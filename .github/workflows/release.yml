@@ -125,6 +125,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+          pattern: labelgate-*
           merge-multiple: true
 
       - name: Generate release body
