@@ -1,18 +1,22 @@
-# Stage 1: Build dashboard frontend
-FROM node:22-alpine@sha256:e4bf2a82ad0a4037d28035ae71529873c069b13eb0455466ae0bc13363826e34 AS dashboard-builder
+# Stage 1: Build dashboard frontend (runs on host arch — output is platform-independent)
+FROM --platform=$BUILDPLATFORM node:22-alpine AS dashboard-builder
 
 WORKDIR /app/dashboard
 
 # Install dependencies first for better caching
 COPY dashboard/package.json dashboard/yarn.lock ./
-RUN yarn install --frozen-lockfile --network-timeout 600000
+RUN yarn install --frozen-lockfile
 
 # Build frontend assets
 COPY dashboard/ .
 RUN yarn build
 
-# Stage 2: Build Go binary
-FROM golang:1.25-alpine@sha256:f6751d823c26342f9506c03797d2527668d095b0a15f1862cddb4d927a7a4ced AS builder
+# Stage 2: Build Go binary (runs on host arch — cross-compiles via GOARCH)
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
+
+ARG TARGETARCH
+ARG VERSION=dev
+ARG COMMIT=""
 
 WORKDIR /app
 
@@ -30,9 +34,7 @@ COPY . .
 COPY --from=dashboard-builder /app/dashboard/static ./dashboard/static
 
 # Build the binary (pure Go, no CGO needed — modernc.org/sqlite)
-ARG VERSION=dev
-ARG COMMIT=""
-RUN CGO_ENABLED=0 GOOS=linux go build \
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
     -ldflags "-s -w -X github.com/channinghe/labelgate/internal/version.Version=${VERSION} -X github.com/channinghe/labelgate/internal/version.Commit=${COMMIT} -X github.com/channinghe/labelgate/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     -o /app/labelgate ./cmd/labelgate
 
