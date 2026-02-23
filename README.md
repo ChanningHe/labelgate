@@ -44,6 +44,7 @@ services:
       - "REPLACE_WITH_GROUP_ID"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Run the command "sudo chown -R 65532:65532 ./labelgate-data" to ensure the mount path has the correct ownership.
       - ./labelgate-data:/app/config
     environment:
       - LABELGATE_CLOUDFLARE_API_TOKEN
@@ -77,7 +78,6 @@ services:
 # Create a network for the services you want to connect to cloudflared.
 # This allows your Cloudflare tunnel to connect to services via their container_name within the "cloudflared-network" bridge, eliminating the need for port mapping.
 # Consolidating all public services into a single network ensures they remain isolated from private services.
-
 networks:
   cloudflared-network:
 ```
@@ -87,6 +87,15 @@ docker compose up -d
 ```
 
 That's it. Labelgate watches your containers and syncs labels to Cloudflare automatically.
+
+> **Note:** We do **not** publish a `latest` tag. Use explicit version tags for strict version control:
+>
+> | Tag | Description |
+> |-----|-------------|
+> | `v0.1.0` | Exact version |
+> | `v0.1` | Latest patch in 0.1.x |
+> | `v0` | Latest minor in 0.x.x |
+> | `v0.1.0-full` | Alpine-based variant with shell and timezone data |
 
 ## Features
 
