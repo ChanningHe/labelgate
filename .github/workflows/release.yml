@@ -38,15 +38,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.IMAGE_BASE }}${{ matrix.suffix }}
-          tags: |
-            type=semver,pattern=v{{version}}
-            type=semver,pattern=v{{major}}.{{minor}}
-            type=semver,pattern=v{{major}}
+      - name: Generate tags
+        id: tags
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          MAJOR=$(echo "$VERSION" | grep -oP '^v\d+')
+          MINOR=$(echo "$VERSION" | grep -oP '^v\d+\.\d+')
+          SUFFIX="${{ matrix.suffix }}"
+          TAGS="${{ env.IMAGE_BASE }}:${VERSION}${SUFFIX}"
+          TAGS="${TAGS},${{ env.IMAGE_BASE }}:${MINOR}${SUFFIX}"
+          TAGS="${TAGS},${{ env.IMAGE_BASE }}:${MAJOR}${SUFFIX}"
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -55,8 +57,7 @@ jobs:
           file: ${{ matrix.dockerfile }}
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.tags.outputs.tags }}
           build-args: |
             VERSION=${{ github.ref_name }}
             COMMIT=${{ github.sha }}

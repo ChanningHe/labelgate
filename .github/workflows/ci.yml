@@ -43,10 +43,9 @@ jobs:
         id: tag
         run: |
           BRANCH="${GITHUB_REF_NAME}"
-          # Replace / with - for branch names like dev/feature
           BRANCH_SAFE=$(echo "$BRANCH" | tr '/' '-')
           SHORT_SHA=$(echo "$GITHUB_SHA" | cut -c1-7)
-          echo "tag=${BRANCH_SAFE}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "tag=${BRANCH_SAFE}-${SHORT_SHA}${{ matrix.suffix }}" >> "$GITHUB_OUTPUT"
           echo "version=${BRANCH_SAFE}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push
@@ -56,7 +55,7 @@ jobs:
           file: ${{ matrix.dockerfile }}
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ env.IMAGE_BASE }}${{ matrix.suffix }}:${{ steps.tag.outputs.tag }}
+          tags: ${{ env.IMAGE_BASE }}:${{ steps.tag.outputs.tag }}
           build-args: |
             VERSION=${{ steps.tag.outputs.version }}
             COMMIT=${{ github.sha }}
