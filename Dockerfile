@@ -5,7 +5,7 @@ WORKDIR /app/dashboard
 
 # Install dependencies first for better caching
 COPY dashboard/package.json dashboard/yarn.lock ./
-RUN yarn install --frozen-lockfile
+RUN yarn install --frozen-lockfile --network-timeout 600000
 
 # Build frontend assets
 COPY dashboard/ .

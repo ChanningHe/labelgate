@@ -39,6 +39,9 @@ services:
     image: ghcr.io/channinghe/labelgate:v0
     container_name: labelgate
     restart: unless-stopped
+    # use command "stat -c '%g' /var/run/docker.sock" to get the group id of the docker socket
+    group_add:
+      - "REPLACE_WITH_GROUP_ID"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./labelgate-data:/app/config
@@ -48,6 +51,9 @@ services:
       - LABELGATE_CLOUDFLARE_TUNNEL_ID
     ports:
       - "28111:8080"
+    # labelgate no need to connect to the network "cloudflared-network"
+    # Because Labelgate simply uses the Cloudflare API to create tunnel ingress rules or DNS records.
+    network_mode: bridge
 
   cloudflared:
     image: cloudflare/cloudflared:latest
@@ -68,6 +74,10 @@ services:
     networks:
       - cloudflared-network
 
+# Create a network for the services you want to connect to cloudflared.
+# This allows your Cloudflare tunnel to connect to services via their container_name within the "cloudflared-network" bridge, eliminating the need for port mapping.
+# Consolidating all public services into a single network ensures they remain isolated from private services.
+
 networks:
   cloudflared-network:
 ```
@@ -84,9 +94,8 @@ That's it. Labelgate watches your containers and syncs labels to Cloudflare auto
 - [x] **Tunnel Ingress** — Expose services through Cloudflare Tunnels without port forwarding
 - [x] **Zero Trust Access** — Configure Cloudflare Access policies declaratively
 - [x] **Multi-host Agents** — Manage containers across multiple Docker hosts
-- [x] **Web Dashboard** — Built-in UI for monitoring and management
-- [x] **Real-time Sync** — Watches Docker events for instant reconciliation
-- [x] **Orphan Cleanup** — Automatically removes stale records when containers stop
+- [x] **Web Dashboard** — Built-in UI for monitoring
+- [x] **Secure & Lightweight** — Rootless, distroless Docker images by default, with sizes typically under 10 MiB
 
 
 

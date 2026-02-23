@@ -57,6 +57,9 @@ services:
   labelgate:
     image: labelgate:latest
     restart: unless-stopped
+    # use command "stat -c '%g' /var/run/docker.sock" to get the group id of the docker socket
+    group_add:
+      - "REPLACE_WITH_GROUP_ID"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - labelgate-data:/app/config
