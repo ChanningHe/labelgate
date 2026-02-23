@@ -1,0 +1,144 @@
+---
+title: Tunnel Labels
+description: Labelgate Tunnel 标签属性的完整参考。
+---
+
+## Format
+
+```
+labelgate.tunnel.<service_name>.<property>=<value>
+```
+
+## Properties
+
+| Property | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `hostname` | Yes | - | Public hostname for the service |
+| `service` | Yes | - | Backend service URL: `protocol://host:port` |
+| `tunnel` | No | `default` | Tunnel name to use |
+| `path` | No | - | Path regex to match (e.g., `\.(jpg\|png)$`) |
+| `credential` | No | `default` | Credential name to use |
+| `cleanup` | No | `false` | Delete ingress rule when container stops |
+| `access` | No | - | Access policy name to apply |
+
+## Service Protocols
+
+| Protocol | Format | Description |
+|----------|--------|-------------|
+| HTTP | `http://host:port` | HTTP service |
+| HTTPS | `https://host:port` | HTTPS service |
+| SSH | `ssh://host:port` | SSH access |
+| RDP | `rdp://host:port` | Remote Desktop |
+| TCP | `tcp://host:port` | Raw TCP |
+| UDP | `udp://host:port` | UDP (requires WARP) |
+| Unix | `unix:/path/to/socket` | Unix socket |
+| Hello World | `hello_world` | Test endpoint |
+| HTTP Status | `http_status:404` | Return a fixed status code |
+
+<Callout type="info">
+使用 tunnel 模式时，Cloudflare 会自动为 hostname 创建一个指向你的 tunnel 的 CNAME DNS 记录。你不需要创建单独的 DNS 记录。
+</Callout>
+
+## Origin Request Configuration
+
+微调 cloudflared 和你的源服务之间的连接：
+
+### Connection Settings
+
+```yaml
+labels:
+  labelgate.tunnel.web.origin.connect_timeout: "30s"
+  labelgate.tunnel.web.origin.tls_timeout: "10s"
+  labelgate.tunnel.web.origin.tcp_keepalive: "30s"
+  labelgate.tunnel.web.origin.keep_alive_connections: "100"
+  labelgate.tunnel.web.origin.keep_alive_timeout: "90s"
+```
+
+### TLS Settings
+
+```yaml
+labels:
+  labelgate.tunnel.web.origin.no_tls_verify: "false"
+  labelgate.tunnel.web.origin.origin_server_name: ""
+  labelgate.tunnel.web.origin.ca_pool: ""
+```
+
+### HTTP Settings
+
+```yaml
+labels:
+  labelgate.tunnel.web.origin.http_host_header: ""
+  labelgate.tunnel.web.origin.no_happy_eyeballs: "false"
+  labelgate.tunnel.web.origin.disable_chunked_encoding: "false"
+```
+
+### Proxy Settings
+
+```yaml
+labels:
+  # Empty string or "socks"
+  labelgate.tunnel.web.origin.proxy_type: ""
+```
+
+## Examples
+
+### Basic web service
+
+```yaml
+services:
+  webapp:
+    image: nginx:alpine
+    labels:
+      labelgate.tunnel.web.hostname: "app.example.com"
+      labelgate.tunnel.web.service: "http://webapp:80"
+```
+
+### Multiple services on one container
+
+```yaml
+services:
+  app:
+    image: myapp:latest
+    labels:
+      labelgate.tunnel.web.hostname: "www.example.com"
+      labelgate.tunnel.web.service: "http://app:80"
+
+      labelgate.tunnel.api.hostname: "api.example.com"
+      labelgate.tunnel.api.service: "http://app:3000"
+```
+
+### SSH access through tunnel
+
+```yaml
+services:
+  dev-server:
+    image: ubuntu:latest
+    labels:
+      labelgate.tunnel.ssh.hostname: "ssh.example.com"
+      labelgate.tunnel.ssh.service: "ssh://dev-server:22"
+```
+
+### Using a specific tunnel
+
+```yaml
+services:
+  internal:
+    image: internal-app:latest
+    labels:
+      labelgate.tunnel.app.hostname: "internal.company.io"
+      labelgate.tunnel.app.service: "http://internal:8080"
+      labelgate.tunnel.app.tunnel: "secondary"
+      labelgate.tunnel.app.credential: "company"
+```
+
+### Path-based routing
+
+```yaml
+services:
+  static:
+    image: nginx:alpine
+    labels:
+      labelgate.tunnel.static.hostname: "example.com"
+      labelgate.tunnel.static.service: "http://static:80"
+      labelgate.tunnel.static.path: "\\.(jpg|png|css|js)$"
+```

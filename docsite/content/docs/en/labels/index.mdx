@@ -1,0 +1,71 @@
+---
+title: Label Format
+description: How Labelgate labels work and how to structure them.
+---
+
+Labelgate reads Docker container labels to determine what Cloudflare resources to manage. All labels follow a consistent naming convention.
+
+## Format
+
+```
+labelgate.<type>.<service_name>.<property>=<value>
+```
+
+| Segment | Description | Example |
+|---------|-------------|---------|
+| `labelgate` | Prefix (configurable via `LABELGATE_LABEL_PREFIX`) | `labelgate` |
+| `type` | Resource type | `dns`, `tunnel`, `access` |
+| `service_name` | Unique service identifier | `web`, `api`, `mail` |
+| `property` | Setting name | `hostname`, `service`, `type` |
+
+## Service Name Rules
+
+The `service_name` is a unique identifier for each service within a container. It lets you define multiple services on the same container.
+
+**Allowed characters:** lowercase letters, digits, and hyphens: `[a-z0-9]([a-z0-9-]*[a-z0-9])?`
+
+**Reserved words** (cannot be used as service names): `hostname`, `service`, `type`, `target`, `proxied`, `ttl`, `cleanup`, `credential`, `tunnel`, `path`, `origin`, `access`, `default`, `priority`, `weight`, `port`, `flags`, `tag`, `comment`
+
+## Multiple Services
+
+A single container can define multiple services:
+
+```yaml
+labels:
+  # Service "web" - main website
+  labelgate.tunnel.web.hostname: "www.example.com"
+  labelgate.tunnel.web.service: "http://app:80"
+  # Service "api" - API endpoint
+  labelgate.tunnel.api.hostname: "api.example.com"
+  labelgate.tunnel.api.service: "http://app:3000"
+```
+
+## Hostname Constraints
+
+### DNS and Tunnel Conflict
+
+The same hostname **cannot** have both a DNS record and a Tunnel ingress rule. Cloudflare Tunnel automatically creates a CNAME record for tunnel hostnames, so adding a manual DNS record would conflict.
+
+```yaml
+# WRONG - hostname conflict
+labels:
+  labelgate.dns.web.hostname: "app.example.com"
+  labelgate.tunnel.web.hostname: "app.example.com"  # Conflict!
+```
+
+```yaml
+# CORRECT - use different hostnames
+labels:
+  labelgate.dns.legacy.hostname: "old.example.com"
+  labelgate.tunnel.web.hostname: "app.example.com"
+```
+
+### First Container Wins
+
+When multiple containers claim the same hostname, the first container to register wins. Subsequent containers will log an error and skip that hostname.
+
+## Label Types
+
+- [DNS Labels](/docs/labels/dns) - Manage Cloudflare DNS records
+- [Tunnel Labels](/docs/labels/tunnel) - Manage Cloudflare Tunnel ingress rules
+- [Access Policy Labels](/docs/labels/access) - Manage Zero Trust Access policies

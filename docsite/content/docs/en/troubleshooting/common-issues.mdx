@@ -1,0 +1,172 @@
+---
+title: Common Issues
+description: Solutions to frequently encountered problems with Labelgate.
+---
+
+## Hostname Conflicts
+
+### DNS and Tunnel on Same Hostname
+
+**Problem:** You see an error like `hostname conflict: app.example.com is already used by tunnel service`
+
+**Cause:** The same hostname cannot be used for both a DNS record and a Tunnel ingress rule. Cloudflare Tunnel automatically creates a CNAME record, so adding a manual DNS record would conflict.
+
+**Solution:** Use different hostnames for DNS and Tunnel, or use only one type per hostname:
+
+```yaml
+# Use Tunnel only (recommended for most cases)
+labels:
+  labelgate.tunnel.web.hostname: "app.example.com"
+  labelgate.tunnel.web.service: "http://app:80"
+```
+
+### Multiple Containers Claiming Same Hostname
+
+**Problem:** A container's labels are being ignored with a conflict error.
+
+**Cause:** Another container already registered that hostname. First container wins.
+
+**Solution:** Check which container owns the hostname:
+
+```bash
+# Check Labelgate logs for conflict details
+docker compose logs labelgate | grep "conflict"
+```
+
+Stop the conflicting container first, then start the new one.
+
+## DNS Record Already Exists
+
+**Problem:** `DNS record already exists and is not managed by Labelgate`
+
+**Cause:** A DNS record with the same hostname exists in Cloudflare but wasn't created by Labelgate (e.g., created manually via dashboard).
+
+**Solution:** Either delete the existing record from the Cloudflare dashboard, or let Labelgate overwrite it by creating the record with matching settings.
+
+## Zone Not Found
+
+**Problem:** `zone not found for hostname: app.example.com`
+
+**Cause:** The API token doesn't have access to the zone containing your hostname.
+
+**Solution:**
+1. Check your API token permissions in [Cloudflare Dashboard > API Tokens](https://dash.cloudflare.com/profile/api-tokens)
+2. Ensure `Zone:Read` permission is granted for the target zone
+3. Verify the domain exists in your Cloudflare account
+
+## Tunnel Not Connected
+
+**Problem:** Labelgate creates ingress rules but the hostname returns a 502 or connection error.
+
+**Cause:** The `cloudflared` daemon is not running or not connected to the tunnel.
+
+**Solution:**
+1. Check cloudflared is running:
+   ```bash
+   docker compose ps cloudflared
+   ```
+2. Check cloudflared logs:
+   ```bash
+   docker compose logs cloudflared
+   ```
+3. Verify the tunnel token is correct
+4. Check tunnel status in the [Zero Trust Dashboard](https://one.dash.cloudflare.com/) under **Networks > Tunnels**
+
+## Public IP Detection Fails
+
+**Problem:** DNS records with `target=auto` are not being created.
+
+**Cause:** Labelgate failed to detect the host's public IP address.
+
+**Solution:**
+- Check internet connectivity from the Labelgate container
+- Check logs for IP detection errors:
+  ```bash
+  docker compose logs labelgate | grep "public IP"
+  ```
+- Use an explicit IP instead of `auto`:
+  ```yaml
+  labels:
+    labelgate.dns.web.target: "203.0.113.1"
+  ```
+
+## API Rate Limits
+
+**Problem:** `API rate limit reached` errors in logs.
+
+**Cause:** Cloudflare API has a limit of 1200 requests per 5 minutes. Exceeded limits result in a 5-minute ban.
+
+**Solution:**
+- Labelgate automatically retries with exponential backoff
+- Reduce the number of managed resources if limits are frequently hit
+- Avoid rapidly restarting many containers at once
+- Increase the polling interval to reduce reconciliation frequency:
+  ```bash
+  LABELGATE_DOCKER_POLL_INTERVAL=5m
+  ```
+
+## Resources Not Cleaned Up
+
+**Problem:** Cloudflare resources persist after containers are stopped.
+
+**Cause:** By default, Labelgate does **not** delete resources when containers stop (`cleanup=false`). This is a safety feature.
+
+**Solution:** Enable cleanup per-service or globally:
+
+```yaml
+# Per-service
+labels:
+  labelgate.dns.web.cleanup: "true"
+
+# Global
+# Set environment variable:
+# LABELGATE_SYNC_REMOVE_ON_STOP=true
+```
+
+## Container Rebuild (Same Config, New ID)
+
+**Problem:** After rebuilding a container, resources show as conflicting.
+
+**Cause:** The new container has a different ID but the same hostname configuration.
+
+**Solution:** This is handled automatically. When the old container no longer exists and a new container claims the same hostname, Labelgate transfers ownership. No action needed - just make sure the old container is fully stopped before starting the new one.
+
+## Agent Connection Issues
+
+### Agent Can't Connect
+
+**Problem:** Agent logs show `connection refused` or `timeout`.
+
+**Solution:**
+1. Verify the main instance endpoint is reachable from the agent host
+2. Check the agent token matches what's configured on the main instance
+3. For outbound mode, ensure port 8081 (or your custom port) is open on the main host
+4. Check TLS certificates if using encrypted connections
+
+### Agent Keeps Reconnecting
+
+**Problem:** Agent logs show repeated connect/disconnect cycles.
+
+**Solution:**
+- This is normal during network instability - agents auto-reconnect with exponential backoff
+- Check main instance logs for authentication errors
+- Verify the agent token hasn't been changed on the main instance
+
+## Docker Socket Permission Denied
+
+**Problem:** `permission denied while trying to connect to the Docker daemon socket`
+
+**Solution:** Ensure Labelgate has access to the Docker socket:
+
+```yaml
+services:
+  labelgate:
+    image: labelgate:latest
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    # Option 1: Run as root (simplest)
+    user: root
+    # Option 2: Add to docker group
+    # group_add:
+    #   - docker
+```

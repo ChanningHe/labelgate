@@ -1,0 +1,91 @@
+---
+title: 配置概述
+description: 了解配置 Labelgate 的不同方式。
+---
+
+Labelgate 使用灵活的配置系统，具有三种模式：
+
+## 配置模式
+
+### 1. 仅环境变量（推荐用于简单设置）
+
+无需配置文件。使用 `LABELGATE_` 前缀设置环境变量：
+
+```bash
+LABELGATE_CLOUDFLARE_API_TOKEN=your-token
+LABELGATE_CLOUDFLARE_ACCOUNT_ID=your-account-id
+LABELGATE_CLOUDFLARE_TUNNEL_ID=your-tunnel-id
+```
+
+这是最简单的方法，在[快速开始](/zh/docs/getting-started)指南中使用。
+
+### 2. 配置文件
+
+使用 YAML 配置文件进行更复杂的设置（例如，多凭证、多隧道）。
+
+通过 `LABELGATE_CONFIG` 环境变量指定配置文件路径：
+
+```bash
+LABELGATE_CONFIG=/path/to/labelgate.yaml
+```
+
+如果未设置 `LABELGATE_CONFIG`，Labelgate 将完全依赖环境变量和默认值。
+
+### 3. 混合模式
+
+结合两者：使用配置文件作为基础设置，使用环境变量进行覆盖。
+
+**优先级：环境变量 > 配置文件 > 默认值**
+
+这对于将密钥排除在配置文件之外很有用：
+
+```yaml
+# labelgate.yaml - base config
+docker:
+  endpoint: unix:///var/run/docker.sock
+
+cloudflare:
+  api_token: ${CF_API_TOKEN}  # Reference env var
+  account_id: ${CF_ACCOUNT_ID}
+  tunnel_id: ${CF_TUNNEL_ID}
+```
+
+## 清理策略
+
+默认情况下，Labelgate **不会**在容器停止时删除 Cloudflare 资源。这是一项安全措施，可防止意外删除。
+
+您可以通过三种方式启用清理：
+
+### 全局设置
+
+```bash
+LABELGATE_SYNC_REMOVE_ON_STOP=true
+```
+
+### 每个服务的标签
+
+```yaml
+labels:
+  labelgate.dns.web.cleanup: "true"
+  labelgate.tunnel.web.cleanup: "true"
+```
+
+### 清理延迟
+
+在清理之前添加延迟（对滚动部署有用）：
+
+```bash
+LABELGATE_SYNC_REMOVE_DELAY=30s
+```
+
+### 孤立资源 TTL
+
+自动清理其容器不再存在的资源：
+
+```bash
+LABELGATE_SYNC_ORPHAN_TTL=24h  # 0 = never auto-clean
+```
+
+## 下一步
+
+- [配置参考](/zh/docs/configuration/reference) - 所有环境变量和配置文件选项的完整列表

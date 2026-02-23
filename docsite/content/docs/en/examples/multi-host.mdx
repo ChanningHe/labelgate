@@ -1,0 +1,166 @@
+---
+title: Multi-Host (Agent Mode)
+description: Deploy Labelgate across multiple Docker hosts using Agent mode.
+---
+
+Agent mode lets you monitor Docker containers across multiple hosts. A central **Main** instance handles all Cloudflare API calls, while lightweight **Agent** instances on remote hosts collect container labels and report back.
+
+## Architecture
+
+```
+┌──────────────┐     WebSocket     ┌──────────────┐
+│   Agent #1   │ ──────────────>   │              │
+│  Docker Host │                   │    Main      │ ───> Cloudflare API
+│              │                   │   Instance   │
+└──────────────┘                   │              │
+                                   │              │
+┌──────────────┐     WebSocket     │              │
+│   Agent #2   │ ──────────────>   │              │
+│  Docker Host │                   └──────────────┘
+└──────────────┘
+```
+
+## Connection Modes
+
+### Outbound (Agent connects to Main)
+
+Best for agents behind NAT or firewalls. The agent initiates the connection.
+
+### Inbound (Main connects to Agent)
+
+Best for agents on internal networks where the main instance can reach them directly.
+
+## Outbound Mode Example
+
+### Main Instance
+
+```yaml
+# docker-compose.yaml (main host)
+services:
+  labelgate:
+    image: labelgate:latest
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - labelgate-data:/app/config
+    environment:
+      - LABELGATE_CLOUDFLARE_API_TOKEN
+      - LABELGATE_CLOUDFLARE_ACCOUNT_ID
+      - LABELGATE_CLOUDFLARE_TUNNEL_ID
+      - LABELGATE_AGENT_ENABLED=true
+      - LABELGATE_AGENT_LISTEN=:8081
+    ports:
+      - "8081:8081"
+    configs:
+      - source: labelgate-config
+        target: /etc/labelgate/labelgate.yaml
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel run --token ${TUNNEL_TOKEN}
+
+volumes:
+  labelgate-data:
+
+configs:
+  labelgate-config:
+    content: |
+      agent:
+        enabled: true
+        listen: :8081
+        agents:
+          docker-host-1:
+            token: ${AGENT_1_TOKEN}
+            default_tunnel: default
+          docker-host-2:
+            token: ${AGENT_2_TOKEN}
+            default_tunnel: default
+```
+
+### Agent Instance
+
+```yaml
+# docker-compose.yaml (remote host)
+services:
+  labelgate-agent:
+    image: labelgate:latest
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - LABELGATE_MODE=agent
+      - LABELGATE_CONNECT_MODE=outbound
+      - LABELGATE_CONNECT_ENDPOINT=wss://main-host.example.com:8081
+      - LABELGATE_CONNECT_TOKEN=${AGENT_TOKEN}
+      - LABELGATE_DEFAULT_TUNNEL=default
+
+  # Your services with labels (same as single-host)
+  webapp:
+    image: nginx:alpine
+    labels:
+      labelgate.tunnel.web.hostname: "remote-app.example.com"
+      labelgate.tunnel.web.service: "http://webapp:80"
+```
+
+## Inbound Mode Example
+
+### Main Instance
+
+```yaml
+# docker-compose.yaml (main host)
+services:
+  labelgate:
+    image: labelgate:latest
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - labelgate-data:/app/config
+    environment:
+      - LABELGATE_CLOUDFLARE_API_TOKEN
+      - LABELGATE_CLOUDFLARE_ACCOUNT_ID
+      - LABELGATE_CLOUDFLARE_TUNNEL_ID
+    configs:
+      - source: labelgate-config
+        target: /etc/labelgate/labelgate.yaml
+
+volumes:
+  labelgate-data:
+
+configs:
+  labelgate-config:
+    content: |
+      agent:
+        enabled: true
+        agents:
+          docker-host-1:
+            connect_to: wss://192.168.1.11:8082
+            token: ${AGENT_1_TOKEN}
+```
+
+### Agent Instance (Inbound)
+
+```yaml
+# docker-compose.yaml (remote host)
+services:
+  labelgate-agent:
+    image: labelgate:latest
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - LABELGATE_MODE=agent
+      - LABELGATE_CONNECT_MODE=inbound
+      - LABELGATE_CONNECT_LISTEN=:8082
+      - LABELGATE_CONNECT_TOKEN=${AGENT_TOKEN}
+    ports:
+      - "8082:8082"
+```
+
+## Key Notes
+
+- **Agents are lightweight**: They only collect container labels and report to the main instance. All Cloudflare API calls happen on the main instance.
+- **Hostname conflicts**: Cross-host hostname conflicts are detected. First container to register a hostname wins, regardless of which host it's on.
+- **Tunnel assignment**: Container label > Agent default tunnel > Global default tunnel.
+- **Reconnection**: Agents automatically reconnect with exponential backoff if the connection drops.
+- **TLS**: For production, always use TLS for agent connections. Configure certificates on the server side (main for outbound, agent for inbound).

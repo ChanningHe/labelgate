@@ -1,0 +1,150 @@
+---
+title: 架构概览
+description: Labelgate 的设计原理及其组件如何协同工作。
+---
+
+## 系统架构
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Provider Layer                        │
+│  ┌────────────────┐            ┌────────────────┐       │
+│  │ Docker Provider│            │ K8s Provider   │       │
+│  │ (unix/tcp/ssh) │            │ (planned)      │       │
+│  └───────┬────────┘            └────────────────┘       │
+└──────────┼──────────────────────────────────────────────┘
+           │ Container Events + Labels
+           ▼
+┌─────────────────────────────────────────────────────────┐
+│                      Core Engine                         │
+│  ┌──────────┐    ┌──────────┐    ┌──────────────┐       │
+│  │  Event   │ -> │  Label   │ -> │  Reconciler  │       │
+│  │ Watcher  │    │  Parser  │    │              │       │
+│  └──────────┘    └──────────┘    └──────┬───────┘       │
+└─────────────────────────────────────────┼───────────────┘
+           │                              │
+           ▼                              ▼
+┌──────────────────┐     ┌────────────────────────────────┐
+│   SQLite Storage │     │        Operator Layer          │
+│                  │     │  ┌─────┐ ┌───────┐ ┌───────┐  │
+│ - Resource state │     │  │ DNS │ │Tunnel │ │Access │  │
+│ - Ownership      │     │  └──┬──┘ └──┬────┘ └──┬────┘  │
+│ - Conflict data  │     └─────┼───────┼─────────┼───────┘
+└──────────────────┘           │       │         │
+                               ▼       ▼         ▼
+                        ┌─────────────────────────────┐
+                        │    Cloudflare API Client     │
+                        │  ┌───────────────────────┐   │
+                        │  │ Credential Manager    │   │
+                        │  │ (multi-token + zones) │   │
+                        │  └───────────────────────┘   │
+                        └─────────────────────────────┘
+```
+
+## 组件
+
+### Provider Layer
+
+Providers 是容器数据的来源。Docker provider 连接到 Docker daemon 并：
+
+- **实时监听事件**（容器启动、停止、退出）
+- **在启动时和定期列出容器**作为备用方案
+- 支持三种连接方式：Unix socket、TCP 和 SSH
+
+### Label Parser
+
+解析器从容器标签中提取结构化配置。它：
+
+- 验证标签格式和服务名称
+- 分离 DNS、Tunnel 和 Access 标签
+- 检测主机名冲突
+- 应用默认值和继承规则
+
+### Reconciler
+
+Reconciler 是 Labelgate 的核心。它比较期望状态（来自容器标签）与实际状态（来自 Cloudflare API 和本地数据库），并决定要执行的操作：
+
+- **Create** - 需要创建新资源
+- **Update** - 现有资源需要更改
+- **Delete** - 应删除资源（如果启用了清理）
+- **Skip** - 无需更改
+
+### Operators
+
+每个 operator 管理一种类型的 Cloudflare 资源：
+
+| Operator | Responsibility |
+|----------|---------------|
+| **DNS** | 创建、更新和删除 DNS 记录 |
+| **Tunnel** | 添加和删除 Tunnel ingress 规则，管理 catch-all 规则 |
+| **Access** | 创建和管理 Zero Trust Access 应用程序和策略 |
+
+### Credential Manager
+
+处理多令牌认证：
+
+- **Zone matching** - 根据主机名自动选择正确的令牌
+- **Credential fallback** - 当未配置特定凭证时，回退到默认 API token
+- **Label override** - 容器标签可以指定要使用的凭据
+
+### State Persistence (SQLite)
+
+所有托管资源都在 SQLite 中跟踪：
+
+- **Resource ownership** - 将 Cloudflare 资源链接到容器
+- **Conflict detection** - 防止重复的主机名分配
+- **Recovery** - 支持优雅重启而无需重新创建资源
+- **Orphan detection** - 识别其容器不再存在的资源
+
+## 事件流程
+
+### 1. 容器启动
+
+```
+Docker Event (start)
+  → Watcher receives event
+  → Parser extracts labels
+  → Reconciler compares desired vs actual state
+  → Operator creates/updates Cloudflare resources
+  → Storage records ownership
+```
+
+### 2. 容器停止
+
+```
+Docker Event (stop/die)
+  → Watcher receives event
+  → Reconciler checks cleanup policy
+  → If cleanup=true: Operator deletes resources, Storage removes records
+  → If cleanup=false: Storage marks resource as orphaned
+```
+
+### 3. 定期同步（每 2 分钟）
+
+```
+Timer fires
+  → Provider lists all running containers
+  → Parser extracts all labels
+  → Reconciler compares full desired state vs actual state
+  → Fixes any drift or missed events
+```
+
+## Agent Mode
+
+在多主机部署中，Agents 扩展了 Labelgate 的覆盖范围：
+
+```
+┌──────────┐  WebSocket   ┌──────────┐
+│  Agent   │ ──────────>  │  Main    │ ──> Cloudflare
+│ (Host A) │              │ Instance │
+└──────────┘              └──────────┘
+┌──────────┐  WebSocket        ▲
+│  Agent   │ ──────────────────┘
+│ (Host B) │
+└──────────┘
+```
+
+- Agents 是轻量级的：它们只收集容器标签和公共 IP
+- 主实例处理所有 Cloudflare API 操作
+- 通信通过 WebSocket 进行，使用基于令牌的认证
+- 支持出站（agent→main）和入站（main→agent）连接

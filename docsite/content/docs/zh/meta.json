@@ -1,0 +1,18 @@
+{
+  "title": "文档",
+  "root": true,
+  "pages": [
+    "index",
+    "getting-started",
+    "---配置---",
+    "...configuration",
+    "---Label 参考---",
+    "...labels",
+    "---配置示例---",
+    "...examples",
+    "---架构---",
+    "...architecture",
+    "---故障排除---",
+    "...troubleshooting"
+  ]
+}

@@ -1,0 +1,144 @@
+---
+title: cloudflared 设置
+description: 如何与 Labelgate 一起部署 cloudflared。
+---
+
+Labelgate 通过 Cloudflare API 管理 Tunnel 入口规则，但您仍需要运行 `cloudflared` 守护进程来建立隧道连接。以下是设置方法。
+
+## 推荐：使用隧道令牌的远程配置
+
+这是与 Labelgate 一起使用的最佳方法。隧道配置通过 Cloudflare API 远程管理，因此 cloudflared 会自动获取 Labelgate 所做的更改，无需重启。
+
+```yaml
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN}
+```
+
+<Callout type="info">
+当 Labelgate 通过 API 添加或删除入口规则时，cloudflared 会检测到更改并自动应用它们。无需重启。
+</Callout>
+
+## 替代方案：隧道令牌（简单）
+
+如果您更喜欢最小配置：
+
+```yaml
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel run
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+```
+
+## 替代方案：凭据文件
+
+对于将凭据作为文件管理的环境：
+
+```yaml
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --config /etc/cloudflared/config.yml run
+    volumes:
+      - ./cloudflared:/etc/cloudflared:ro
+```
+
+其中 `cloudflared/config.yml` 包含：
+
+```yaml
+tunnel: your-tunnel-id
+credentials-file: /etc/cloudflared/credentials.json
+```
+
+## 获取您的隧道令牌
+
+1. 访问 [Cloudflare Zero Trust Dashboard](https://one.dash.cloudflare.com/)
+2. 导航到 **Networks > Tunnels**
+3. 创建新隧道或选择现有隧道
+4. 从安装命令中复制隧道令牌
+
+或通过 CLI：
+
+```bash
+cloudflared tunnel create my-tunnel
+cloudflared tunnel token my-tunnel
+```
+
+## 网络提示
+
+### Docker Compose 网络
+
+使用 Docker Compose 时，所有服务默认共享一个网络。在标签中使用 Docker 服务名称：
+
+```yaml
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel run --token ${TUNNEL_TOKEN}
+
+  webapp:
+    image: nginx:alpine
+    labels:
+      # Use the service name "webapp", not "localhost"
+      labelgate.tunnel.web.hostname: "app.example.com"
+      labelgate.tunnel.web.service: "http://webapp:80"
+```
+
+### 基于主机的服务
+
+要路由到直接在主机上运行的服务（不在 Docker 中）：
+
+```yaml
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel run --token ${TUNNEL_TOKEN}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  proxy:
+    image: alpine
+    labels:
+      labelgate.tunnel.host-svc.hostname: "svc.example.com"
+      labelgate.tunnel.host-svc.service: "http://host.docker.internal:8080"
+```
+
+### 多个 Docker 网络
+
+如果您的服务位于不同的 Docker 网络上，请确保 cloudflared 可以访问它们：
+
+```yaml
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel run --token ${TUNNEL_TOKEN}
+    networks:
+      - frontend
+      - backend
+
+networks:
+  frontend:
+  backend:
+```
+
+## 健康检查
+
+启用 cloudflared 指标以进行监控：
+
+```yaml
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --metrics 0.0.0.0:2000 run --token ${TUNNEL_TOKEN}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:2000/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+```

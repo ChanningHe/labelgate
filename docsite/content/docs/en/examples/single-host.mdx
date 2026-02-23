@@ -1,0 +1,193 @@
+---
+title: Single Host
+description: Docker Compose examples for single-host deployments.
+---
+
+## DNS-Only Setup
+
+The simplest setup - Labelgate manages DNS records only, no tunnels needed.
+
+```yaml
+services:
+  labelgate:
+    image: labelgate:latest
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - labelgate-data:/app/config
+    environment:
+      - LABELGATE_CLOUDFLARE_API_TOKEN
+
+  # Web server with auto DNS
+  nginx:
+    image: nginx:alpine
+    labels:
+      labelgate.dns.web.hostname: "www.example.com"
+      labelgate.dns.web.type: "A"
+      labelgate.dns.web.target: "auto"
+      labelgate.dns.web.proxied: "true"
+
+volumes:
+  labelgate-data:
+```
+
+## Tunnel-Only Setup
+
+Expose services through Cloudflare Tunnel - no public ports needed.
+
+```yaml
+services:
+  labelgate:
+    image: labelgate:latest
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - labelgate-data:/app/config
+    environment:
+      - LABELGATE_CLOUDFLARE_API_TOKEN
+      - LABELGATE_CLOUDFLARE_ACCOUNT_ID
+      - LABELGATE_CLOUDFLARE_TUNNEL_ID
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel run --token ${TUNNEL_TOKEN}
+
+  # Web application
+  webapp:
+    image: nginx:alpine
+    labels:
+      labelgate.tunnel.web.hostname: "app.example.com"
+      labelgate.tunnel.web.service: "http://webapp:80"
+
+  # API server
+  api:
+    image: node:alpine
+    labels:
+      labelgate.tunnel.api.hostname: "api.example.com"
+      labelgate.tunnel.api.service: "http://api:3000"
+
+volumes:
+  labelgate-data:
+```
+
+<Callout type="info">
+Use Docker service names (e.g., `http://webapp:80`) in `service` labels, not `localhost`. Containers communicate via Docker's internal network.
+</Callout>
+
+## DNS + Tunnel (Different Hostnames)
+
+Combine DNS records and tunnel services on different hostnames.
+
+```yaml
+services:
+  labelgate:
+    image: labelgate:latest
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - labelgate-data:/app/config
+    environment:
+      - LABELGATE_CLOUDFLARE_API_TOKEN
+      - LABELGATE_CLOUDFLARE_ACCOUNT_ID
+      - LABELGATE_CLOUDFLARE_TUNNEL_ID
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel run --token ${TUNNEL_TOKEN}
+
+  app:
+    image: myapp:latest
+    labels:
+      # Tunnel: expose via Cloudflare Tunnel
+      labelgate.tunnel.web.hostname: "app.example.com"
+      labelgate.tunnel.web.service: "http://app:80"
+
+      # DNS: point a different hostname to server IP
+      labelgate.dns.legacy.hostname: "old.example.com"
+      labelgate.dns.legacy.type: "A"
+      labelgate.dns.legacy.target: "203.0.113.1"
+
+volumes:
+  labelgate-data:
+```
+
+## With Access Policy
+
+Protect services with Zero Trust Access.
+
+```yaml
+services:
+  labelgate:
+    image: labelgate:latest
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - labelgate-data:/app/config
+    environment:
+      - LABELGATE_CLOUDFLARE_API_TOKEN
+      - LABELGATE_CLOUDFLARE_ACCOUNT_ID
+      - LABELGATE_CLOUDFLARE_TUNNEL_ID
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel run --token ${TUNNEL_TOKEN}
+
+  admin-panel:
+    image: admin:latest
+    labels:
+      # Define access policy
+      labelgate.access.team.policy.decision: "allow"
+      labelgate.access.team.policy.include.emails_ending_in: "@company.io"
+      labelgate.access.team.session_duration: "8h"
+
+      # Tunnel with access policy
+      labelgate.tunnel.admin.hostname: "admin.company.io"
+      labelgate.tunnel.admin.service: "http://admin-panel:8080"
+      labelgate.tunnel.admin.access: "team"
+
+  # Public docs - no access policy needed
+  docs:
+    image: docs:latest
+    labels:
+      labelgate.tunnel.docs.hostname: "docs.company.io"
+      labelgate.tunnel.docs.service: "http://docs:80"
+
+volumes:
+  labelgate-data:
+```
+
+## PR Preview Environment
+
+Automatic preview deployments with cleanup on container stop.
+
+```yaml
+services:
+  labelgate:
+    image: labelgate:latest
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - labelgate-data:/app/config
+    environment:
+      - LABELGATE_CLOUDFLARE_API_TOKEN
+      - LABELGATE_CLOUDFLARE_ACCOUNT_ID
+      - LABELGATE_CLOUDFLARE_TUNNEL_ID
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel run --token ${TUNNEL_TOKEN}
+
+  preview:
+    image: myapp:pr-${PR_NUMBER:-0}
+    labels:
+      labelgate.tunnel.preview.hostname: "pr-${PR_NUMBER:-0}.preview.example.com"
+      labelgate.tunnel.preview.service: "http://preview:3000"
+      labelgate.tunnel.preview.cleanup: "true"
+
+volumes:
+  labelgate-data:
+```

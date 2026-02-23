@@ -1,0 +1,172 @@
+---
+title: Access Policy Labels
+description: Labelgate Zero Trust Access Policy 标签的完整参考。
+---
+
+Access Policy 标签允许你使用 Cloudflare Zero Trust Access 保护服务。它们通过定义可重用的策略模板来工作，这些模板从 tunnel 或 DNS 服务中引用。
+
+## How It Works
+
+1. **Define** 使用 `labelgate.access.<name>.*` 标签定义访问策略模板
+2. **Reference** 使用 `access` 属性从 tunnel 或 DNS 服务中引用它
+
+```yaml
+labels:
+  # Step 1: Define a policy named "internal"
+  labelgate.access.internal.policy.decision: "allow"
+  labelgate.access.internal.policy.include.emails: "admin@example.com,dev@example.com"
+
+  # Step 2: Reference it from a tunnel service
+  labelgate.tunnel.web.hostname: "app.example.com"
+  labelgate.tunnel.web.service: "http://app:80"
+  labelgate.tunnel.web.access: "internal"
+```
+
+## Policy Definition Format
+
+```
+labelgate.access.<policy_name>.<property>=<value>
+```
+
+### Policy Properties
+
+| Property | Default | Description |
+|----------|---------|-------------|
+| `app_name` | `labelgate-<name>` | Cloudflare Access application name |
+| `session_duration` | `24h` | Session duration (e.g., `1h`, `24h`, `720h`) |
+| `policy.decision` | `allow` | Policy action: `allow`, `block`, `bypass`, `service_auth` |
+| `policy.name` | - | Policy display name in CF dashboard |
+| `policy.include.<selector>` | - | Include rules (OR logic) |
+| `policy.require.<selector>` | - | Require rules (AND logic) |
+| `policy.exclude.<selector>` | - | Exclude rules (NOT logic) |
+
+### Decisions
+
+| Decision | CF API Value | Description |
+|----------|-------------|-------------|
+| `allow` | `allow` | Allow access if rules match |
+| `block` | `deny` | Block access if rules match |
+| `bypass` | `bypass` | Skip authentication entirely |
+| `service_auth` | `non_identity` | Require service token or mTLS certificate |
+
+<Callout type="warn">
+`allow` 和 `block` 决策需要至少一个 `include` 规则。
+</Callout>
+
+### Rule Selectors
+
+| Selector | CF Web UI Name | Example Values |
+|----------|---------------|----------------|
+| `emails` | Emails | `user@example.com,admin@example.com` |
+| `emails_ending_in` | Emails ending in | `@example.com,@company.io` |
+| `ip_ranges` | IP ranges | `192.168.1.0/24,10.0.0.0/8` |
+| `country` | Country | `US,GB,JP` |
+| `everyone` | Everyone | (no value needed) |
+| `service_token` | Service Token | `<token-id>` |
+| `access_groups` | Access groups | `<group-id>` |
+| `certificate` | Valid Certificate | (no value needed) |
+| `login_methods` | Login Methods | `<method-id>` |
+
+多个值用逗号分隔。像 `everyone` 和 `certificate` 这样的选择器不需要值。
+
+## Rule Logic
+
+- **Include** 规则使用 **OR** 逻辑 - 任何匹配的规则都会授予/阻止访问
+- **Require** 规则使用 **AND** 逻辑 - 所有规则都必须匹配
+- **Exclude** 规则使用 **NOT** 逻辑 - 匹配的规则被豁免
+
+## Examples
+
+### Allow specific emails
+
+```yaml
+labels:
+  labelgate.access.team.policy.decision: "allow"
+  labelgate.access.team.policy.include.emails: "alice@example.com,bob@example.com"
+  labelgate.access.team.session_duration: "12h"
+
+  labelgate.tunnel.admin.hostname: "admin.example.com"
+  labelgate.tunnel.admin.service: "http://admin:8080"
+  labelgate.tunnel.admin.access: "team"
+```
+
+### Allow by email domain
+
+```yaml
+labels:
+  labelgate.access.company.policy.decision: "allow"
+  labelgate.access.company.policy.include.emails_ending_in: "@company.io"
+
+  labelgate.tunnel.app.hostname: "app.company.io"
+  labelgate.tunnel.app.service: "http://app:80"
+  labelgate.tunnel.app.access: "company"
+```
+
+### IP-restricted access
+
+```yaml
+labels:
+  labelgate.access.office.policy.decision: "allow"
+  labelgate.access.office.policy.include.ip_ranges: "203.0.113.0/24,198.51.100.0/24"
+
+  labelgate.tunnel.internal.hostname: "internal.example.com"
+  labelgate.tunnel.internal.service: "http://internal:3000"
+  labelgate.tunnel.internal.access: "office"
+```
+
+### Bypass authentication (public access)
+
+```yaml
+labels:
+  labelgate.access.public.policy.decision: "bypass"
+  labelgate.access.public.policy.include.everyone: ""
+
+  labelgate.tunnel.docs.hostname: "docs.example.com"
+  labelgate.tunnel.docs.service: "http://docs:80"
+  labelgate.tunnel.docs.access: "public"
+```
+
+### Service token authentication
+
+```yaml
+labels:
+  labelgate.access.machine.policy.decision: "service_auth"
+  labelgate.access.machine.policy.include.service_token: "your-service-token-id"
+
+  labelgate.tunnel.api.hostname: "api.example.com"
+  labelgate.tunnel.api.service: "http://api:8080"
+  labelgate.tunnel.api.access: "machine"
+```
+
+### Combined rules (include + require + exclude)
+
+```yaml
+labels:
+  # Allow company emails, require US location, exclude contractors
+  labelgate.access.secure.policy.decision: "allow"
+  labelgate.access.secure.policy.include.emails_ending_in: "@company.io"
+  labelgate.access.secure.policy.require.country: "US"
+  labelgate.access.secure.policy.exclude.emails: "contractor1@company.io,contractor2@company.io"
+
+  labelgate.tunnel.secure.hostname: "secure.company.io"
+  labelgate.tunnel.secure.service: "http://secure:443"
+  labelgate.tunnel.secure.access: "secure"
+```
+
+### Shared policy across multiple services
+
+```yaml
+labels:
+  # Define one policy
+  labelgate.access.internal.policy.decision: "allow"
+  labelgate.access.internal.policy.include.emails_ending_in: "@example.com"
+
+  # Reuse it across multiple services
+  labelgate.tunnel.app.hostname: "app.example.com"
+  labelgate.tunnel.app.service: "http://app:80"
+  labelgate.tunnel.app.access: "internal"
+
+  labelgate.tunnel.admin.hostname: "admin.example.com"
+  labelgate.tunnel.admin.service: "http://admin:8080"
+  labelgate.tunnel.admin.access: "internal"
+```

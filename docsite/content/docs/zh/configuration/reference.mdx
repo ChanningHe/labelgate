@@ -1,0 +1,175 @@
+---
+title: 配置参考
+description: Labelgate 所有配置选项的完整参考。
+---
+
+## 基本设置
+
+| 环境变量 | 配置文件路径 | 默认值 | 说明 |
+|---------------------|------------------|---------|-------------|
+| `LABELGATE_LABEL_PREFIX` | `label_prefix` | `labelgate` | 容器标签前缀 |
+| `LABELGATE_LOG_LEVEL` | `log_level` | `info` | 日志级别：`debug`、`info`、`warn`、`error` |
+| `LABELGATE_LOG_FORMAT` | `log_format` | `text` | 日志格式：`json`、`text` |
+| `LABELGATE_MODE` | `mode` | `main` | 运行模式：`main` 或 `agent` |
+| `LABELGATE_DEFAULT_TUNNEL` | `default_tunnel` | `default` | 默认隧道名称 |
+
+## Docker Provider
+
+| 环境变量 | 配置文件路径 | 默认值 | 说明 |
+|---------------------|------------------|---------|-------------|
+| `LABELGATE_DOCKER_ENDPOINT` | `docker.endpoint` | `unix:///var/run/docker.sock` | Docker 守护进程端点 |
+| `LABELGATE_DOCKER_POLL_INTERVAL` | `docker.poll_interval` | `2m` | 轮询间隔 |
+| `LABELGATE_DOCKER_FILTER_LABEL` | `docker.filter_label` | - | 仅监视具有此标签的容器 |
+| `LABELGATE_DOCKER_SSH_KEY` | `docker.ssh.key` | - | SSH 私钥路径（用于 `ssh://` 端点） |
+| `LABELGATE_DOCKER_SSH_KEY_PASSPHRASE` | `docker.ssh.key_passphrase` | - | SSH 密钥密码 |
+| `LABELGATE_DOCKER_SSH_KNOWN_HOSTS` | `docker.ssh.known_hosts` | - | SSH known hosts 文件 |
+| `LABELGATE_DOCKER_TLS_CA` | `docker.tls.ca` | - | TLS CA 证书（用于 `tcp://` + TLS） |
+| `LABELGATE_DOCKER_TLS_CERT` | `docker.tls.cert` | - | TLS 客户端证书 |
+| `LABELGATE_DOCKER_TLS_KEY` | `docker.tls.key` | - | TLS 客户端密钥 |
+
+## Cloudflare 凭证
+
+| 环境变量 | 配置文件路径 | 默认值 | 说明 |
+|---------------------|------------------|---------|-------------|
+| `LABELGATE_CLOUDFLARE_API_TOKEN` | `cloudflare.api_token` | - | 默认 API Token **（必须）** |
+| `LABELGATE_CLOUDFLARE_ACCOUNT_ID` | `cloudflare.account_id` | - | Cloudflare 账户 ID |
+| `LABELGATE_CLOUDFLARE_TUNNEL_ID` | `cloudflare.tunnel_id` | - | 默认 Tunnel ID |
+
+<Callout type="info">
+cloudflared 用于建立隧道连接的 `TUNNEL_TOKEN` **不是** Labelgate 配置。它直接在 cloudflared 服务上配置。详见 [cloudflared 设置](/zh/docs/examples/cloudflared)。
+</Callout>
+
+## 同步与生命周期
+
+| 环境变量 | 配置文件路径 | 默认值 | 说明 |
+|---------------------|------------------|---------|-------------|
+| `LABELGATE_SYNC_INTERVAL` | `sync.interval` | `1h` | 周期性协调间隔 |
+| `LABELGATE_SYNC_REMOVE_DELAY` | `sync.remove_delay` | `0s` | 删除资源前的延迟 |
+| `LABELGATE_SYNC_ORPHAN_TTL` | `sync.orphan_ttl` | `0` | 自动清理孤立资源（0 = 永不） |
+
+## 数据库
+
+| 环境变量 | 配置文件路径 | 默认值 | 说明 |
+|---------------------|------------------|---------|-------------|
+| `LABELGATE_DB_PATH` | `db.path` | `/app/config/labelgate.db` | SQLite 数据库路径 |
+| `LABELGATE_DB_RETENTION` | `db.retention` | `168h` | 已删除记录保留时间 |
+| `LABELGATE_DB_VACUUM_INTERVAL` | `db.vacuum_interval` | `24h` | 数据库 vacuum 间隔 |
+
+## API 服务器
+
+| 环境变量 | 配置文件路径 | 默认值 | 说明 |
+|---------------------|------------------|---------|-------------|
+| `LABELGATE_API_ENABLED` | `api.enabled` | `true` | 启用 HTTP API 服务器 |
+| `LABELGATE_API_ADDRESS` | `api.address` | `:8080` | 监听地址 |
+| `LABELGATE_API_BASE_PATH` | `api.base_path` | `/api` | API 基础路径 |
+
+## 重试设置
+
+| 环境变量 | 配置文件路径 | 默认值 | 说明 |
+|---------------------|------------------|---------|-------------|
+| `LABELGATE_RETRY_ATTEMPTS` | `retry.attempts` | `3` | 最大重试次数 |
+| `LABELGATE_RETRY_DELAY` | `retry.delay` | `1s` | 初始重试延迟 |
+| `LABELGATE_RETRY_MAX_DELAY` | `retry.max_delay` | `30s` | 最大重试延迟 |
+| `LABELGATE_RETRY_BACKOFF` | `retry.backoff` | `2` | 重试退避乘数 |
+
+## Agent 服务器（主实例）
+
+| 环境变量 | 配置文件路径 | 默认值 | 说明 |
+|---------------------|------------------|---------|-------------|
+| `LABELGATE_AGENT_ENABLED` | `agent.enabled` | `false` | 启用 Agent WebSocket 服务器 |
+| `LABELGATE_AGENT_LISTEN` | `agent.listen` | `:8081` | Agent 服务器监听地址 |
+| `LABELGATE_AGENT_ACCEPT_TOKEN` | `agent.accept_token` | - | 接受任意 Agent 的共享令牌 |
+| `LABELGATE_AGENT_TLS_CERT` | `agent.tls.cert` | - | Agent 服务器 TLS 证书 |
+| `LABELGATE_AGENT_TLS_KEY` | `agent.tls.key` | - | Agent 服务器 TLS 密钥 |
+
+## Agent 连接（Agent 实例）
+
+| 环境变量 | 配置文件路径 | 默认值 | 说明 |
+|---------------------|------------------|---------|-------------|
+| `LABELGATE_CONNECT_MODE` | `connect.mode` | `outbound` | 连接模式：`outbound` 或 `inbound` |
+| `LABELGATE_CONNECT_ENDPOINT` | `connect.endpoint` | - | 主实例 WebSocket URL（outbound） |
+| `LABELGATE_CONNECT_LISTEN` | `connect.listen` | - | 监听地址（inbound） |
+| `LABELGATE_CONNECT_TOKEN` | `connect.token` | - | 认证令牌 |
+| `LABELGATE_CONNECT_AGENT_ID` | `connect.agent_id` | 自动获取自 `/etc/machine-id` | Agent 标识符 |
+| `LABELGATE_CONNECT_HEARTBEAT_INTERVAL` | `connect.heartbeat_interval` | `30s` | 心跳间隔 |
+
+## 其他
+
+| 环境变量 | 配置文件路径 | 默认值 | 说明 |
+|---------------------|------------------|---------|-------------|
+| `LABELGATE_CONFIG` | - | - | YAML 配置文件路径 |
+| `LABELGATE_SKIP_CREDENTIAL_VALIDATION` | `skip_credential_validation` | `false` | 启动时跳过凭证验证 |
+
+## 多凭证设置
+
+对于管理多个 Cloudflare 账户或使用不同令牌管理不同区域，使用配置文件：
+
+```yaml
+cloudflare:
+  api_token: ${CF_DEFAULT_TOKEN}
+
+  credentials:
+    personal:
+      api_token: ${CF_PERSONAL_TOKEN}
+      zones:
+        - example.com
+        - "*.example.com"
+    company:
+      api_token: ${CF_COMPANY_TOKEN}
+      zones:
+        - company.io
+        - company.com
+
+  tunnels:
+    secondary:
+      account_id: ${CF_ACCOUNT_ID_2}
+      tunnel_id: ${CF_TUNNEL_ID_2}
+      credential: company
+```
+
+### 凭证解析顺序
+
+1. 容器标签指定凭证名称（例如 `labelgate.dns.web.credential=company`）
+2. 根据配置的 `zones` 模式自动匹配区域
+3. 回退到默认 `api_token`
+
+### 区域匹配规则
+
+- **精确匹配**：`example.com` 匹配 `example.com`
+- **通配符匹配**：`*.example.com` 匹配 `sub.example.com`、`api.example.com`
+- **父域匹配**：`example.com` 匹配 `www.example.com`（回退）
+
+## 完整 YAML 配置示例
+
+```yaml
+label_prefix: labelgate
+log_level: info
+log_format: text
+default_tunnel: default
+
+docker:
+  endpoint: unix:///var/run/docker.sock
+  poll_interval: 2m
+
+cloudflare:
+  api_token: ${CF_API_TOKEN}
+  account_id: ${CF_ACCOUNT_ID}
+  tunnel_id: ${CF_TUNNEL_ID}
+
+sync:
+  interval: 1h
+
+db:
+  path: /app/config/labelgate.db
+
+retry:
+  attempts: 3
+  delay: 1s
+  max_delay: 30s
+  backoff: 2
+
+api:
+  enabled: true
+  address: :8080
+  base_path: /api
+```

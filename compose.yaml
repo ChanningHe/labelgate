@@ -1,0 +1,48 @@
+services:
+  # Main Labelgate instance
+  labelgate:
+    image: ghcr.io/channinghe/labelgate:${LABELGATE_VERSION:-v0}
+    container_name: labelgate
+    restart: unless-stopped
+
+    # use command "stat -c '%g' /var/run/docker.sock" to get the group id of the docker socket
+    group_add:
+      - "REPLACE_WITH_GROUP_ID"
+    volumes:
+      # Docker socket for container monitoring
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Persistent storage
+      - ./labelgate-data:/app/config
+      
+      # Optional: custom config file
+      # - ./labelgate.yaml:/app/config/labelgate.yaml:ro
+    
+    environment:
+      # Cloudflare credentials (required)
+      - LABELGATE_CLOUDFLARE_API_TOKEN=${LABELGATE_CLOUDFLARE_API_TOKEN}
+      - LABELGATE_CLOUDFLARE_ACCOUNT_ID=${LABELGATE_CLOUDFLARE_ACCOUNT_ID}
+      - LABELGATE_CLOUDFLARE_TUNNEL_ID=${LABELGATE_CLOUDFLARE_TUNNEL_ID}
+      
+      # Optional settings
+      - LABELGATE_LOG_LEVEL=${LABELGATE_LOG_LEVEL:-info}
+      - LABELGATE_LOG_FORMAT=${LABELGATE_LOG_FORMAT:-text}
+      
+      # Database path (inside container)
+      - LABELGATE_DB_PATH=/app/config/labelgate.db
+    
+    ports:
+      # HTTP API && Dashboard Port
+      - "28111:8080"
+      # Agent Server (enable if using agents)
+      # - "8081:8081"
+    
+    # labels:
+    #   # Self-monitoring example (optional)
+    #   labelgate.dns.api.hostname: api.example.com
+    #   labelgate.dns.api.type: A
+    #   labelgate.dns.api.target: auto
+    #   labelgate.dns.api.proxied: "true"
+
+networks:
+  default:
+    name: labelgate-network

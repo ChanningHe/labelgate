@@ -1,0 +1,175 @@
+---
+title: Configuration Reference
+description: Complete reference for all Labelgate configuration options.
+---
+
+## Basic Settings
+
+| Environment Variable | Config File Path | Default | Description |
+|---------------------|------------------|---------|-------------|
+| `LABELGATE_LABEL_PREFIX` | `label_prefix` | `labelgate` | Label prefix for container labels |
+| `LABELGATE_LOG_LEVEL` | `log_level` | `info` | Log level: `debug`, `info`, `warn`, `error` |
+| `LABELGATE_LOG_FORMAT` | `log_format` | `text` | Log format: `json`, `text` |
+| `LABELGATE_MODE` | `mode` | `main` | Run mode: `main` or `agent` |
+| `LABELGATE_DEFAULT_TUNNEL` | `default_tunnel` | `default` | Default tunnel name |
+
+## Docker Provider
+
+| Environment Variable | Config File Path | Default | Description |
+|---------------------|------------------|---------|-------------|
+| `LABELGATE_DOCKER_ENDPOINT` | `docker.endpoint` | `unix:///var/run/docker.sock` | Docker daemon endpoint |
+| `LABELGATE_DOCKER_POLL_INTERVAL` | `docker.poll_interval` | `2m` | Fallback polling interval |
+| `LABELGATE_DOCKER_FILTER_LABEL` | `docker.filter_label` | - | Only watch containers with this label |
+| `LABELGATE_DOCKER_SSH_KEY` | `docker.ssh.key` | - | SSH private key path (for `ssh://` endpoints) |
+| `LABELGATE_DOCKER_SSH_KEY_PASSPHRASE` | `docker.ssh.key_passphrase` | - | SSH key passphrase |
+| `LABELGATE_DOCKER_SSH_KNOWN_HOSTS` | `docker.ssh.known_hosts` | - | SSH known hosts file |
+| `LABELGATE_DOCKER_TLS_CA` | `docker.tls.ca` | - | TLS CA certificate (for `tcp://` with TLS) |
+| `LABELGATE_DOCKER_TLS_CERT` | `docker.tls.cert` | - | TLS client certificate |
+| `LABELGATE_DOCKER_TLS_KEY` | `docker.tls.key` | - | TLS client key |
+
+## Cloudflare Credentials
+
+| Environment Variable | Config File Path | Default | Description |
+|---------------------|------------------|---------|-------------|
+| `LABELGATE_CLOUDFLARE_API_TOKEN` | `cloudflare.api_token` | - | Default API token **(required)** |
+| `LABELGATE_CLOUDFLARE_ACCOUNT_ID` | `cloudflare.account_id` | - | Cloudflare Account ID |
+| `LABELGATE_CLOUDFLARE_TUNNEL_ID` | `cloudflare.tunnel_id` | - | Default Tunnel ID |
+
+<Callout type="info">
+The `TUNNEL_TOKEN` used by cloudflared to establish the tunnel connection is **not** a Labelgate configuration. It is configured directly on the cloudflared service. See [cloudflared Setup](/docs/examples/cloudflared) for details.
+</Callout>
+
+## Sync & Lifecycle
+
+| Environment Variable | Config File Path | Default | Description |
+|---------------------|------------------|---------|-------------|
+| `LABELGATE_SYNC_INTERVAL` | `sync.interval` | `1h` | Periodic reconciliation interval |
+| `LABELGATE_SYNC_REMOVE_DELAY` | `sync.remove_delay` | `0s` | Delay before removing resources |
+| `LABELGATE_SYNC_ORPHAN_TTL` | `sync.orphan_ttl` | `0` | Auto-clean orphaned resources (0 = never) |
+
+## Database
+
+| Environment Variable | Config File Path | Default | Description |
+|---------------------|------------------|---------|-------------|
+| `LABELGATE_DB_PATH` | `db.path` | `/app/config/labelgate.db` | SQLite database path |
+| `LABELGATE_DB_RETENTION` | `db.retention` | `168h` | How long to keep deleted records |
+| `LABELGATE_DB_VACUUM_INTERVAL` | `db.vacuum_interval` | `24h` | Database vacuum interval |
+
+## API Server
+
+| Environment Variable | Config File Path | Default | Description |
+|---------------------|------------------|---------|-------------|
+| `LABELGATE_API_ENABLED` | `api.enabled` | `true` | Enable HTTP API server |
+| `LABELGATE_API_ADDRESS` | `api.address` | `:8080` | Listen address |
+| `LABELGATE_API_BASE_PATH` | `api.base_path` | `/api` | API base path |
+
+## Retry Settings
+
+| Environment Variable | Config File Path | Default | Description |
+|---------------------|------------------|---------|-------------|
+| `LABELGATE_RETRY_ATTEMPTS` | `retry.attempts` | `3` | Maximum retry attempts |
+| `LABELGATE_RETRY_DELAY` | `retry.delay` | `1s` | Initial retry delay |
+| `LABELGATE_RETRY_MAX_DELAY` | `retry.max_delay` | `30s` | Maximum retry delay |
+| `LABELGATE_RETRY_BACKOFF` | `retry.backoff` | `2` | Retry backoff multiplier |
+
+## Agent Server (Main Instance)
+
+| Environment Variable | Config File Path | Default | Description |
+|---------------------|------------------|---------|-------------|
+| `LABELGATE_AGENT_ENABLED` | `agent.enabled` | `false` | Enable agent WebSocket server |
+| `LABELGATE_AGENT_LISTEN` | `agent.listen` | `:8081` | Agent server listen address |
+| `LABELGATE_AGENT_ACCEPT_TOKEN` | `agent.accept_token` | - | Shared token to accept any agent |
+| `LABELGATE_AGENT_TLS_CERT` | `agent.tls.cert` | - | TLS certificate for agent server |
+| `LABELGATE_AGENT_TLS_KEY` | `agent.tls.key` | - | TLS key for agent server |
+
+## Agent Connection (Agent Instance)
+
+| Environment Variable | Config File Path | Default | Description |
+|---------------------|------------------|---------|-------------|
+| `LABELGATE_CONNECT_MODE` | `connect.mode` | `outbound` | Connection mode: `outbound` or `inbound` |
+| `LABELGATE_CONNECT_ENDPOINT` | `connect.endpoint` | - | Main instance WebSocket URL (outbound) |
+| `LABELGATE_CONNECT_LISTEN` | `connect.listen` | - | Listen address (inbound) |
+| `LABELGATE_CONNECT_TOKEN` | `connect.token` | - | Authentication token |
+| `LABELGATE_CONNECT_AGENT_ID` | `connect.agent_id` | Auto from `/etc/machine-id` | Agent identifier |
+| `LABELGATE_CONNECT_HEARTBEAT_INTERVAL` | `connect.heartbeat_interval` | `30s` | Heartbeat interval |
+
+## Other
+
+| Environment Variable | Config File Path | Default | Description |
+|---------------------|------------------|---------|-------------|
+| `LABELGATE_CONFIG` | - | - | Path to YAML config file |
+| `LABELGATE_SKIP_CREDENTIAL_VALIDATION` | `skip_credential_validation` | `false` | Skip credential check on startup |
+
+## Multi-Credential Setup
+
+For managing multiple Cloudflare accounts or zones with different tokens, use a config file:
+
+```yaml
+cloudflare:
+  api_token: ${CF_DEFAULT_TOKEN}
+
+  credentials:
+    personal:
+      api_token: ${CF_PERSONAL_TOKEN}
+      zones:
+        - example.com
+        - "*.example.com"
+    company:
+      api_token: ${CF_COMPANY_TOKEN}
+      zones:
+        - company.io
+        - company.com
+
+  tunnels:
+    secondary:
+      account_id: ${CF_ACCOUNT_ID_2}
+      tunnel_id: ${CF_TUNNEL_ID_2}
+      credential: company
+```
+
+### Credential Resolution Order
+
+1. Container label specifies credential name (e.g., `labelgate.dns.web.credential=company`)
+2. Automatic zone matching against configured `zones` patterns
+3. Fall back to the default `api_token`
+
+### Zone Matching Rules
+
+- **Exact match**: `example.com` matches `example.com`
+- **Wildcard match**: `*.example.com` matches `sub.example.com`, `api.example.com`
+- **Parent domain match**: `example.com` matches `www.example.com` (fallback)
+
+## Full YAML Config Example
+
+```yaml
+label_prefix: labelgate
+log_level: info
+log_format: text
+default_tunnel: default
+
+docker:
+  endpoint: unix:///var/run/docker.sock
+  poll_interval: 2m
+
+cloudflare:
+  api_token: ${CF_API_TOKEN}
+  account_id: ${CF_ACCOUNT_ID}
+  tunnel_id: ${CF_TUNNEL_ID}
+
+sync:
+  interval: 1h
+
+db:
+  path: /app/config/labelgate.db
+
+retry:
+  attempts: 3
+  delay: 1s
+  max_delay: 30s
+  backoff: 2
+
+api:
+  enabled: true
+  address: :8080
+  base_path: /api
+```

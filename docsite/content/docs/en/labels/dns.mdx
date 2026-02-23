@@ -1,0 +1,140 @@
+---
+title: DNS Labels
+description: Complete reference for Labelgate DNS label properties.
+---
+
+## Format
+
+```
+labelgate.dns.<service_name>.<property>=<value>
+```
+
+## Properties
+
+| Property | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `hostname` | Yes | - | Full domain name for the DNS record |
+| `type` | No | `A` | Record type: `A`, `AAAA`, `CNAME`, `TXT`, `MX`, `SRV`, `CAA` |
+| `target` | No | `auto` | Record value. `auto` = detect public IP, `container` = container IP |
+| `proxied` | No | `true` | Enable Cloudflare proxy (orange cloud) |
+| `ttl` | No | `auto` | TTL in seconds. `auto` when proxied |
+| `credential` | No | `default` | Credential name to use |
+| `cleanup` | No | `false` | Delete record when container stops |
+| `comment` | No | - | DNS record comment |
+| `priority` | No | - | Priority (required for MX, SRV) |
+| `access` | No | - | Access policy name to apply |
+
+## Record Types
+
+### A / AAAA Records
+
+Point a hostname to an IP address.
+
+```yaml
+labels:
+  labelgate.dns.web.hostname: "app.example.com"
+  labelgate.dns.web.type: "A"
+  labelgate.dns.web.target: "203.0.113.1"
+  labelgate.dns.web.proxied: "true"
+```
+
+**Special `target` values:**
+- `auto` - Automatically detect the host's public IP address
+- `container` - Use the container's internal IP address
+- Any valid IPv4 (A) or IPv6 (AAAA) address
+
+### CNAME Records
+
+Create an alias pointing to another hostname.
+
+```yaml
+labels:
+  labelgate.dns.www.hostname: "www.example.com"
+  labelgate.dns.www.type: "CNAME"
+  labelgate.dns.www.target: "example.com"
+```
+
+### TXT Records
+
+Add text records (SPF, DKIM, verification, etc.).
+
+```yaml
+labels:
+  labelgate.dns.spf.hostname: "example.com"
+  labelgate.dns.spf.type: "TXT"
+  labelgate.dns.spf.target: "v=spf1 include:_spf.google.com ~all"
+```
+
+### MX Records
+
+Configure mail exchange records. Requires `priority`.
+
+```yaml
+labels:
+  labelgate.dns.mail.hostname: "example.com"
+  labelgate.dns.mail.type: "MX"
+  labelgate.dns.mail.target: "mail.provider.com"
+  labelgate.dns.mail.priority: "10"
+```
+
+### SRV Records
+
+Service location records. Requires `priority`, `weight`, and `port`.
+
+```yaml
+labels:
+  labelgate.dns.xmpp.hostname: "_xmpp._tcp.example.com"
+  labelgate.dns.xmpp.type: "SRV"
+  labelgate.dns.xmpp.target: "xmpp.example.com"
+  labelgate.dns.xmpp.priority: "10"
+  labelgate.dns.xmpp.weight: "5"
+  labelgate.dns.xmpp.port: "5222"
+```
+
+### CAA Records
+
+Certificate Authority Authorization records.
+
+```yaml
+labels:
+  labelgate.dns.caa.hostname: "example.com"
+  labelgate.dns.caa.type: "CAA"
+  labelgate.dns.caa.target: "letsencrypt.org"
+  labelgate.dns.caa.flags: "0"
+  labelgate.dns.caa.tag: "issue"
+```
+
+## Examples
+
+### Multiple DNS records from one container
+
+```yaml
+services:
+  myapp:
+    image: myapp:latest
+    labels:
+      labelgate.dns.root.hostname: "example.com"
+      labelgate.dns.root.type: "A"
+      labelgate.dns.root.target: "auto"
+
+      labelgate.dns.www.hostname: "www.example.com"
+      labelgate.dns.www.type: "CNAME"
+      labelgate.dns.www.target: "example.com"
+
+      labelgate.dns.mail.hostname: "example.com"
+      labelgate.dns.mail.type: "MX"
+      labelgate.dns.mail.target: "mail.example.com"
+      labelgate.dns.mail.priority: "10"
+```
+
+### Auto-cleanup for temporary environments
+
+```yaml
+services:
+  preview:
+    image: preview:latest
+    labels:
+      labelgate.dns.preview.hostname: "preview.example.com"
+      labelgate.dns.preview.target: "auto"
+      labelgate.dns.preview.cleanup: "true"
+```

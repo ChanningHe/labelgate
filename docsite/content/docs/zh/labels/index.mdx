@@ -1,0 +1,71 @@
+---
+title: Label 格式
+description: Labelgate 标签的工作原理和结构说明。
+---
+
+Labelgate 读取 Docker 容器标签来确定需要管理的 Cloudflare 资源。所有标签都遵循一致的命名约定。
+
+## Format
+
+```
+labelgate.<type>.<service_name>.<property>=<value>
+```
+
+| Segment | Description | Example |
+|---------|-------------|---------|
+| `labelgate` | Prefix (configurable via `LABELGATE_LABEL_PREFIX`) | `labelgate` |
+| `type` | Resource type | `dns`, `tunnel`, `access` |
+| `service_name` | Unique service identifier | `web`, `api`, `mail` |
+| `property` | Setting name | `hostname`, `service`, `type` |
+
+## Service Name Rules
+
+`service_name` 是容器内每个服务的唯一标识符。它允许你在同一个容器上定义多个服务。
+
+**Allowed characters:** lowercase letters, digits, and hyphens: `[a-z0-9]([a-z0-9-]*[a-z0-9])?`
+
+**Reserved words** (cannot be used as service names): `hostname`, `service`, `type`, `target`, `proxied`, `ttl`, `cleanup`, `credential`, `tunnel`, `path`, `origin`, `access`, `default`, `priority`, `weight`, `port`, `flags`, `tag`, `comment`
+
+## Multiple Services
+
+单个容器可以定义多个服务：
+
+```yaml
+labels:
+  # Service "web" - main website
+  labelgate.tunnel.web.hostname: "www.example.com"
+  labelgate.tunnel.web.service: "http://app:80"
+  # Service "api" - API endpoint
+  labelgate.tunnel.api.hostname: "api.example.com"
+  labelgate.tunnel.api.service: "http://app:3000"
+```
+
+## Hostname Constraints
+
+### DNS and Tunnel Conflict
+
+同一个 hostname **不能**同时拥有 DNS 记录和 Tunnel ingress 规则。Cloudflare Tunnel 会自动为 tunnel hostname 创建 CNAME 记录，因此添加手动 DNS 记录会产生冲突。
+
+```yaml
+# WRONG - hostname conflict
+labels:
+  labelgate.dns.web.hostname: "app.example.com"
+  labelgate.tunnel.web.hostname: "app.example.com"  # Conflict!
+```
+
+```yaml
+# CORRECT - use different hostnames
+labels:
+  labelgate.dns.legacy.hostname: "old.example.com"
+  labelgate.tunnel.web.hostname: "app.example.com"
+```
+
+### First Container Wins
+
+当多个容器声明相同的 hostname 时，第一个注册的容器获胜。后续容器将记录错误并跳过该 hostname。
+
+## Label Types
+
+- [DNS Labels](/zh/docs/labels/dns) - Manage Cloudflare DNS records
+- [Tunnel Labels](/zh/docs/labels/tunnel) - Manage Cloudflare Tunnel ingress rules
+- [Access Policy Labels](/zh/docs/labels/access) - Manage Zero Trust Access policies

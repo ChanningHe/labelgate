@@ -1,0 +1,112 @@
+---
+title: About Labelgate
+description: Automate Cloudflare DNS, Tunnels, and Access Policies through Docker container labels.
+---
+
+## What is Labelgate?
+
+Labelgate is a lightweight Go daemon that watches your Docker containers and automatically manages Cloudflare resources based on container labels. Simply add labels to your containers, and Labelgate takes care of DNS records, Tunnel ingress rules, and Zero Trust Access policies for you.
+
+Instead of manually configuring Cloudflare every time you deploy a service, Labelgate makes infrastructure-as-code as simple as adding a Docker label.
+
+```yaml
+# Just add labels to your container
+services:
+  webapp:
+    image: nginx
+    labels:
+      labelgate.tunnel.web.hostname: "app.example.com"
+      labelgate.tunnel.web.service: "http://webapp:80"
+```
+
+## Core Concepts
+
+### Labels
+
+Labels are the primary interface for telling Labelgate what to do. They follow a structured format:
+
+```
+labelgate.<type>.<service_name>.<property>=<value>
+```
+
+- **type** - The resource type: `dns`, `tunnel`, or `access`
+- **service_name** - A unique name for this service (e.g., `web`, `api`)
+- **property** - The specific setting (e.g., `hostname`, `service`)
+
+### Operators
+
+Labelgate has three operators, each managing a specific type of Cloudflare resource:
+
+| Operator | What it manages | Example use case |
+|----------|----------------|------------------|
+| **DNS Operator** | DNS records (A, AAAA, CNAME, TXT, MX, SRV, CAA) | Point `api.example.com` to your server |
+| **Tunnel Operator** | Cloudflare Tunnel ingress rules | Expose `app.example.com` through a tunnel |
+| **Access Operator** | Zero Trust Access policies | Restrict access to `admin.example.com` by email |
+
+### Reconciliation
+
+Labelgate uses an event-driven reconciliation model:
+
+1. **Docker events** trigger immediate reconciliation when containers start, stop, or die
+2. **Periodic sync** runs every 2 minutes as a fallback to catch any missed events
+3. The reconciler compares **desired state** (from container labels) against **actual state** (from Cloudflare API) and applies the necessary changes
+
+### Providers
+
+Providers are the source of container information. Currently, Labelgate supports Docker as a provider, with Kubernetes planned for the future. The Docker provider supports three connection methods:
+
+- **Unix socket** - Local Docker daemon (`unix:///var/run/docker.sock`)
+- **TCP** - Remote Docker daemon (`tcp://host:2376`)
+- **SSH** - Remote Docker via SSH (`ssh://user@host`)
+
+### State Persistence
+
+All managed resources are tracked in a local SQLite database. This enables:
+
+- **Ownership tracking** - Know which container owns which Cloudflare resource
+- **Conflict detection** - Prevent duplicate hostname assignments
+- **Graceful recovery** - Resume operations after restarts without duplicate resources
+
+## How It Works
+
+```
+┌─────────────────────────────────────────────────┐
+│                 Docker Containers                │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐      │
+│  │ webapp   │  │ api      │  │ admin    │      │
+│  │ labels:  │  │ labels:  │  │ labels:  │      │
+│  │ tunnel.. │  │ dns..    │  │ access.. │      │
+│  └──────────┘  └──────────┘  └──────────┘      │
+└────────────────────┬────────────────────────────┘
+                     │ Docker Events
+                     ▼
+              ┌──────────────┐
+              │  Labelgate   │
+              │              │
+              │ ┌──────────┐ │
+              │ │  Parser  │ │  Parse labels
+              │ └────┬─────┘ │
+              │      ▼       │
+              │ ┌──────────┐ │
+              │ │Reconciler│ │  Desired vs Actual
+              │ └────┬─────┘ │
+              │      ▼       │
+              │ ┌──────────┐ │
+              │ │Operators │ │  DNS / Tunnel / Access
+              │ └──────────┘ │
+              └──────┬───────┘
+                     │ Cloudflare API
+                     ▼
+              ┌──────────────┐
+              │  Cloudflare  │
+              │ DNS Records  │
+              │ Tunnel Rules │
+              │ Access Policy│
+              └──────────────┘
+```
+
+## Next Steps
+
+- [Getting Started](/docs/getting-started) - Set up Labelgate in minutes
+- [Label Reference](/docs/labels) - Complete label format documentation
+- [Configuration](/docs/configuration) - Advanced configuration options

@@ -1,0 +1,112 @@
+---
+title: 关于 Labelgate
+description: 通过 Docker 容器标签自动管理 Cloudflare DNS、Tunnel 和 Access 策略。
+---
+
+## 什么是 Labelgate？
+
+Labelgate 是一个轻量级的 Go 守护进程，它监控您的 Docker 容器，并根据容器标签自动管理 Cloudflare 资源。只需在容器上添加标签，Labelgate 就会为您处理 DNS 记录、Tunnel 入口规则和 Zero Trust Access 策略。
+
+无需每次部署服务时手动配置 Cloudflare，Labelgate 让基础设施即代码变得像添加 Docker 标签一样简单。
+
+```yaml
+# Just add labels to your container
+services:
+  webapp:
+    image: nginx
+    labels:
+      labelgate.tunnel.web.hostname: "app.example.com"
+      labelgate.tunnel.web.service: "http://webapp:80"
+```
+
+## 核心概念
+
+### 标签
+
+标签是告诉 Labelgate 要做什么的主要接口。它们遵循结构化格式：
+
+```
+labelgate.<type>.<service_name>.<property>=<value>
+```
+
+- **type** - 资源类型：`dns`、`tunnel` 或 `access`
+- **service_name** - 此服务的唯一名称（例如：`web`、`api`）
+- **property** - 特定设置（例如：`hostname`、`service`）
+
+### 操作器
+
+Labelgate 有三个操作器，每个操作器管理特定类型的 Cloudflare 资源：
+
+| Operator | What it manages | Example use case |
+|----------|----------------|------------------|
+| **DNS Operator** | DNS records (A, AAAA, CNAME, TXT, MX, SRV, CAA) | Point `api.example.com` to your server |
+| **Tunnel Operator** | Cloudflare Tunnel ingress rules | Expose `app.example.com` through a tunnel |
+| **Access Operator** | Zero Trust Access policies | Restrict access to `admin.example.com` by email |
+
+### 协调
+
+Labelgate 使用事件驱动的协调模型：
+
+1. **Docker 事件**在容器启动、停止或死亡时触发即时协调
+2. **定期同步**每 2 分钟运行一次，作为后备机制以捕获任何遗漏的事件
+3. 协调器比较**期望状态**（来自容器标签）与**实际状态**（来自 Cloudflare API），并应用必要的更改
+
+### 提供者
+
+提供者是容器信息的来源。目前，Labelgate 支持 Docker 作为提供者，未来计划支持 Kubernetes。Docker 提供者支持三种连接方法：
+
+- **Unix socket** - 本地 Docker 守护进程（`unix:///var/run/docker.sock`）
+- **TCP** - 远程 Docker 守护进程（`tcp://host:2376`）
+- **SSH** - 通过 SSH 的远程 Docker（`ssh://user@host`）
+
+### 状态持久化
+
+所有管理的资源都存储在本地 SQLite 数据库中。这实现了：
+
+- **所有权跟踪** - 了解哪个容器拥有哪个 Cloudflare 资源
+- **冲突检测** - 防止重复的主机名分配
+- **优雅恢复** - 在重启后恢复操作，而不会创建重复资源
+
+## 工作原理
+
+```
+┌─────────────────────────────────────────────────┐
+│                 Docker Containers                │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐      │
+│  │ webapp   │  │ api      │  │ admin    │      │
+│  │ labels:  │  │ labels:  │  │ labels:  │      │
+│  │ tunnel.. │  │ dns..    │  │ access.. │      │
+│  └──────────┘  └──────────┘  └──────────┘      │
+└────────────────────┬────────────────────────────┘
+                     │ Docker Events
+                     ▼
+              ┌──────────────┐
+              │  Labelgate   │
+              │              │
+              │ ┌──────────┐ │
+              │ │  Parser  │ │  Parse labels
+              │ └────┬─────┘ │
+              │      ▼       │
+              │ ┌──────────┐ │
+              │ │Reconciler│ │  Desired vs Actual
+              │ └────┬─────┘ │
+              │      ▼       │
+              │ ┌──────────┐ │
+              │ │Operators │ │  DNS / Tunnel / Access
+              │ └──────────┘ │
+              └──────┬───────┘
+                     │ Cloudflare API
+                     ▼
+              ┌──────────────┐
+              │  Cloudflare  │
+              │ DNS Records  │
+              │ Tunnel Rules │
+              │ Access Policy│
+              └──────────────┘
+```
+
+## 下一步
+
+- [快速开始](/zh/docs/getting-started) - 几分钟内设置 Labelgate
+- [标签参考](/zh/docs/labels) - 完整的标签格式文档
+- [配置](/zh/docs/configuration) - 高级配置选项

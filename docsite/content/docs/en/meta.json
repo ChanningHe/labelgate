@@ -1,0 +1,18 @@
+{
+  "title": "Documentation",
+  "root": true,
+  "pages": [
+    "index",
+    "getting-started",
+    "---Configuration---",
+    "...configuration",
+    "---Label Reference---",
+    "...labels",
+    "---Examples---",
+    "...examples",
+    "---Architecture---",
+    "...architecture",
+    "---Troubleshooting---",
+    "...troubleshooting"
+  ]
+}

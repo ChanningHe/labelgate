@@ -1,0 +1,166 @@
+---
+title: 多主机（代理模式）
+description: 使用代理模式在多个 Docker 主机上部署 Labelgate。
+---
+
+代理模式允许您监控多个主机上的 Docker 容器。一个中央**主**实例处理所有 Cloudflare API 调用，而远程主机上的轻量级**代理**实例收集容器标签并报告回来。
+
+## 架构
+
+```
+┌──────────────┐     WebSocket     ┌──────────────┐
+│   Agent #1   │ ──────────────>   │              │
+│  Docker Host │                   │    Main      │ ───> Cloudflare API
+│              │                   │   Instance   │
+└──────────────┘                   │              │
+                                   │              │
+┌──────────────┐     WebSocket     │              │
+│   Agent #2   │ ──────────────>   │              │
+│  Docker Host │                   └──────────────┘
+└──────────────┘
+```
+
+## 连接模式
+
+### 出站（代理连接到主实例）
+
+最适合位于 NAT 或防火墙后面的代理。代理发起连接。
+
+### 入站（主实例连接到代理）
+
+最适合位于内部网络上的代理，主实例可以直接访问它们。
+
+## 出站模式示例
+
+### 主实例
+
+```yaml
+# docker-compose.yaml (main host)
+services:
+  labelgate:
+    image: labelgate:latest
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - labelgate-data:/app/config
+    environment:
+      - LABELGATE_CLOUDFLARE_API_TOKEN
+      - LABELGATE_CLOUDFLARE_ACCOUNT_ID
+      - LABELGATE_CLOUDFLARE_TUNNEL_ID
+      - LABELGATE_AGENT_ENABLED=true
+      - LABELGATE_AGENT_LISTEN=:8081
+    ports:
+      - "8081:8081"
+    configs:
+      - source: labelgate-config
+        target: /etc/labelgate/labelgate.yaml
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel run --token ${TUNNEL_TOKEN}
+
+volumes:
+  labelgate-data:
+
+configs:
+  labelgate-config:
+    content: |
+      agent:
+        enabled: true
+        listen: :8081
+        agents:
+          docker-host-1:
+            token: ${AGENT_1_TOKEN}
+            default_tunnel: default
+          docker-host-2:
+            token: ${AGENT_2_TOKEN}
+            default_tunnel: default
+```
+
+### 代理实例
+
+```yaml
+# docker-compose.yaml (remote host)
+services:
+  labelgate-agent:
+    image: labelgate:latest
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - LABELGATE_MODE=agent
+      - LABELGATE_CONNECT_MODE=outbound
+      - LABELGATE_CONNECT_ENDPOINT=wss://main-host.example.com:8081
+      - LABELGATE_CONNECT_TOKEN=${AGENT_TOKEN}
+      - LABELGATE_DEFAULT_TUNNEL=default
+
+  # Your services with labels (same as single-host)
+  webapp:
+    image: nginx:alpine
+    labels:
+      labelgate.tunnel.web.hostname: "remote-app.example.com"
+      labelgate.tunnel.web.service: "http://webapp:80"
+```
+
+## 入站模式示例
+
+### 主实例
+
+```yaml
+# docker-compose.yaml (main host)
+services:
+  labelgate:
+    image: labelgate:latest
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - labelgate-data:/app/config
+    environment:
+      - LABELGATE_CLOUDFLARE_API_TOKEN
+      - LABELGATE_CLOUDFLARE_ACCOUNT_ID
+      - LABELGATE_CLOUDFLARE_TUNNEL_ID
+    configs:
+      - source: labelgate-config
+        target: /etc/labelgate/labelgate.yaml
+
+volumes:
+  labelgate-data:
+
+configs:
+  labelgate-config:
+    content: |
+      agent:
+        enabled: true
+        agents:
+          docker-host-1:
+            connect_to: wss://192.168.1.11:8082
+            token: ${AGENT_1_TOKEN}
+```
+
+### 代理实例（入站）
+
+```yaml
+# docker-compose.yaml (remote host)
+services:
+  labelgate-agent:
+    image: labelgate:latest
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - LABELGATE_MODE=agent
+      - LABELGATE_CONNECT_MODE=inbound
+      - LABELGATE_CONNECT_LISTEN=:8082
+      - LABELGATE_CONNECT_TOKEN=${AGENT_TOKEN}
+    ports:
+      - "8082:8082"
+```
+
+## 重要提示
+
+- **代理是轻量级的**：它们只收集容器标签并向主实例报告。所有 Cloudflare API 调用都在主实例上进行。
+- **主机名冲突**：会检测跨主机的主机名冲突。首先注册主机名的容器获胜，无论它在哪个主机上。
+- **隧道分配**：容器标签 > 代理默认隧道 > 全局默认隧道。
+- **重连**：如果连接断开，代理会自动使用指数退避重连。
+- **TLS**：对于生产环境，始终为代理连接使用 TLS。在服务器端配置证书（出站模式在主实例，入站模式在代理）。

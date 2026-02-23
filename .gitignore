@@ -1,0 +1,16 @@
+bin/
+dev/
+
+
+# docsite
+docsite/node_modules/
+docsite/.next/
+docsite/.source/
+docsite/.open-next/
+docsite/out/
+.wrangler/
+
+# dashboard
+dashboard/node_modules/
+dashboard/.vite/
+dashboard/static/

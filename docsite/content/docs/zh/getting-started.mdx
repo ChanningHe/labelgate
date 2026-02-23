@@ -1,0 +1,133 @@
+---
+title: 快速开始
+description: 使用 Docker Compose 在几分钟内设置 Labelgate。
+---
+
+## 前置要求
+
+在开始之前，请确保您已具备：
+
+- 已安装 **Docker** 和 Docker Compose
+- 拥有至少一个域名的 **Cloudflare 账户**
+- 拥有 **Cloudflare API Token**（我们将在下面创建一个）
+
+## 创建 Cloudflare API Token
+
+前往 [Cloudflare Dashboard > My Profile > API Tokens](https://dash.cloudflare.com/profile/api-tokens) 并创建一个具有所需权限的自定义 Token：
+
+| 使用场景 | 所需权限 |
+|----------|---------------------|
+| 仅 DNS | `Zone:Read` + `DNS:Edit` |
+| DNS + Tunnel | `Zone:Read` + `DNS:Edit` + `Cloudflare Tunnel:Edit` |
+| DNS + Tunnel + Access | `Zone:Read` + `DNS:Edit` + `Cloudflare Tunnel:Edit` + `Access: Apps and Policies:Edit` |
+
+对于**区域资源**，选择您希望 Labelgate 管理的特定区域（域名），或选择"所有区域"以获得完全访问权限。
+
+对于**账户资源**（Tunnel 模式必须），选择拥有 Tunnel 的账户。
+
+您还需要您的**账户 ID**，可以在 Cloudflare Dashboard 中任何区域的概览页面上找到。
+
+## 快速设置
+
+### 1. 设置环境变量
+
+在项目目录中创建 `.env` 文件：
+
+```bash
+# Labelgate configuration
+LABELGATE_CLOUDFLARE_API_TOKEN=your-cloudflare-api-token
+LABELGATE_CLOUDFLARE_ACCOUNT_ID=your-account-id
+
+# Required for Tunnel mode
+LABELGATE_CLOUDFLARE_TUNNEL_ID=your-tunnel-id
+
+# cloudflared tunnel token (for cloudflared daemon, not Labelgate)
+# Get this from: Cloudflare Dashboard > Zero Trust > Networks > Tunnels
+TUNNEL_TOKEN=your-tunnel-token
+```
+
+<Callout type="info">
+如果您还没有 Tunnel，可以在 [Cloudflare Dashboard > Zero Trust > Networks > Tunnels](https://one.dash.cloudflare.com/) 中创建一个。
+</Callout>
+
+### 2. 创建 docker-compose.yaml
+
+```yaml
+services:
+  labelgate:
+    image: labelgate:latest
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - labelgate-data:/app/config
+    environment:
+      - LABELGATE_CLOUDFLARE_API_TOKEN
+      - LABELGATE_CLOUDFLARE_ACCOUNT_ID
+      - LABELGATE_CLOUDFLARE_TUNNEL_ID
+
+  # Only needed for Tunnel mode
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel run --token ${TUNNEL_TOKEN}
+
+  # Example: expose a web app through Tunnel
+  webapp:
+    image: nginx:alpine
+    labels:
+      labelgate.tunnel.web.hostname: "app.example.com"
+      labelgate.tunnel.web.service: "http://webapp:80"
+
+volumes:
+  labelgate-data:
+```
+
+### 3. 启动堆栈
+
+```bash
+docker compose up -d
+```
+
+Labelgate 将：
+1. 连接到 Docker 守护进程并发现正在运行的容器
+2. 解析 `webapp` 上的标签
+3. 创建一个 Tunnel 入口规则，将 `app.example.com` 指向 `http://webapp:80`
+4. Cloudflare 自动为隧道主机名创建 CNAME DNS 记录
+
+### 4. 验证
+
+几秒钟后，访问 `https://app.example.com` - 您的 nginx 欢迎页面应该可以通过 Cloudflare Tunnel 访问。
+
+您也可以查看 Labelgate 日志：
+
+```bash
+docker compose logs labelgate
+```
+
+## 仅 DNS 示例
+
+如果您只需要 DNS 记录管理（无需隧道），则更简单：
+
+```yaml
+services:
+  labelgate:
+    image: labelgate:latest
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - LABELGATE_CLOUDFLARE_API_TOKEN
+
+  myapp:
+    image: nginx:alpine
+    labels:
+      labelgate.dns.web.hostname: "app.example.com"
+      labelgate.dns.web.type: "A"
+      labelgate.dns.web.target: "203.0.113.1"
+      labelgate.dns.web.proxied: "true"
+```
+
+## 下一步
+
+- [配置](/zh/docs/configuration) - 了解配置文件、环境变量和多凭证设置
+- [标签参考](/zh/docs/labels) - DNS、Tunnel 和 Access 标签的完整参考
+- [示例](/zh/docs/examples/single-host) - 更多真实世界的部署示例

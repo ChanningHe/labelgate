@@ -1,0 +1,73 @@
+# Docker Compose for Labelgate
+# 
+# Usage:
+#   1. Copy .env.example to .env and configure credentials
+#   2. Run: docker-compose up -d
+#
+# For multi-host deployment with agents, see docker-compose.agent.yaml
+
+services:
+  # Main Labelgate instance
+  labelgate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: labelgate:latest
+    container_name: labelgate
+    restart: unless-stopped
+    
+    # Run as root to access Docker socket
+    # Alternatively, add the labelgate user to the docker group
+    user: root
+    
+    volumes:
+      # Docker socket for container monitoring
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      
+      # Persistent storage
+      - labelgate-data:/app/config
+      
+      # Optional: custom config file
+      # - ./labelgate.yaml:/etc/labelgate/labelgate.yaml:ro
+    
+    environment:
+      # Cloudflare credentials (required)
+      - LABELGATE_CLOUDFLARE_API_TOKEN=${LABELGATE_CLOUDFLARE_API_TOKEN}
+      - LABELGATE_CLOUDFLARE_ACCOUNT_ID=${LABELGATE_CLOUDFLARE_ACCOUNT_ID}
+      - LABELGATE_CLOUDFLARE_TUNNEL_ID=${LABELGATE_CLOUDFLARE_TUNNEL_ID}
+      
+      # Optional settings
+      - LABELGATE_LOG_LEVEL=${LABELGATE_LOG_LEVEL:-info}
+      - LABELGATE_LOG_FORMAT=${LABELGATE_LOG_FORMAT:-text}
+      
+      # Database path (inside container)
+      - LABELGATE_DB_PATH=/app/config/labelgate.db
+    
+    ports:
+      # HTTP API
+      - "8080:8080"
+      
+      # Agent Server (enable if using agents)
+      # - "8081:8081"
+    
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    
+    # labels:
+    #   # Self-monitoring example (optional)
+    #   labelgate.dns.api.hostname: api.example.com
+    #   labelgate.dns.api.type: A
+    #   labelgate.dns.api.target: auto
+    #   labelgate.dns.api.proxied: "true"
+
+volumes:
+  labelgate-data:
+    driver: local
+
+networks:
+  default:
+    name: labelgate-network

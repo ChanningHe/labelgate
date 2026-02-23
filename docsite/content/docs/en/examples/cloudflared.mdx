@@ -1,0 +1,144 @@
+---
+title: cloudflared Setup
+description: How to deploy cloudflared alongside Labelgate.
+---
+
+Labelgate manages Tunnel ingress rules via the Cloudflare API, but you still need a running `cloudflared` daemon to establish the tunnel connection. Here's how to set it up.
+
+## Recommended: Remote Config with Tunnel Token
+
+This is the best approach for use with Labelgate. The tunnel configuration is managed remotely via the Cloudflare API, so cloudflared automatically picks up changes made by Labelgate without needing a restart.
+
+```yaml
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN}
+```
+
+<Callout type="info">
+When Labelgate adds or removes ingress rules via the API, cloudflared detects the changes and applies them automatically. No restart needed.
+</Callout>
+
+## Alternative: Tunnel Token (Simple)
+
+If you prefer minimal configuration:
+
+```yaml
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel run
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+```
+
+## Alternative: Credentials File
+
+For environments where you manage credentials as files:
+
+```yaml
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --config /etc/cloudflared/config.yml run
+    volumes:
+      - ./cloudflared:/etc/cloudflared:ro
+```
+
+Where `cloudflared/config.yml` contains:
+
+```yaml
+tunnel: your-tunnel-id
+credentials-file: /etc/cloudflared/credentials.json
+```
+
+## Getting Your Tunnel Token
+
+1. Go to [Cloudflare Zero Trust Dashboard](https://one.dash.cloudflare.com/)
+2. Navigate to **Networks > Tunnels**
+3. Create a new tunnel or select an existing one
+4. Copy the tunnel token from the install command
+
+Or via CLI:
+
+```bash
+cloudflared tunnel create my-tunnel
+cloudflared tunnel token my-tunnel
+```
+
+## Networking Tips
+
+### Docker Compose Networking
+
+When using Docker Compose, all services share a network by default. Use Docker service names in your labels:
+
+```yaml
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel run --token ${TUNNEL_TOKEN}
+
+  webapp:
+    image: nginx:alpine
+    labels:
+      # Use the service name "webapp", not "localhost"
+      labelgate.tunnel.web.hostname: "app.example.com"
+      labelgate.tunnel.web.service: "http://webapp:80"
+```
+
+### Host-Based Services
+
+To route to services running directly on the host (not in Docker):
+
+```yaml
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel run --token ${TUNNEL_TOKEN}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  proxy:
+    image: alpine
+    labels:
+      labelgate.tunnel.host-svc.hostname: "svc.example.com"
+      labelgate.tunnel.host-svc.service: "http://host.docker.internal:8080"
+```
+
+### Multiple Docker Networks
+
+If your services are on different Docker networks, make sure cloudflared can reach them:
+
+```yaml
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel run --token ${TUNNEL_TOKEN}
+    networks:
+      - frontend
+      - backend
+
+networks:
+  frontend:
+  backend:
+```
+
+## Health Check
+
+Enable cloudflared metrics for monitoring:
+
+```yaml
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --metrics 0.0.0.0:2000 run --token ${TUNNEL_TOKEN}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:2000/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+```

@@ -1,0 +1,150 @@
+---
+title: Architecture Overview
+description: How Labelgate is designed and how its components work together.
+---
+
+## System Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Provider Layer                        │
+│  ┌────────────────┐            ┌────────────────┐       │
+│  │ Docker Provider│            │ K8s Provider   │       │
+│  │ (unix/tcp/ssh) │            │ (planned)      │       │
+│  └───────┬────────┘            └────────────────┘       │
+└──────────┼──────────────────────────────────────────────┘
+           │ Container Events + Labels
+           ▼
+┌─────────────────────────────────────────────────────────┐
+│                      Core Engine                         │
+│  ┌──────────┐    ┌──────────┐    ┌──────────────┐       │
+│  │  Event   │ -> │  Label   │ -> │  Reconciler  │       │
+│  │ Watcher  │    │  Parser  │    │              │       │
+│  └──────────┘    └──────────┘    └──────┬───────┘       │
+└─────────────────────────────────────────┼───────────────┘
+           │                              │
+           ▼                              ▼
+┌──────────────────┐     ┌────────────────────────────────┐
+│   SQLite Storage │     │        Operator Layer          │
+│                  │     │  ┌─────┐ ┌───────┐ ┌───────┐  │
+│ - Resource state │     │  │ DNS │ │Tunnel │ │Access │  │
+│ - Ownership      │     │  └──┬──┘ └──┬────┘ └──┬────┘  │
+│ - Conflict data  │     └─────┼───────┼─────────┼───────┘
+└──────────────────┘           │       │         │
+                               ▼       ▼         ▼
+                        ┌─────────────────────────────┐
+                        │    Cloudflare API Client     │
+                        │  ┌───────────────────────┐   │
+                        │  │ Credential Manager    │   │
+                        │  │ (multi-token + zones) │   │
+                        │  └───────────────────────┘   │
+                        └─────────────────────────────┘
+```
+
+## Components
+
+### Provider Layer
+
+Providers are the source of container data. The Docker provider connects to the Docker daemon and:
+
+- **Watches events** in real-time (container start, stop, die)
+- **Lists containers** on startup and periodically as a fallback
+- Supports three connection methods: Unix socket, TCP, and SSH
+
+### Label Parser
+
+The parser extracts structured configuration from container labels. It:
+
+- Validates label format and service names
+- Separates DNS, Tunnel, and Access labels
+- Detects hostname conflicts
+- Applies defaults and inheritance rules
+
+### Reconciler
+
+The reconciler is the brain of Labelgate. It compares desired state (from container labels) against actual state (from Cloudflare API and local database) and determines what actions to take:
+
+- **Create** - New resource needed
+- **Update** - Existing resource needs changes
+- **Delete** - Resource should be removed (if cleanup is enabled)
+- **Skip** - No changes needed
+
+### Operators
+
+Each operator manages one type of Cloudflare resource:
+
+| Operator | Responsibility |
+|----------|---------------|
+| **DNS** | Create, update, and delete DNS records |
+| **Tunnel** | Add and remove Tunnel ingress rules, manage catch-all rule |
+| **Access** | Create and manage Zero Trust Access applications and policies |
+
+### Credential Manager
+
+Handles multi-token authentication:
+
+- **Zone matching** - Automatically selects the right token based on hostname
+- **Credential fallback** - Falls back to the default API token when no specific credential is configured
+- **Label override** - Container labels can specify which credential to use
+
+### State Persistence (SQLite)
+
+All managed resources are tracked in SQLite:
+
+- **Resource ownership** - Links Cloudflare resources to containers
+- **Conflict detection** - Prevents duplicate hostname assignments
+- **Recovery** - Enables graceful restart without recreating resources
+- **Orphan detection** - Identifies resources whose containers no longer exist
+
+## Event Flow
+
+### 1. Container Starts
+
+```
+Docker Event (start)
+  → Watcher receives event
+  → Parser extracts labels
+  → Reconciler compares desired vs actual state
+  → Operator creates/updates Cloudflare resources
+  → Storage records ownership
+```
+
+### 2. Container Stops
+
+```
+Docker Event (stop/die)
+  → Watcher receives event
+  → Reconciler checks cleanup policy
+  → If cleanup=true: Operator deletes resources, Storage removes records
+  → If cleanup=false: Storage marks resource as orphaned
+```
+
+### 3. Periodic Sync (Every 2 Minutes)
+
+```
+Timer fires
+  → Provider lists all running containers
+  → Parser extracts all labels
+  → Reconciler compares full desired state vs actual state
+  → Fixes any drift or missed events
+```
+
+## Agent Mode
+
+In multi-host deployments, Agents extend Labelgate's reach:
+
+```
+┌──────────┐  WebSocket   ┌──────────┐
+│  Agent   │ ──────────>  │  Main    │ ──> Cloudflare
+│ (Host A) │              │ Instance │
+└──────────┘              └──────────┘
+┌──────────┐  WebSocket        ▲
+│  Agent   │ ──────────────────┘
+│ (Host B) │
+└──────────┘
+```
+
+- Agents are lightweight: they only collect container labels and public IP
+- The main instance handles all Cloudflare API operations
+- Communication is via WebSocket with token-based authentication
+- Supports both outbound (agent→main) and inbound (main→agent) connections

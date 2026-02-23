@@ -1,0 +1,93 @@
+# Labelgate Example Configuration (TOML)
+# Copy this file to labelgate.toml and customize as needed.
+# All values can be overridden by environment variables with LABELGATE_ prefix.
+# Naming rule: TOML path a.b.c -> ENV LABELGATE_A_B_C
+
+# Core configuration
+label_prefix = "labelgate"
+log_level = "info"                # debug, info, warn, error
+log_format = "text"               # json, text
+mode = "main"                     # main, agent
+default_tunnel = "default"
+
+# Docker Provider configuration
+[docker]
+endpoint = "unix:///var/run/docker.sock"
+poll_interval = "2m"
+# filter_label = "labelgate.enable=true"
+
+# [docker.ssh]
+# key = "/path/to/id_rsa"
+# key_passphrase = ""
+# known_hosts = "/path/to/known_hosts"
+
+# [docker.tls]
+# ca = "/path/to/ca.pem"
+# cert = "/path/to/cert.pem"
+# key = "/path/to/key.pem"
+
+# Cloudflare configuration
+[cloudflare]
+api_token = "your-api-token-here"
+account_id = "your-account-id"
+tunnel_id = "your-tunnel-id"
+
+# Additional named credentials (for multi-account)
+# [cloudflare.credentials.personal]
+# api_token = "personal-token"
+# zones = ["example.com", "*.example.com"]
+
+# Additional named tunnels (beyond default)
+# [cloudflare.tunnels.secondary]
+# account_id = "account-id-2"
+# tunnel_id = "tunnel-id-2"
+# credential = "personal"
+
+# Sync configuration (reconciliation + resource lifecycle)
+[sync]
+interval = "1h"
+remove_delay = "0s"
+orphan_ttl = "0s"
+
+# Retry configuration (general retry policy for API calls and reconnection)
+[retry]
+attempts = 3
+delay = "1s"
+max_delay = "30s"
+backoff = 2.0
+
+# Database configuration
+[db]
+path = "/app/config/labelgate.db"
+retention = "168h"                # 7 days
+vacuum_interval = "24h"
+
+# HTTP API configuration
+[api]
+enabled = true
+address = ":8080"
+base_path = "/api"
+
+# Agent management (for main instance)
+[agent]
+enabled = false
+listen = ":8081"
+# accept_token = ""
+
+# [agent.tls]
+# cert = "/path/to/cert.pem"
+# key = "/path/to/key.pem"
+
+# Pre-configured agents
+# [agent.agents.remote-host-1]
+# token = "agent-token-1"
+# default_tunnel = "default"
+# connect_to = "ws://remote-host-1:8082/ws"
+
+# Agent connection (when mode = "agent")
+# [connect]
+# mode = "outbound"              # outbound, inbound
+# endpoint = "wss://main:8081/ws"
+# token = "agent-token"
+# agent_id = ""                  # auto from /etc/machine-id
+# heartbeat_interval = "30s"

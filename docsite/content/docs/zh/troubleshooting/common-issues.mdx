@@ -1,0 +1,172 @@
+---
+title: 常见问题
+description: Labelgate 常见问题的解决方案。
+---
+
+## 主机名冲突
+
+### DNS 和 Tunnel 使用相同主机名
+
+**问题：** 您看到类似 `hostname conflict: app.example.com is already used by tunnel service` 的错误
+
+**原因：** 同一主机名不能同时用于 DNS 记录和 Tunnel ingress 规则。Cloudflare Tunnel 会自动创建 CNAME 记录，因此添加手动 DNS 记录会产生冲突。
+
+**解决方案：** 为 DNS 和 Tunnel 使用不同的主机名，或每个主机名仅使用一种类型：
+
+```yaml
+# Use Tunnel only (recommended for most cases)
+labels:
+  labelgate.tunnel.web.hostname: "app.example.com"
+  labelgate.tunnel.web.service: "http://app:80"
+```
+
+### 多个容器声明相同主机名
+
+**问题：** 容器的标签因冲突错误而被忽略。
+
+**原因：** 另一个容器已经注册了该主机名。第一个容器优先。
+
+**解决方案：** 检查哪个容器拥有该主机名：
+
+```bash
+# Check Labelgate logs for conflict details
+docker compose logs labelgate | grep "conflict"
+```
+
+首先停止冲突的容器，然后启动新容器。
+
+## DNS 记录已存在
+
+**问题：** `DNS record already exists and is not managed by Labelgate`
+
+**原因：** Cloudflare 中存在具有相同主机名的 DNS 记录，但不是由 Labelgate 创建的（例如，通过仪表板手动创建）。
+
+**解决方案：** 从 Cloudflare 仪表板删除现有记录，或通过创建具有匹配设置的记录让 Labelgate 覆盖它。
+
+## Zone 未找到
+
+**问题：** `zone not found for hostname: app.example.com`
+
+**原因：** API token 无权访问包含您的主机名的 zone。
+
+**解决方案：**
+1. 在 [Cloudflare Dashboard > API Tokens](https://dash.cloudflare.com/profile/api-tokens) 中检查您的 API token 权限
+2. 确保为目标 zone 授予 `Zone:Read` 权限
+3. 验证域名是否存在于您的 Cloudflare 账户中
+
+## Tunnel 未连接
+
+**问题：** Labelgate 创建了 ingress 规则，但主机名返回 502 或连接错误。
+
+**原因：** `cloudflared` daemon 未运行或未连接到 tunnel。
+
+**解决方案：**
+1. 检查 cloudflared 是否正在运行：
+   ```bash
+   docker compose ps cloudflared
+   ```
+2. 检查 cloudflared 日志：
+   ```bash
+   docker compose logs cloudflared
+   ```
+3. 验证 tunnel token 是否正确
+4. 在 [Zero Trust Dashboard](https://one.dash.cloudflare.com/) 的 **Networks > Tunnels** 下检查 tunnel 状态
+
+## 公共 IP 检测失败
+
+**问题：** 带有 `target=auto` 的 DNS 记录未被创建。
+
+**原因：** Labelgate 未能检测到主机的公共 IP 地址。
+
+**解决方案：**
+- 检查 Labelgate 容器的互联网连接
+- 检查日志中的 IP 检测错误：
+  ```bash
+  docker compose logs labelgate | grep "public IP"
+  ```
+- 使用显式 IP 而不是 `auto`：
+  ```yaml
+  labels:
+    labelgate.dns.web.target: "203.0.113.1"
+  ```
+
+## API 速率限制
+
+**问题：** 日志中出现 `API rate limit reached` 错误。
+
+**原因：** Cloudflare API 的限制为每 5 分钟 1200 个请求。超过限制会导致 5 分钟封禁。
+
+**解决方案：**
+- Labelgate 会自动使用指数退避重试
+- 如果经常达到限制，减少托管资源的数量
+- 避免同时快速重启多个容器
+- 增加轮询间隔以减少协调频率：
+  ```bash
+  LABELGATE_DOCKER_POLL_INTERVAL=5m
+  ```
+
+## 资源未清理
+
+**问题：** 容器停止后，Cloudflare 资源仍然存在。
+
+**原因：** 默认情况下，Labelgate **不会**在容器停止时删除资源（`cleanup=false`）。这是一项安全功能。
+
+**解决方案：** 按服务或全局启用清理：
+
+```yaml
+# Per-service
+labels:
+  labelgate.dns.web.cleanup: "true"
+
+# Global
+# Set environment variable:
+# LABELGATE_SYNC_REMOVE_ON_STOP=true
+```
+
+## 容器重建（相同配置，新 ID）
+
+**问题：** 重建容器后，资源显示为冲突。
+
+**原因：** 新容器具有不同的 ID，但主机名配置相同。
+
+**解决方案：** 这是自动处理的。当旧容器不再存在且新容器声明相同主机名时，Labelgate 会转移所有权。无需操作 - 只需确保在启动新容器之前完全停止旧容器。
+
+## Agent 连接问题
+
+### Agent 无法连接
+
+**问题：** Agent 日志显示 `connection refused` 或 `timeout`。
+
+**解决方案：**
+1. 验证主实例端点是否可以从 agent 主机访问
+2. 检查 agent token 是否与主实例上配置的匹配
+3. 对于出站模式，确保主主机上的端口 8081（或您的自定义端口）已打开
+4. 如果使用加密连接，检查 TLS 证书
+
+### Agent 不断重连
+
+**问题：** Agent 日志显示重复的连接/断开循环。
+
+**解决方案：**
+- 这在网络不稳定期间是正常的 - agents 使用指数退避自动重连
+- 检查主实例日志中的认证错误
+- 验证主实例上的 agent token 是否未更改
+
+## Docker Socket 权限被拒绝
+
+**问题：** `permission denied while trying to connect to the Docker daemon socket`
+
+**解决方案：** 确保 Labelgate 可以访问 Docker socket：
+
+```yaml
+services:
+  labelgate:
+    image: labelgate:latest
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    # Option 1: Run as root (simplest)
+    user: root
+    # Option 2: Add to docker group
+    # group_add:
+    #   - docker
+```
