@@ -155,9 +155,14 @@ jobs:
           services:
             labelgate:
               image: ghcr.io/channinghe/labelgate:VERSION_PLACEHOLDER
+              container_name: labelgate
               restart: unless-stopped
+              # use command "stat -c '%g' /var/run/docker.sock" to get the group id of the docker socket
+              group_add:
+                - "REPLACE_WITH_GROUP_ID"
               volumes:
                 - /var/run/docker.sock:/var/run/docker.sock:ro
+                # Run the command "sudo chown -R 65532:65532 ./labelgate-data" to ensure the mount path has the correct ownership.
                 - ./labelgate-data:/app/config
               environment:
                 - LABELGATE_CLOUDFLARE_API_TOKEN
@@ -165,6 +170,7 @@ jobs:
                 - LABELGATE_CLOUDFLARE_TUNNEL_ID
               ports:
                 - "28111:8080"
+              network_mode: bridge
           ```
           COMPOSE
 
