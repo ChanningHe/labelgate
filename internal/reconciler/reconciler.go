@@ -3,8 +3,11 @@ package reconciler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -31,7 +34,8 @@ type Reconciler struct {
 	removeDelay time.Duration // delay before cleaning up orphaned CF resources
 	mu          sync.RWMutex
 	containers  map[string]*types.ParsedContainer   // containerID -> parsed container
-	agentData   map[string][]*types.ParsedContainer // agentID -> containers
+	agentData         map[string][]*types.ParsedContainer // agentID -> containers
+	agentFingerprints map[string]uint64                   // agentID -> data hash
 
 	// Channel to trigger reconciliation when agent data changes
 	agentTrigger chan struct{}
@@ -75,8 +79,9 @@ func NewReconciler(cfg *Config) *Reconciler {
 		orphanTTL:      cfg.OrphanTTL,
 		removeDelay:    cfg.RemoveDelay,
 		containers:     make(map[string]*types.ParsedContainer),
-		agentData:      make(map[string][]*types.ParsedContainer),
-		agentTrigger:   make(chan struct{}, 1),
+		agentData:         make(map[string][]*types.ParsedContainer),
+		agentFingerprints: make(map[string]uint64),
+		agentTrigger:      make(chan struct{}, 1),
 		expectedAgents: cfg.ExpectedAgents,
 		agentReady:     make(chan struct{}),
 		startedAt:      time.Now(),
@@ -655,16 +660,16 @@ func (r *Reconciler) resolveAccessReferences(containers []*types.ParsedContainer
 }
 
 // UpdateAgentData updates container data from an agent.
+// Only triggers reconciliation when the data has actually changed.
 func (r *Reconciler) UpdateAgentData(agentID string, containers []*types.ParsedContainer) {
+	fp := agentDataFingerprint(containers)
+
 	r.mu.Lock()
+	changed := r.agentFingerprints[agentID] != fp
 	r.agentData[agentID] = containers
+	r.agentFingerprints[agentID] = fp
 	allReady := r.checkExpectedAgentsLocked()
 	r.mu.Unlock()
-
-	log.Debug().
-		Str("agent", agentID).
-		Int("containers", len(containers)).
-		Msg("Updated agent data")
 
 	if allReady {
 		r.agentReadyOnce.Do(func() {
@@ -672,12 +677,43 @@ func (r *Reconciler) UpdateAgentData(agentID string, containers []*types.ParsedC
 		})
 	}
 
-	// Non-blocking send to trigger immediate reconciliation
+	if !changed {
+		log.Debug().
+			Str("agent", agentID).
+			Int("containers", len(containers)).
+			Msg("Agent data unchanged, skipping reconciliation trigger")
+		return
+	}
+
+	log.Debug().
+		Str("agent", agentID).
+		Int("containers", len(containers)).
+		Msg("Agent data updated, triggering reconciliation")
+
 	select {
 	case r.agentTrigger <- struct{}{}:
 	default:
-		// Reconciliation already pending, skip duplicate trigger
 	}
+}
+
+// agentDataFingerprint computes a fast hash for change detection.
+// Only hashes fields that affect reconciliation (ID, Name, Labels),
+// skipping volatile fields like State, Created, Started, Networks.
+func agentDataFingerprint(containers []*types.ParsedContainer) uint64 {
+	sorted := make([]*types.ParsedContainer, len(containers))
+	copy(sorted, containers)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].Info.ID < sorted[j].Info.ID
+	})
+
+	h := fnv.New64a()
+	for _, c := range sorted {
+		fmt.Fprintf(h, "%s\x00%s\x00", c.Info.ID, c.Info.Name)
+		labels, _ := json.Marshal(c.Info.Labels)
+		h.Write(labels)
+		h.Write([]byte{0})
+	}
+	return h.Sum64()
 }
 
 // checkExpectedAgentsLocked returns true if all expected agents have reported.
