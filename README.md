@@ -95,7 +95,7 @@ That's it. Labelgate watches your containers and syncs labels to Cloudflare auto
 > | `v0.1.0` | Exact version |
 > | `v0.1` | Latest patch in 0.1.x |
 > | `v0` | Latest minor in 0.x.x |
-> | `v0.1.0-full` | Alpine-based variant with shell and timezone data |
+> | `v0.1.0-full` | debug variant includes busybox shell |
 
 ## Features
 
