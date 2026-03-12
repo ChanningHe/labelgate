@@ -36,6 +36,11 @@ type Reconciler struct {
 	// Channel to trigger reconciliation when agent data changes
 	agentTrigger chan struct{}
 
+	// Expected agents tracking: defer initial reconcile until all report in
+	expectedAgents []string
+	agentReady     chan struct{}
+	agentReadyOnce sync.Once
+
 	// Sync state exposed for the API layer
 	startedAt     time.Time
 	lastSyncTime  time.Time
@@ -45,33 +50,36 @@ type Reconciler struct {
 
 // Config holds reconciler configuration.
 type Config struct {
-	Provider     provider.Provider
-	Storage      storage.Storage
-	LabelPrefix  string
-	DNSOperator  operator.DNSOperator
-	TunnelOp     operator.TunnelOperator
-	AccessOp     operator.AccessOperator
-	PollInterval time.Duration
-	OrphanTTL    time.Duration // 0 = never auto-clean orphans from DB
-	RemoveDelay  time.Duration // delay before cleaning up orphaned CF resources
+	Provider       provider.Provider
+	Storage        storage.Storage
+	LabelPrefix    string
+	DNSOperator    operator.DNSOperator
+	TunnelOp       operator.TunnelOperator
+	AccessOp       operator.AccessOperator
+	PollInterval   time.Duration
+	OrphanTTL      time.Duration // 0 = never auto-clean orphans from DB
+	RemoveDelay    time.Duration // delay before cleaning up orphaned CF resources
+	ExpectedAgents []string      // agent IDs that must report before initial reconcile
 }
 
 // NewReconciler creates a new reconciler.
 func NewReconciler(cfg *Config) *Reconciler {
 	return &Reconciler{
-		provider:     cfg.Provider,
-		storage:      cfg.Storage,
-		parser:       labels.NewParser(cfg.LabelPrefix),
-		dnsOp:        cfg.DNSOperator,
-		tunnelOp:     cfg.TunnelOp,
-		accessOp:     cfg.AccessOp,
-		interval:     cfg.PollInterval,
-		orphanTTL:    cfg.OrphanTTL,
-		removeDelay:  cfg.RemoveDelay,
-		containers:   make(map[string]*types.ParsedContainer),
-		agentData:    make(map[string][]*types.ParsedContainer),
-		agentTrigger: make(chan struct{}, 1),
-		startedAt:    time.Now(),
+		provider:       cfg.Provider,
+		storage:        cfg.Storage,
+		parser:         labels.NewParser(cfg.LabelPrefix),
+		dnsOp:          cfg.DNSOperator,
+		tunnelOp:       cfg.TunnelOp,
+		accessOp:       cfg.AccessOp,
+		interval:       cfg.PollInterval,
+		orphanTTL:      cfg.OrphanTTL,
+		removeDelay:    cfg.RemoveDelay,
+		containers:     make(map[string]*types.ParsedContainer),
+		agentData:      make(map[string][]*types.ParsedContainer),
+		agentTrigger:   make(chan struct{}, 1),
+		expectedAgents: cfg.ExpectedAgents,
+		agentReady:     make(chan struct{}),
+		startedAt:      time.Now(),
 	}
 }
 
@@ -80,6 +88,11 @@ func (r *Reconciler) Run(ctx context.Context) error {
 	// Initial sync
 	if err := r.syncContainers(ctx); err != nil {
 		log.Error().Err(err).Msg("Initial container sync failed")
+	}
+
+	// Wait for expected agents before initial reconcile to avoid false orphan detection
+	if len(r.expectedAgents) > 0 {
+		r.waitForAgents(ctx)
 	}
 
 	if err := r.reconcile(ctx); err != nil {
@@ -128,6 +141,40 @@ func (r *Reconciler) Run(ctx context.Context) error {
 				log.Error().Err(err).Msg("Periodic reconciliation failed")
 			}
 		}
+	}
+}
+
+// waitForAgents blocks until all expected agents have reported or the timeout expires.
+func (r *Reconciler) waitForAgents(ctx context.Context) {
+	const timeout = 5 * time.Second
+
+	log.Info().
+		Strs("expected_agents", r.expectedAgents).
+		Dur("timeout", timeout).
+		Msg("Waiting for expected agents before initial reconciliation")
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case <-r.agentReady:
+		log.Info().Msg("All expected agents reported, proceeding with initial reconciliation")
+	case <-timer.C:
+		r.mu.RLock()
+		var missing []string
+		for _, id := range r.expectedAgents {
+			if _, ok := r.agentData[id]; !ok {
+				missing = append(missing, id)
+			}
+		}
+		r.mu.RUnlock()
+
+		if len(missing) > 0 {
+			log.Warn().
+				Strs("missing_agents", missing).
+				Msg("Timed out waiting for agents, proceeding with initial reconciliation")
+		}
+	case <-ctx.Done():
 	}
 }
 
@@ -611,6 +658,7 @@ func (r *Reconciler) resolveAccessReferences(containers []*types.ParsedContainer
 func (r *Reconciler) UpdateAgentData(agentID string, containers []*types.ParsedContainer) {
 	r.mu.Lock()
 	r.agentData[agentID] = containers
+	allReady := r.checkExpectedAgentsLocked()
 	r.mu.Unlock()
 
 	log.Debug().
@@ -618,12 +666,29 @@ func (r *Reconciler) UpdateAgentData(agentID string, containers []*types.ParsedC
 		Int("containers", len(containers)).
 		Msg("Updated agent data")
 
+	if allReady {
+		r.agentReadyOnce.Do(func() {
+			close(r.agentReady)
+		})
+	}
+
 	// Non-blocking send to trigger immediate reconciliation
 	select {
 	case r.agentTrigger <- struct{}{}:
 	default:
 		// Reconciliation already pending, skip duplicate trigger
 	}
+}
+
+// checkExpectedAgentsLocked returns true if all expected agents have reported.
+// Must be called with r.mu held (read or write).
+func (r *Reconciler) checkExpectedAgentsLocked() bool {
+	for _, id := range r.expectedAgents {
+		if _, ok := r.agentData[id]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // RemoveAgentData removes container data for an agent.

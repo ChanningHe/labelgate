@@ -163,17 +163,26 @@ func runMain(ctx context.Context, cfg *config.Config) error {
 		log.Info().Msg("Access API permission check passed")
 	}
 
+	// Collect expected agent IDs from config
+	var expectedAgents []string
+	if cfg.Agent.Enabled {
+		for id := range cfg.Agent.Agents {
+			expectedAgents = append(expectedAgents, id)
+		}
+	}
+
 	// Initialize reconciler
 	rec := reconciler.NewReconciler(&reconciler.Config{
-		Provider:     dockerProvider,
-		Storage:      store,
-		LabelPrefix:  cfg.LabelPrefix,
-		DNSOperator:  dnsOperator,
-		TunnelOp:     tunnelOperator,
-		AccessOp:     accessOperator,
-		PollInterval: cfg.Docker.PollInterval,
-		OrphanTTL:    cfg.Sync.OrphanTTL,
-		RemoveDelay:  cfg.Sync.RemoveDelay,
+		Provider:       dockerProvider,
+		Storage:        store,
+		LabelPrefix:    cfg.LabelPrefix,
+		DNSOperator:    dnsOperator,
+		TunnelOp:       tunnelOperator,
+		AccessOp:       accessOperator,
+		PollInterval:   cfg.Docker.PollInterval,
+		OrphanTTL:      cfg.Sync.OrphanTTL,
+		RemoveDelay:    cfg.Sync.RemoveDelay,
+		ExpectedAgents: expectedAgents,
 	})
 
 	// Start agent server if enabled
