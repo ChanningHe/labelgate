@@ -8,6 +8,7 @@ docsite/.next/
 docsite/.source/
 docsite/.open-next/
 docsite/out/
+docsite/next-env.d.ts
 .wrangler/
 
 # dashboard
