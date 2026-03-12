@@ -104,7 +104,7 @@ That's it. Labelgate watches your containers and syncs labels to Cloudflare auto
 - [x] **Zero Trust Access** — Configure Cloudflare Access policies declaratively
 - [x] **Multi-host Agents** — Manage containers across multiple Docker hosts
 - [x] **Web Dashboard** — Built-in UI for monitoring
-- [x] **Secure & Lightweight** — Rootless, distroless Docker images by default, with sizes typically under 10 MiB
+- [x] **Secure & Lightweight** — Rootless, distroless Docker images by default, with sizes typically under 30 MiB
 
 
 
