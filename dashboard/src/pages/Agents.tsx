@@ -10,13 +10,18 @@ import {
   Divider,
   Box,
   Skeleton,
+  ActionIcon,
+  Tooltip,
 } from '@mantine/core';
+import { useState } from 'react';
 import {
   IconServer,
   IconWifi,
   IconWifiOff,
   IconWorldWww,
   IconStack2,
+  IconEye,
+  IconEyeOff,
 } from '@tabler/icons-react';
 import { StatusBadge } from '../components/StatusBadge';
 import { useAgents } from '../hooks/useAPI';
@@ -25,6 +30,14 @@ import { formatTime } from '../utils/format';
 
 export function Agents() {
   const { data: apiData, error, isLoading } = useAgents();
+  const [revealedIPs, setRevealedIPs] = useState<Set<string>>(new Set());
+
+  const toggleIP = (agentId: string) =>
+    setRevealedIPs((prev) => {
+      const next = new Set(prev);
+      next.has(agentId) ? next.delete(agentId) : next.add(agentId);
+      return next;
+    });
 
   // Only fall back to mock data in dev mode when the API is unreachable
   const useMock = !apiData && !!error && import.meta.env.DEV;
@@ -94,9 +107,29 @@ export function Agents() {
                         Public IP
                       </Text>
                     </Group>
-                    <Text size="sm" ff="monospace">
-                      {agent.public_ip}
-                    </Text>
+                    <Group gap={4}>
+                      <Text
+                        size="sm"
+                        ff="monospace"
+                        style={{
+                          filter: revealedIPs.has(agent.id) ? 'none' : 'blur(4px)',
+                          userSelect: revealedIPs.has(agent.id) ? 'text' : 'none',
+                          transition: 'filter 0.2s',
+                        }}
+                      >
+                        {agent.public_ip}
+                      </Text>
+                      <Tooltip label={revealedIPs.has(agent.id) ? 'Hide IP' : 'Show IP'} withArrow>
+                        <ActionIcon
+                          variant="subtle"
+                          size="xs"
+                          color="gray"
+                          onClick={() => toggleIP(agent.id)}
+                        >
+                          {revealedIPs.has(agent.id) ? <IconEyeOff size={12} /> : <IconEye size={12} />}
+                        </ActionIcon>
+                      </Tooltip>
+                    </Group>
                   </Group>
 
                   <Group justify="space-between">
