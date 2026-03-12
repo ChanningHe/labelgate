@@ -40,13 +40,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Generate tag
+      - name: Generate tags
         id: tag
         run: |
           BRANCH="${GITHUB_REF_NAME}"
           BRANCH_SAFE=$(echo "$BRANCH" | tr '/' '-')
           SHORT_SHA=$(echo "$GITHUB_SHA" | cut -c1-7)
-          echo "tag=${BRANCH_SAFE}-${SHORT_SHA}${{ matrix.suffix }}" >> "$GITHUB_OUTPUT"
+          SHA_TAG="${BRANCH_SAFE}-${SHORT_SHA}${{ matrix.suffix }}"
+          BRANCH_TAG="${BRANCH_SAFE}${{ matrix.suffix }}"
+          echo "tags=${IMAGE_BASE}:${SHA_TAG},${IMAGE_BASE}:${BRANCH_TAG}" >> "$GITHUB_OUTPUT"
           echo "version=${BRANCH_SAFE}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push
@@ -56,7 +58,7 @@ jobs:
           file: ${{ matrix.dockerfile }}
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ env.IMAGE_BASE }}:${{ steps.tag.outputs.tag }}
+          tags: ${{ steps.tag.outputs.tags }}
           build-args: |
             VERSION=${{ steps.tag.outputs.version }}
             COMMIT=${{ github.sha }}
