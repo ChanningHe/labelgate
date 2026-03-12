@@ -11,7 +11,7 @@ services:
   labelgate:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: docker/Dockerfile
     image: labelgate:latest
     container_name: labelgate
     restart: unless-stopped

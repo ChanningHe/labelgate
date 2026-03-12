@@ -14,20 +14,104 @@ permissions:
 env:
   REGISTRY: ghcr.io
   IMAGE_BASE: ghcr.io/channinghe/labelgate
+  # Pinned base images for reproducible builds
+  BASE_NONROOT: gcr.io/distroless/static-debian13:nonroot@sha256:01e550fdb7ab79ee7be5ff440a563a58f1fd000ad9e0c532e65c3d23f917f1c5
+  BASE_DEBUG: gcr.io/distroless/static-debian13:debug-nonroot@sha256:b80e889821affbb581c2743235fe72fca378182a64e7e6313c36aa9a60f6f244
 
 jobs:
-  docker:
-    name: Docker Images
+  # Phase 1: Build dashboard frontend once (output is platform-independent)
+  dashboard:
+    name: Build Dashboard
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: dashboard/yarn.lock
+
+      - name: Build dashboard
+        working-directory: dashboard
+        run: |
+          yarn install --frozen-lockfile
+          yarn build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-static
+          path: dashboard/static
+          retention-days: 1
+
+  # Phase 2: Cross-compile Go binaries (native speed, no QEMU)
+  binaries:
+    name: Binary ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    needs: dashboard
     strategy:
       matrix:
         include:
-          - dockerfile: Dockerfile
-            suffix: ""
-          - dockerfile: full.Dockerfile
-            suffix: "-full"
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dashboard-static
+          path: dashboard/static
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build binary
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          BRANCH="${GITHUB_REF_NAME}"
+          BRANCH_SAFE=$(echo "$BRANCH" | tr '/' '-')
+          SHORT_SHA=$(echo "$GITHUB_SHA" | cut -c1-7)
+          VERSION="${BRANCH_SAFE}-${SHORT_SHA}"
+          go build \
+            -ldflags "-s -w \
+              -X github.com/channinghe/labelgate/internal/version.Version=${VERSION} \
+              -X github.com/channinghe/labelgate/internal/version.Commit=${{ github.sha }} \
+              -X github.com/channinghe/labelgate/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -o labelgate-${{ matrix.goos }}-${{ matrix.goarch }} \
+            ./cmd/labelgate
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: labelgate-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: labelgate-${{ matrix.goos }}-${{ matrix.goarch }}
+          retention-days: 1
+
+  # Phase 3: Package pre-built binaries into multi-arch Docker images
+  docker:
+    name: Docker${{ matrix.suffix }}
+    runs-on: ubuntu-latest
+    needs: binaries
+    strategy:
+      matrix:
+        include:
+          - suffix: ""
+            base_image_env: BASE_NONROOT
+          - suffix: "-full"
+            base_image_env: BASE_DEBUG
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: labelgate-linux-*
+          path: docker-context
+          merge-multiple: true
 
       - uses: docker/setup-qemu-action@v3
 
@@ -49,18 +133,25 @@ jobs:
           SHA_TAG="${BRANCH_SAFE}-${SHORT_SHA}${{ matrix.suffix }}"
           BRANCH_TAG="${BRANCH_SAFE}${{ matrix.suffix }}"
           echo "tags=${IMAGE_BASE}:${SHA_TAG},${IMAGE_BASE}:${BRANCH_TAG}" >> "$GITHUB_OUTPUT"
-          echo "version=${BRANCH_SAFE}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Set base image
+        id: base
+        run: |
+          if [ "${{ matrix.base_image_env }}" = "BASE_NONROOT" ]; then
+            echo "image=${{ env.BASE_NONROOT }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "image=${{ env.BASE_DEBUG }}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: .
-          file: ${{ matrix.dockerfile }}
+          context: docker-context
+          file: docker/ci.Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.tag.outputs.tags }}
           build-args: |
-            VERSION=${{ steps.tag.outputs.version }}
-            COMMIT=${{ github.sha }}
-          cache-from: type=gha,scope=build-${{ matrix.suffix || 'default' }}
-          cache-to: type=gha,mode=max,scope=build-${{ matrix.suffix || 'default' }}
+            BASE_IMAGE=${{ steps.base.outputs.image }}
+          cache-from: type=gha,scope=ci${{ matrix.suffix || '-default' }}
+          cache-to: type=gha,mode=max,scope=ci${{ matrix.suffix || '-default' }}
