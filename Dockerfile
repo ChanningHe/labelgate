@@ -55,7 +55,7 @@ EXPOSE 8080 8081
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD wget -q --spider http://localhost:8080/api/health || exit 1
+    CMD ["/app/labelgate", "healthcheck"]
 
 # Default command
 ENTRYPOINT ["/app/labelgate"]

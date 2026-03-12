@@ -4,6 +4,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -35,6 +37,11 @@ func main() {
 	if *showVersion {
 		fmt.Printf("labelgate %s\n", version.Version)
 		os.Exit(0)
+	}
+
+	// Built-in healthcheck for distroless containers (no wget/curl available)
+	if flag.Arg(0) == "healthcheck" {
+		os.Exit(runHealthcheck(*configPath))
 	}
 
 	// Setup logger
@@ -229,6 +236,39 @@ func buildAgentConfigs(cfg *config.Config) map[string]*agent.AgentConfigEntry {
 	}
 
 	return result
+}
+
+// runHealthcheck performs an HTTP health check against the local API server.
+// It reuses the same config.Load path (env vars > config file > defaults)
+func runHealthcheck(configPath string) int {
+	addr := ":8080"
+	basePath := "/api"
+
+	if cfg, err := config.Load(configPath); err == nil {
+		addr = cfg.Api.Address
+		basePath = cfg.Api.BasePath
+	}
+
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "healthcheck: invalid address %q: %v\n", addr, err)
+		return 1
+	}
+
+	url := "http://localhost:" + port + basePath + "/health"
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "healthcheck failed: %v\n", err)
+		return 1
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		fmt.Fprintf(os.Stderr, "healthcheck failed: status %d\n", resp.StatusCode)
+		return 1
+	}
+	return 0
 }
 
 // runAgent runs labelgate in agent mode.

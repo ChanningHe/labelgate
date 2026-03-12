@@ -51,7 +51,7 @@ services:
       # - "8081:8081"
     
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/api/health"]
+      test: ["/app/labelgate", "healthcheck"]
       interval: 30s
       timeout: 3s
       retries: 3
