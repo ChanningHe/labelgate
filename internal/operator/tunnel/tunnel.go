@@ -160,7 +160,7 @@ func (o *TunnelOperatorImpl) reconcileTunnel(ctx context.Context, tunnelName str
 			Str("service", d.service.Service).
 			Str("container", d.container.Info.Name).
 			Str("tunnel", tunnelName).
-			Msg("Adding tunnel ingress rule")
+			Msg("Preparing tunnel ingress rule")
 	}
 
 	// Check if tunnel configuration actually changed before pushing
@@ -213,28 +213,35 @@ func (o *TunnelOperatorImpl) reconcileTunnel(ctx context.Context, tunnelName str
 	// Auto-create DNS CNAME records for tunnel hostnames
 	// Cloudflare API does not auto-create DNS records (unlike Dashboard UI)
 	if o.autoCreateDNS {
-		o.ensureTunnelDNSRecords(ctx, tunnelID, desiredMap)
+		o.ensureTunnelDNSRecords(ctx, tunnelID, desiredMap, current)
 	}
 
 	// Update storage for new/updated resources
 	for key, d := range desiredMap {
 		existing, exists := current[key]
 		if exists {
-			// Update existing — clear any previous error
-			existing.Service = d.service.Service
-			existing.CleanupEnabled = d.service.Cleanup
-			existing.AgentID = d.container.AgentID
-			existing.Status = storage.StatusActive
-			existing.LastError = ""
-			if err := o.storage.SaveResource(ctx, existing); err != nil {
-				log.Error().Err(err).Str("hostname", d.service.Hostname).Msg("Failed to update resource")
+			dirty := existing.Service != d.service.Service ||
+				existing.CleanupEnabled != d.service.Cleanup ||
+				existing.AgentID != d.container.AgentID ||
+				existing.Status != storage.StatusActive ||
+				existing.LastError != ""
+
+			if dirty {
+				existing.Service = d.service.Service
+				existing.CleanupEnabled = d.service.Cleanup
+				existing.AgentID = d.container.AgentID
+				existing.Status = storage.StatusActive
+				existing.LastError = ""
+				if err := o.storage.SaveResource(ctx, existing); err != nil {
+					log.Error().Err(err).Str("hostname", d.service.Hostname).Msg("Failed to update resource")
+				}
+
+				log.Debug().
+					Str("hostname", d.service.Hostname).
+					Str("container", d.container.Info.Name).
+					Msg("Updated tunnel ingress")
 			}
 			delete(current, key)
-
-			log.Debug().
-				Str("hostname", d.service.Hostname).
-				Str("container", d.container.Info.Name).
-				Msg("Updated tunnel ingress")
 		} else {
 		// Create new resource record
 		resource := &storage.ManagedResource{
@@ -288,13 +295,20 @@ func (o *TunnelOperatorImpl) reconcileTunnel(ctx context.Context, tunnelName str
 // ensureTunnelDNSRecords creates CNAME records for tunnel hostnames.
 // Cloudflare API does not auto-create DNS records when adding tunnel ingress rules
 // (unlike the Dashboard UI), so we need to create them manually.
-func (o *TunnelOperatorImpl) ensureTunnelDNSRecords(ctx context.Context, tunnelID string, desired map[string]*desiredTunnel) {
+// The current map is used to skip API calls for hostnames already tracked as active.
+func (o *TunnelOperatorImpl) ensureTunnelDNSRecords(ctx context.Context, tunnelID string, desired map[string]*desiredTunnel, current map[string]*storage.ManagedResource) {
 	// Target for tunnel CNAME: <tunnel_id>.cfargotunnel.com
 	tunnelTarget := tunnelID + ".cfargotunnel.com"
 
-	for _, d := range desired {
+	for key, d := range desired {
 		hostname := d.service.Hostname
 		if hostname == "" {
+			continue
+		}
+
+		// Skip DNS check for hostnames already active in storage —
+		// CNAME was verified in a previous reconcile cycle.
+		if res, ok := current[key]; ok && res.Status == storage.StatusActive {
 			continue
 		}
 
