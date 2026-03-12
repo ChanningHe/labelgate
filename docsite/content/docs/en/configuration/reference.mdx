@@ -3,6 +3,23 @@ title: Configuration Reference
 description: Complete reference for all Labelgate configuration options.
 ---
 
+## Naming Convention
+
+Every config file key maps directly to an environment variable:
+
+- Replace dots (`.`) with underscores (`_`)
+- Uppercase all letters
+- Add the `LABELGATE_` prefix
+
+| Config File | Environment Variable |
+|-------------|---------------------|
+| `log_level` | `LABELGATE_LOG_LEVEL` |
+| `docker.endpoint` | `LABELGATE_DOCKER_ENDPOINT` |
+| `sync.remove_delay` | `LABELGATE_SYNC_REMOVE_DELAY` |
+| `api.base_path` | `LABELGATE_API_BASE_PATH` |
+
+Environment variables always take priority over config file values.
+
 ## Basic Settings
 
 | Environment Variable | Config File Path | Default | Description |
@@ -41,19 +58,19 @@ The `TUNNEL_TOKEN` used by cloudflared to establish the tunnel connection is **n
 
 ## Sync & Lifecycle
 
+By default, Labelgate **does not** delete Cloudflare resources when a container stops. To enable deletion, set `cleanup: "true"` on each service label (see [DNS Labels](/docs/labels/dns), [Tunnel Labels](/docs/labels/tunnel)). Resources are then scheduled for deletion after `remove_delay`.
+
 | Environment Variable | Config File Path | Default | Description |
 |---------------------|------------------|---------|-------------|
 | `LABELGATE_SYNC_INTERVAL` | `sync.interval` | `1h` | Periodic reconciliation interval |
-| `LABELGATE_SYNC_REMOVE_DELAY` | `sync.remove_delay` | `0s` | Delay before removing resources |
-| `LABELGATE_SYNC_ORPHAN_TTL` | `sync.orphan_ttl` | `0` | Auto-clean orphaned resources (0 = never) |
+| `LABELGATE_SYNC_REMOVE_DELAY` | `sync.remove_delay` | `30m` | Delay before deleting resources when `cleanup=true` |
+| `LABELGATE_SYNC_ORPHAN_TTL` | `sync.orphan_ttl` | `0` | Auto-remove DB records for orphaned resources (0 = never) |
 
 ## Database
 
 | Environment Variable | Config File Path | Default | Description |
 |---------------------|------------------|---------|-------------|
 | `LABELGATE_DB_PATH` | `db.path` | `/app/config/labelgate.db` | SQLite database path |
-| `LABELGATE_DB_RETENTION` | `db.retention` | `168h` | How long to keep deleted records |
-| `LABELGATE_DB_VACUUM_INTERVAL` | `db.vacuum_interval` | `24h` | Database vacuum interval |
 
 ## API Server
 
@@ -62,6 +79,7 @@ The `TUNNEL_TOKEN` used by cloudflared to establish the tunnel connection is **n
 | `LABELGATE_API_ENABLED` | `api.enabled` | `true` | Enable HTTP API server |
 | `LABELGATE_API_ADDRESS` | `api.address` | `:8080` | Listen address |
 | `LABELGATE_API_BASE_PATH` | `api.base_path` | `/api` | API base path |
+| `LABELGATE_API_TOKEN` | `api.token` | - | Bearer token for API authentication (disabled if empty) |
 
 ## Retry Settings
 
@@ -79,6 +97,7 @@ The `TUNNEL_TOKEN` used by cloudflared to establish the tunnel connection is **n
 | `LABELGATE_AGENT_ENABLED` | `agent.enabled` | `false` | Enable agent WebSocket server |
 | `LABELGATE_AGENT_LISTEN` | `agent.listen` | `:8081` | Agent server listen address |
 | `LABELGATE_AGENT_ACCEPT_TOKEN` | `agent.accept_token` | - | Shared token to accept any agent |
+| `LABELGATE_AGENT_TLS_CA` | `agent.tls.ca` | - | TLS CA certificate |
 | `LABELGATE_AGENT_TLS_CERT` | `agent.tls.cert` | - | TLS certificate for agent server |
 | `LABELGATE_AGENT_TLS_KEY` | `agent.tls.key` | - | TLS key for agent server |
 
@@ -92,6 +111,9 @@ The `TUNNEL_TOKEN` used by cloudflared to establish the tunnel connection is **n
 | `LABELGATE_CONNECT_TOKEN` | `connect.token` | - | Authentication token |
 | `LABELGATE_CONNECT_AGENT_ID` | `connect.agent_id` | Auto from `/etc/machine-id` | Agent identifier |
 | `LABELGATE_CONNECT_HEARTBEAT_INTERVAL` | `connect.heartbeat_interval` | `30s` | Heartbeat interval |
+| `LABELGATE_CONNECT_TLS_CA` | `connect.tls.ca` | - | TLS CA certificate |
+| `LABELGATE_CONNECT_TLS_CERT` | `connect.tls.cert` | - | TLS client certificate |
+| `LABELGATE_CONNECT_TLS_KEY` | `connect.tls.key` | - | TLS client key |
 
 ## Other
 
@@ -106,26 +128,28 @@ For managing multiple Cloudflare accounts or zones with different tokens, use a 
 
 ```yaml
 cloudflare:
-  api_token: ${CF_DEFAULT_TOKEN}
+  api_token: your-default-token
 
   credentials:
     personal:
-      api_token: ${CF_PERSONAL_TOKEN}
+      api_token: your-personal-token
       zones:
         - example.com
         - "*.example.com"
     company:
-      api_token: ${CF_COMPANY_TOKEN}
+      api_token: your-company-token
       zones:
         - company.io
         - company.com
 
   tunnels:
     secondary:
-      account_id: ${CF_ACCOUNT_ID_2}
-      tunnel_id: ${CF_TUNNEL_ID_2}
+      account_id: your-account-id-2
+      tunnel_id: your-tunnel-id-2
       credential: company
 ```
+
+Secrets should still be passed via environment variables — see [Hybrid Mode](/docs/configuration#3-hybrid-mode).
 
 ### Credential Resolution Order
 
@@ -152,12 +176,14 @@ docker:
   poll_interval: 2m
 
 cloudflare:
-  api_token: ${CF_API_TOKEN}
-  account_id: ${CF_ACCOUNT_ID}
-  tunnel_id: ${CF_TUNNEL_ID}
+  # Set via LABELGATE_CLOUDFLARE_API_TOKEN environment variable
+  api_token: ""
+  account_id: ""
+  tunnel_id: ""
 
 sync:
   interval: 1h
+  remove_delay: 30m
 
 db:
   path: /app/config/labelgate.db

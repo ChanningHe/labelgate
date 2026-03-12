@@ -111,16 +111,18 @@ docker compose logs labelgate | grep "conflict"
 
 **原因：** 默认情况下，Labelgate **不会**在容器停止时删除资源（`cleanup=false`）。这是一项安全功能。
 
-**解决方案：** 按服务或全局启用清理：
+**解决方案：** 在服务上设置 `cleanup` 标签：
 
 ```yaml
-# Per-service
 labels:
   labelgate.dns.web.cleanup: "true"
+  labelgate.tunnel.web.cleanup: "true"
+```
 
-# Global
-# Set environment variable:
-# LABELGATE_SYNC_REMOVE_ON_STOP=true
+资源将在清理延迟后删除（默认：`30m`）。修改延迟：
+
+```bash
+LABELGATE_SYNC_REMOVE_DELAY=5m
 ```
 
 ## 容器重建（相同配置，新 ID）

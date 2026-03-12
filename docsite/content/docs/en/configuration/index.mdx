@@ -3,7 +3,7 @@ title: Configuration Overview
 description: Learn about the different ways to configure Labelgate.
 ---
 
-Labelgate uses a flexible configuration system with three modes:
+Labelgate supports three configuration modes. All options follow the same naming convention — see the [Configuration Reference](/docs/configuration/reference) for the complete list.
 
 ## Configuration Modes
 
@@ -23,69 +23,40 @@ This is the simplest approach and is used in the [Getting Started](/docs/getting
 
 Use a YAML config file for more complex setups (e.g., multi-credential, multi-tunnel).
 
+```yaml
+# labelgate.yaml
+cloudflare:
+  api_token: your-cloudflare-api-token
+  account_id: your-account-id
+  tunnel_id: your-tunnel-id
+```
+
 Specify the config file path via the `LABELGATE_CONFIG` environment variable:
 
 ```bash
 LABELGATE_CONFIG=/path/to/labelgate.yaml
 ```
 
-If `LABELGATE_CONFIG` is not set, Labelgate will rely entirely on environment variables and defaults.
+If `LABELGATE_CONFIG` is not set, Labelgate also checks `./labelgate.yaml` and `/etc/labelgate/labelgate.yaml`.
 
 ### 3. Hybrid Mode
 
-Combine both: use a config file for base settings and environment variables for overrides.
+Combine both: use a config file for non-sensitive settings and environment variables for secrets.
 
 **Priority: Environment Variables > Config File > Defaults**
 
-This is useful for keeping secrets out of config files:
-
 ```yaml
-# labelgate.yaml - base config
-docker:
-  endpoint: unix:///var/run/docker.sock
-
+# labelgate.yaml - config file for non-sensitive settings
 cloudflare:
-  api_token: ${CF_API_TOKEN}  # Reference env var
-  account_id: ${CF_ACCOUNT_ID}
-  tunnel_id: ${CF_TUNNEL_ID}
+  account_id: your-account-id
+  tunnel_id: your-tunnel-id
 ```
-
-## Cleanup Policy
-
-By default, Labelgate does **not** delete Cloudflare resources when a container stops. This is a safety measure to prevent accidental deletion.
-
-You can enable cleanup in three ways:
-
-### Global Setting
 
 ```bash
-LABELGATE_SYNC_REMOVE_ON_STOP=true
-```
-
-### Per-Service Label
-
-```yaml
-labels:
-  labelgate.dns.web.cleanup: "true"
-  labelgate.tunnel.web.cleanup: "true"
-```
-
-### Cleanup Delay
-
-Add a delay before cleaning up (useful for rolling deployments):
-
-```bash
-LABELGATE_SYNC_REMOVE_DELAY=30s
-```
-
-### Orphan Resource TTL
-
-Automatically clean up resources whose containers no longer exist:
-
-```bash
-LABELGATE_SYNC_ORPHAN_TTL=24h  # 0 = never auto-clean
+# Secrets via environment variables (override config file values)
+LABELGATE_CLOUDFLARE_API_TOKEN=your-token
 ```
 
 ## Next Steps
 
-- [Configuration Reference](/docs/configuration/reference) - Full list of all environment variables and config file options
+- [Configuration Reference](/docs/configuration/reference) - Complete list of all options, naming convention, and multi-credential setup

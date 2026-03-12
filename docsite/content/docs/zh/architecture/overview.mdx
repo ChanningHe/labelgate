@@ -8,11 +8,11 @@ description: Labelgate 的设计原理及其组件如何协同工作。
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                    Provider Layer                        │
-│  ┌────────────────┐            ┌────────────────┐       │
-│  │ Docker Provider│            │ K8s Provider   │       │
-│  │ (unix/tcp/ssh) │            │ (planned)      │       │
-│  └───────┬────────┘            └────────────────┘       │
-└──────────┼──────────────────────────────────────────────┘
+│           ┌────────────────────────────┐                │
+│           │      Docker Provider       │                │
+│           │  (unix socket / tcp / ssh) │                │
+│           └──────────────┬─────────────┘                │
+└──────────────────────────┼──────────────────────────────┘
            │ Container Events + Labels
            ▼
 ┌─────────────────────────────────────────────────────────┐
@@ -119,10 +119,10 @@ Docker Event (stop/die)
   → If cleanup=false: Storage marks resource as orphaned
 ```
 
-### 3. 定期同步（每 2 分钟）
+### 3. 定期同步
 
 ```
-Timer fires
+Timer fires（Docker 轮询默认每 2m，完整协调默认每 1h）
   → Provider lists all running containers
   → Parser extracts all labels
   → Reconciler compares full desired state vs actual state

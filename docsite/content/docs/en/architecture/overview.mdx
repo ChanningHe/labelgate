@@ -8,11 +8,11 @@ description: How Labelgate is designed and how its components work together.
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                    Provider Layer                        │
-│  ┌────────────────┐            ┌────────────────┐       │
-│  │ Docker Provider│            │ K8s Provider   │       │
-│  │ (unix/tcp/ssh) │            │ (planned)      │       │
-│  └───────┬────────┘            └────────────────┘       │
-└──────────┼──────────────────────────────────────────────┘
+│           ┌────────────────────────────┐                │
+│           │      Docker Provider       │                │
+│           │  (unix socket / tcp / ssh) │                │
+│           └──────────────┬─────────────┘                │
+└──────────────────────────┼──────────────────────────────┘
            │ Container Events + Labels
            ▼
 ┌─────────────────────────────────────────────────────────┐
@@ -119,10 +119,10 @@ Docker Event (stop/die)
   → If cleanup=false: Storage marks resource as orphaned
 ```
 
-### 3. Periodic Sync (Every 2 Minutes)
+### 3. Periodic Sync
 
 ```
-Timer fires
+Timer fires (default: every 2m for Docker polling, 1h for full reconciliation)
   → Provider lists all running containers
   → Parser extracts all labels
   → Reconciler compares full desired state vs actual state

@@ -5,9 +5,9 @@ description: How to deploy cloudflared alongside Labelgate.
 
 Labelgate manages Tunnel ingress rules via the Cloudflare API, but you still need a running `cloudflared` daemon to establish the tunnel connection. Here's how to set it up.
 
-## Recommended: Remote Config with Tunnel Token
+## Tunnel Token (Recommended)
 
-This is the best approach for use with Labelgate. The tunnel configuration is managed remotely via the Cloudflare API, so cloudflared automatically picks up changes made by Labelgate without needing a restart.
+The tunnel configuration is managed remotely via the Cloudflare API, so cloudflared automatically picks up changes made by Labelgate without needing a restart.
 
 ```yaml
 services:
@@ -20,41 +20,6 @@ services:
 <Callout type="info">
 When Labelgate adds or removes ingress rules via the API, cloudflared detects the changes and applies them automatically. No restart needed.
 </Callout>
-
-## Alternative: Tunnel Token (Simple)
-
-If you prefer minimal configuration:
-
-```yaml
-services:
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    restart: unless-stopped
-    command: tunnel run
-    environment:
-      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
-```
-
-## Alternative: Credentials File
-
-For environments where you manage credentials as files:
-
-```yaml
-services:
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    restart: unless-stopped
-    command: tunnel --config /etc/cloudflared/config.yml run
-    volumes:
-      - ./cloudflared:/etc/cloudflared:ro
-```
-
-Where `cloudflared/config.yml` contains:
-
-```yaml
-tunnel: your-tunnel-id
-credentials-file: /etc/cloudflared/credentials.json
-```
 
 ## Getting Your Tunnel Token
 

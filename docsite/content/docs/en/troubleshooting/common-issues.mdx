@@ -111,16 +111,18 @@ Stop the conflicting container first, then start the new one.
 
 **Cause:** By default, Labelgate does **not** delete resources when containers stop (`cleanup=false`). This is a safety feature.
 
-**Solution:** Enable cleanup per-service or globally:
+**Solution:** Enable cleanup via the `cleanup` label on each service:
 
 ```yaml
-# Per-service
 labels:
   labelgate.dns.web.cleanup: "true"
+  labelgate.tunnel.web.cleanup: "true"
+```
 
-# Global
-# Set environment variable:
-# LABELGATE_SYNC_REMOVE_ON_STOP=true
+Resources are deleted after the cleanup delay (default: `30m`). To change the delay:
+
+```bash
+LABELGATE_SYNC_REMOVE_DELAY=5m
 ```
 
 ## Container Rebuild (Same Config, New ID)

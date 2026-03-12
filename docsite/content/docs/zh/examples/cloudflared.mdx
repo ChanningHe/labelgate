@@ -5,9 +5,9 @@ description: 如何与 Labelgate 一起部署 cloudflared。
 
 Labelgate 通过 Cloudflare API 管理 Tunnel 入口规则，但您仍需要运行 `cloudflared` 守护进程来建立隧道连接。以下是设置方法。
 
-## 推荐：使用隧道令牌的远程配置
+## 隧道令牌（推荐）
 
-这是与 Labelgate 一起使用的最佳方法。隧道配置通过 Cloudflare API 远程管理，因此 cloudflared 会自动获取 Labelgate 所做的更改，无需重启。
+隧道配置通过 Cloudflare API 远程管理，cloudflared 会自动获取 Labelgate 所做的更改，无需重启。
 
 ```yaml
 services:
@@ -21,42 +21,7 @@ services:
 当 Labelgate 通过 API 添加或删除入口规则时，cloudflared 会检测到更改并自动应用它们。无需重启。
 </Callout>
 
-## 替代方案：隧道令牌（简单）
-
-如果您更喜欢最小配置：
-
-```yaml
-services:
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    restart: unless-stopped
-    command: tunnel run
-    environment:
-      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
-```
-
-## 替代方案：凭据文件
-
-对于将凭据作为文件管理的环境：
-
-```yaml
-services:
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    restart: unless-stopped
-    command: tunnel --config /etc/cloudflared/config.yml run
-    volumes:
-      - ./cloudflared:/etc/cloudflared:ro
-```
-
-其中 `cloudflared/config.yml` 包含：
-
-```yaml
-tunnel: your-tunnel-id
-credentials-file: /etc/cloudflared/credentials.json
-```
-
-## 获取您的隧道令牌
+## 获取隧道令牌
 
 1. 访问 [Cloudflare Zero Trust Dashboard](https://one.dash.cloudflare.com/)
 2. 导航到 **Networks > Tunnels**
@@ -85,7 +50,7 @@ services:
   webapp:
     image: nginx:alpine
     labels:
-      # Use the service name "webapp", not "localhost"
+      # 使用服务名称 "webapp"，不要用 "localhost"
       labelgate.tunnel.web.hostname: "app.example.com"
       labelgate.tunnel.web.service: "http://webapp:80"
 ```
