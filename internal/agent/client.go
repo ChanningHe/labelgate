@@ -34,11 +34,19 @@ func NewClient(cfg *config.Config, prov provider.Provider) *Client {
 //   - MaxDelay: cap after exponential backoff
 //   - Backoff:  delay multiplier per attempt
 func (c *Client) Run(ctx context.Context) error {
+	log.Info().
+		Str("agent_id", c.getAgentID()).
+		Str("endpoint", c.config.Connect.Endpoint).
+		Dur("heartbeat_interval", c.config.Connect.HeartbeatInterval).
+		Int("max_retry_attempts", c.config.Retry.Attempts).
+		Msg("Agent outbound client starting")
+
 	// Connect to Docker provider
 	if err := c.provider.Connect(ctx); err != nil {
 		return fmt.Errorf("failed to connect to provider: %w", err)
 	}
 	defer c.provider.Close()
+	log.Info().Msg("Docker provider connected")
 
 	retryCount := 0
 	currentDelay := c.config.Retry.Delay
@@ -79,6 +87,8 @@ func (c *Client) Run(ctx context.Context) error {
 		// Connection successful — reset retry state
 		retryCount = 0
 		currentDelay = c.config.Retry.Delay
+
+		log.Info().Msg("Connected to main instance, entering communication loop")
 
 		// Run communication loop (blocks until disconnect)
 		c.runLoop(ctx)

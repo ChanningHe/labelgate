@@ -55,6 +55,8 @@ func (a *agentCore) setConn(conn *websocket.Conn) {
 // authenticate sends auth message and waits for ack from Main.
 func (a *agentCore) authenticate(conn *websocket.Conn) error {
 	agentID := a.getAgentID()
+	log.Debug().Str("agent_id", agentID).Msg("Sending authentication request")
+
 	auth := &AuthPayload{
 		AgentID: agentID,
 		Token:   a.config.Connect.Token,
@@ -97,6 +99,11 @@ func (a *agentCore) authenticate(conn *websocket.Conn) error {
 func (a *agentCore) runLoop(ctx context.Context) {
 	// Create new done channel
 	a.done = make(chan struct{})
+
+	log.Info().
+		Str("agent_id", a.getAgentID()).
+		Dur("heartbeat_interval", a.config.Connect.HeartbeatInterval).
+		Msg("Communication loop started, sending initial report")
 
 	// Start read/write goroutines
 	go a.readPump()
@@ -210,6 +217,11 @@ func (a *agentCore) handleQuery(msg *Message) {
 		return
 	}
 
+	log.Info().
+		Str("action", query.Action).
+		Str("request_id", msg.RequestID).
+		Msg("Handling query from main")
+
 	var data interface{}
 	var err error
 
@@ -247,6 +259,11 @@ func (a *agentCore) handleCommand(msg *Message) {
 		a.sendErrorResponse(msg.RequestID, "invalid_payload", err.Error())
 		return
 	}
+
+	log.Info().
+		Str("action", cmd.Action).
+		Str("request_id", msg.RequestID).
+		Msg("Handling command from main")
 
 	switch cmd.Action {
 	case CommandActionRefresh:
@@ -290,6 +307,18 @@ func (a *agentCore) sendReport() {
 
 	select {
 	case a.send <- msg:
+		log.Info().
+			Str("agent_id", a.getAgentID()).
+			Int("containers", len(containerData)).
+			Msg("Report sent to main instance")
+
+		for _, cd := range containerData {
+			log.Debug().
+				Str("container", cd.Name).
+				Str("id", cd.ID[:12]).
+				Str("image", cd.Image).
+				Msg("Reported container")
+		}
 	default:
 		log.Warn().Msg("Send buffer full, dropping report")
 	}
@@ -343,6 +372,10 @@ func (a *agentCore) watchContainers(ctx context.Context, notify chan<- struct{})
 				continue
 			}
 			if len(containers) != lastCount {
+				log.Info().
+					Int("previous", lastCount).
+					Int("current", len(containers)).
+					Msg("Container count changed, triggering report")
 				lastCount = len(containers)
 				select {
 				case notify <- struct{}{}:
@@ -361,6 +394,8 @@ func (a *agentCore) disconnect() {
 	if !a.connected {
 		return
 	}
+
+	log.Info().Msg("Disconnecting from main instance")
 
 	a.connected = false
 	close(a.done)

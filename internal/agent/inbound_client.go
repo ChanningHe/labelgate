@@ -212,6 +212,8 @@ func (s *Server) dialInboundAgent(ctx context.Context, expectedAgentID, endpoint
 		<-done
 	}
 
+	log.Info().Str("agent_id", expectedAgentID).Msg("Inbound agent connection closed")
+
 	return nil
 }
 

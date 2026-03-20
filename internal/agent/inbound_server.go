@@ -37,11 +37,18 @@ func NewInboundListener(cfg *config.Config, prov provider.Provider) *InboundList
 
 // Run starts the inbound listener with reconnection support.
 func (l *InboundListener) Run(ctx context.Context) error {
+	log.Info().
+		Str("agent_id", l.getAgentID()).
+		Str("listen", l.config.Connect.Listen).
+		Dur("heartbeat_interval", l.config.Connect.HeartbeatInterval).
+		Msg("Agent inbound listener starting")
+
 	// Connect to Docker provider
 	if err := l.provider.Connect(ctx); err != nil {
 		return fmt.Errorf("failed to connect to provider: %w", err)
 	}
 	defer l.provider.Close()
+	log.Info().Msg("Docker provider connected")
 
 	listenAddr := l.config.Connect.Listen
 	if listenAddr == "" {

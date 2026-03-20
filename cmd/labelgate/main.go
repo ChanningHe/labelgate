@@ -282,6 +282,12 @@ func runHealthcheck(configPath string) int {
 
 // runAgent runs labelgate in agent mode.
 func runAgent(ctx context.Context, cfg *config.Config) error {
+	log.Info().
+		Str("agent_id", cfg.Connect.AgentID).
+		Str("connect_mode", string(cfg.Connect.Mode)).
+		Str("docker_endpoint", cfg.Docker.Endpoint).
+		Msg("Agent mode configuration")
+
 	// Initialize Docker provider
 	dockerProvider := docker.NewDockerProvider(&cfg.Docker)
 

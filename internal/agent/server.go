@@ -226,6 +226,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	log.Info().
 		Str("agent_id", auth.AgentID).
 		Str("remote", conn.RemoteAddr().String()).
+		Str("version", auth.Version).
 		Msg("Agent connected")
 
 	// Persist agent to storage
@@ -383,10 +384,16 @@ func (s *Server) handleReport(agent *AgentConnection, msg *Message) {
 		}
 	}
 
-	log.Debug().
+	containerNames := make([]string, 0, len(report.Containers))
+	for _, cd := range report.Containers {
+		containerNames = append(containerNames, cd.Name)
+	}
+
+	log.Info().
 		Str("agent", agent.ID).
 		Int("containers", len(report.Containers)).
-		Msg("Received report")
+		Strs("container_names", containerNames).
+		Msg("Received agent report")
 
 	s.sendAck(agent.Conn, msg.RequestID)
 }
@@ -498,6 +505,8 @@ func (s *Server) SendQuery(agentID string, action string) error {
 		return fmt.Errorf("agent not connected: %s", agentID)
 	}
 
+	log.Debug().Str("agent_id", agentID).Str("action", action).Msg("Sending query to agent")
+
 	msg, err := NewMessageWithID(MessageTypeQuery, uuid.New().String(), &QueryPayload{
 		Action: action,
 	})
@@ -522,6 +531,8 @@ func (s *Server) SendCommand(agentID string, action string) error {
 	if !ok || !agent.Connected {
 		return fmt.Errorf("agent not connected: %s", agentID)
 	}
+
+	log.Debug().Str("agent_id", agentID).Str("action", action).Msg("Sending command to agent")
 
 	msg, err := NewMessageWithID(MessageTypeCommand, uuid.New().String(), &CommandPayload{
 		Action: action,
