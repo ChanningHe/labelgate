@@ -73,20 +73,27 @@ func (a *AccessClient) FindExistingAccessApp(ctx context.Context, hostname strin
 // This is the main entry point used by the Access Operator.
 //
 // Flow:
-//  1. Create account-level reusable policies via ZeroTrust.Access.Policies.New
+//  1. Find or create account-level reusable policies
 //  2. Create or update the Access Application, linking policies via the Policies field
+//  3. Clean up old unreferenced policies from the previous app state
 func (a *AccessClient) EnsureAccessForHostname(ctx context.Context, hostname string, policyDef *types.AccessPolicyDef, existingAppID string) (string, error) {
 	if a.accountID == "" {
 		return "", fmt.Errorf("account ID is required for access operations")
 	}
 
-	// Step 1: Create reusable policies at the account level
+	// Step 1: Collect old policy IDs before changes (for cleanup later)
+	var oldPolicyIDs []string
+	if existingAppID != "" {
+		oldPolicyIDs = a.listAppPolicyIDs(ctx, existingAppID)
+	}
+
+	// Step 2: Find or create reusable policies at the account level
 	var policyLinks []policyLink
 	for i := range policyDef.Policies {
 		policy := &policyDef.Policies[i]
-		policyID, err := a.createReusablePolicy(ctx, policy, i)
+		policyID, err := a.ensureReusablePolicy(ctx, policy, i)
 		if err != nil {
-			return "", fmt.Errorf("failed to create reusable policy %d for %s: %w", i, hostname, err)
+			return "", fmt.Errorf("failed to ensure reusable policy %d for %s: %w", i, hostname, err)
 		}
 		policyLinks = append(policyLinks, policyLink{
 			ID:         policyID,
@@ -94,7 +101,7 @@ func (a *AccessClient) EnsureAccessForHostname(ctx context.Context, hostname str
 		})
 	}
 
-	// Step 2: Create or update the application with policy links
+	// Step 3: Create or update the application with policy links
 	appName := policyDef.AppName
 	if appName == "" {
 		appName = fmt.Sprintf("labelgate-%s", policyDef.Name)
@@ -102,9 +109,6 @@ func (a *AccessClient) EnsureAccessForHostname(ctx context.Context, hostname str
 
 	var appID string
 	if existingAppID != "" {
-		// Delete old policies linked to this app before updating
-		a.cleanupOldAppPolicies(ctx, existingAppID)
-
 		err := a.updateApplication(ctx, existingAppID, hostname, appName, policyDef.SessionDuration, policyLinks)
 		if err != nil {
 			return "", err
@@ -118,6 +122,17 @@ func (a *AccessClient) EnsureAccessForHostname(ctx context.Context, hostname str
 		}
 	}
 
+	// Step 4: Clean up old policies that are no longer referenced by this app
+	newPolicyIDs := make(map[string]bool)
+	for _, link := range policyLinks {
+		newPolicyIDs[link.ID] = true
+	}
+	for _, oldID := range oldPolicyIDs {
+		if !newPolicyIDs[oldID] {
+			a.tryDeleteReusablePolicy(ctx, oldID)
+		}
+	}
+
 	return appID, nil
 }
 
@@ -127,11 +142,23 @@ type policyLink struct {
 	Precedence int64
 }
 
-// createReusablePolicy creates an account-level reusable Access Policy.
-func (a *AccessClient) createReusablePolicy(ctx context.Context, policy *types.AccessPolicy, index int) (string, error) {
+// ensureReusablePolicy finds an existing reusable policy by name or creates a new one.
+func (a *AccessClient) ensureReusablePolicy(ctx context.Context, policy *types.AccessPolicy, index int) (string, error) {
 	policyName := policy.Name
 	if policyName == "" {
 		policyName = fmt.Sprintf("labelgate-%s-%d", policy.Decision, index)
+	}
+
+	// Try to find an existing reusable policy with the same name
+	existingID, err := a.findReusablePolicyByName(ctx, policyName)
+	if err != nil {
+		log.Warn().Err(err).Str("policy_name", policyName).Msg("Failed to search for existing policy, will create new")
+	} else if existingID != "" {
+		log.Debug().
+			Str("policy_id", existingID).
+			Str("policy_name", policyName).
+			Msg("Reusing existing Access Policy")
+		return existingID, nil
 	}
 
 	includeRules := buildAccessRules(policy.Include)
@@ -163,6 +190,56 @@ func (a *AccessClient) createReusablePolicy(ctx context.Context, policy *types.A
 		Msg("Created reusable Access Policy")
 
 	return result.ID, nil
+}
+
+// findReusablePolicyByName searches account-level reusable policies for a matching name.
+func (a *AccessClient) findReusablePolicyByName(ctx context.Context, name string) (string, error) {
+	policies, err := a.client.API().ZeroTrust.Access.Policies.List(ctx, zero_trust.AccessPolicyListParams{
+		AccountID: cf.F(a.accountID),
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to list reusable policies: %w", err)
+	}
+
+	for _, p := range policies.Result {
+		if p.Name == name {
+			return p.ID, nil
+		}
+	}
+	return "", nil
+}
+
+// listAppPolicyIDs returns the IDs of policies currently linked to an application.
+func (a *AccessClient) listAppPolicyIDs(ctx context.Context, appID string) []string {
+	policies, err := a.client.API().ZeroTrust.Access.Applications.Policies.List(ctx, appID, zero_trust.AccessApplicationPolicyListParams{
+		AccountID: cf.F(a.accountID),
+	})
+	if err != nil {
+		log.Warn().Err(err).Str("app_id", appID).Msg("Failed to list app policies")
+		return nil
+	}
+	ids := make([]string, 0, len(policies.Result))
+	for _, p := range policies.Result {
+		ids = append(ids, p.ID)
+	}
+	return ids
+}
+
+// tryDeleteReusablePolicy attempts to delete a reusable policy.
+// Silently ignores 409 (still in use) and 404 (already gone) errors.
+func (a *AccessClient) tryDeleteReusablePolicy(ctx context.Context, policyID string) {
+	_, err := a.client.API().ZeroTrust.Access.Policies.Delete(ctx, policyID, zero_trust.AccessPolicyDeleteParams{
+		AccountID: cf.F(a.accountID),
+	})
+	if err != nil {
+		log.Debug().Err(err).
+			Str("policy_id", policyID).
+			Msg("Could not delete old reusable policy (may still be in use)")
+	} else {
+		log.Debug().
+			Str("policy_id", policyID).
+			Msg("Cleaned up old reusable policy")
+	}
 }
 
 // createApplication creates a new Access Application with linked policies.
@@ -234,18 +311,16 @@ func (a *AccessClient) updateApplication(ctx context.Context, appID, hostname, a
 	return nil
 }
 
-// DeleteAccessApplication deletes an Access Application.
-// Associated reusable policies are NOT automatically deleted by Cloudflare,
-// but they become unlinked and can be cleaned up separately if needed.
+// DeleteAccessApplication deletes an Access Application and its linked policies.
 func (a *AccessClient) DeleteAccessApplication(ctx context.Context, appID string) error {
 	if a.accountID == "" {
 		return fmt.Errorf("account ID is required for access operations")
 	}
 
-	// First, get the app's linked policies so we can clean them up
-	a.cleanupOldAppPolicies(ctx, appID)
+	// Collect linked policy IDs before deleting the app
+	policyIDs := a.listAppPolicyIDs(ctx, appID)
 
-	// Then delete the application itself
+	// Delete the application first
 	_, err := a.client.API().ZeroTrust.Access.Applications.Delete(ctx, appID, zero_trust.AccessApplicationDeleteParams{
 		AccountID: cf.F(a.accountID),
 	})
@@ -257,39 +332,12 @@ func (a *AccessClient) DeleteAccessApplication(ctx context.Context, appID string
 		Str("app_id", appID).
 		Msg("Deleted Access Application")
 
+	// Then try to clean up the now-unlinked reusable policies
+	for _, pID := range policyIDs {
+		a.tryDeleteReusablePolicy(ctx, pID)
+	}
+
 	return nil
-}
-
-// cleanupOldAppPolicies lists policies linked to an app and deletes the
-// account-level reusable policies that were created by labelgate.
-func (a *AccessClient) cleanupOldAppPolicies(ctx context.Context, appID string) {
-	policies, err := a.client.API().ZeroTrust.Access.Applications.Policies.List(ctx, appID, zero_trust.AccessApplicationPolicyListParams{
-		AccountID: cf.F(a.accountID),
-	})
-	if err != nil {
-		log.Warn().Err(err).Str("app_id", appID).Msg("Failed to list app policies for cleanup")
-		return
-	}
-
-	for _, p := range policies.Result {
-		// Delete all linked reusable policies at the account level.
-		// Labelgate fully owns policies on apps it manages, so we clean them all.
-		_, err := a.client.API().ZeroTrust.Access.Policies.Delete(ctx, p.ID, zero_trust.AccessPolicyDeleteParams{
-			AccountID: cf.F(a.accountID),
-		})
-		if err != nil {
-			// May fail for inline (non-reusable) policies — that's fine, they go away with the app.
-			log.Debug().Err(err).
-				Str("policy_id", p.ID).
-				Str("policy_name", p.Name).
-				Msg("Could not delete linked policy (may be non-reusable)")
-		} else {
-			log.Debug().
-				Str("policy_id", p.ID).
-				Str("policy_name", p.Name).
-				Msg("Cleaned up old reusable policy")
-		}
-	}
 }
 
 // buildAccessRules converts internal AccessRule types to Cloudflare API rule params.
