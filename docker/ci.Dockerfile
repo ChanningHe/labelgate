@@ -10,7 +10,7 @@ ARG TARGETARCH
 
 WORKDIR /app
 
-COPY labelgate-linux-${TARGETARCH} /app/labelgate
+COPY --chmod=755 labelgate-linux-${TARGETARCH} /app/labelgate
 
 USER nonroot
 
