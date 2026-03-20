@@ -91,7 +91,7 @@ func (a *AccessClient) EnsureAccessForHostname(ctx context.Context, hostname str
 	var policyLinks []policyLink
 	for i := range policyDef.Policies {
 		policy := &policyDef.Policies[i]
-		policyID, err := a.ensureReusablePolicy(ctx, policy, i)
+		policyID, err := a.ensureReusablePolicy(ctx, policyDef.Name, policy, i)
 		if err != nil {
 			return "", fmt.Errorf("failed to ensure reusable policy %d for %s: %w", i, hostname, err)
 		}
@@ -104,7 +104,7 @@ func (a *AccessClient) EnsureAccessForHostname(ctx context.Context, hostname str
 	// Step 3: Create or update the application with policy links
 	appName := policyDef.AppName
 	if appName == "" {
-		appName = fmt.Sprintf("labelgate-%s", policyDef.Name)
+		appName = fmt.Sprintf("labelgate:%s", hostname)
 	}
 
 	var appID string
@@ -143,10 +143,13 @@ type policyLink struct {
 }
 
 // ensureReusablePolicy finds an existing reusable policy by name or creates a new one.
-func (a *AccessClient) ensureReusablePolicy(ctx context.Context, policy *types.AccessPolicy, index int) (string, error) {
+func (a *AccessClient) ensureReusablePolicy(ctx context.Context, defName string, policy *types.AccessPolicy, index int) (string, error) {
 	policyName := policy.Name
 	if policyName == "" {
-		policyName = fmt.Sprintf("labelgate-%s-%d", policy.Decision, index)
+		policyName = fmt.Sprintf("labelgate:%s:%s", defName, policy.Decision)
+		if index > 0 {
+			policyName = fmt.Sprintf("%s:%d", policyName, index)
+		}
 	}
 
 	// Try to find an existing reusable policy with the same name

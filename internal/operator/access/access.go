@@ -124,7 +124,7 @@ func (o *AccessOperatorImpl) ReconcileBindings(ctx context.Context, bindings []*
 					Msg("Failed to create Access Application")
 			errAppName := binding.PolicyDef.AppName
 			if errAppName == "" {
-				errAppName = fmt.Sprintf("labelgate-%s", binding.PolicyDef.Name)
+				errAppName = fmt.Sprintf("labelgate:%s", binding.Hostname)
 			}
 			errDecision := ""
 			if len(binding.PolicyDef.Policies) > 0 {
@@ -217,7 +217,7 @@ func (o *AccessOperatorImpl) EnsureAccess(ctx context.Context, binding *types.Re
 
 	appName := binding.PolicyDef.AppName
 	if appName == "" {
-		appName = fmt.Sprintf("labelgate-%s", binding.PolicyDef.Name)
+		appName = fmt.Sprintf("labelgate:%s", binding.Hostname)
 	}
 	decision := ""
 	if len(binding.PolicyDef.Policies) > 0 {
@@ -292,7 +292,7 @@ func (o *AccessOperatorImpl) updateAccess(ctx context.Context, existing *storage
 	// Update storage
 	appName := binding.PolicyDef.AppName
 	if appName == "" {
-		appName = fmt.Sprintf("labelgate-%s", binding.PolicyDef.Name)
+		appName = fmt.Sprintf("labelgate:%s", binding.Hostname)
 	}
 	existing.AccessAppName = appName
 	existing.AccessPolicyName = binding.PolicyDef.Name
