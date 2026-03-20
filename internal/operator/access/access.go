@@ -4,6 +4,7 @@ package access
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/rs/zerolog/log"
 
@@ -249,6 +250,7 @@ func (o *AccessOperatorImpl) EnsureAccess(ctx context.Context, binding *types.Re
 }
 
 // updateAccess updates an existing Access Application.
+// If the CF app was deleted externally, it resets the stored ID and recreates.
 func (o *AccessOperatorImpl) updateAccess(ctx context.Context, existing *storage.ManagedResource, binding *types.ResolvedAccessBinding) error {
 	client, tunnelCred, err := o.credManager.GetTunnelClient("default")
 	if err != nil {
@@ -265,7 +267,24 @@ func (o *AccessOperatorImpl) updateAccess(ctx context.Context, existing *storage
 
 	accessClient := cloudflare.NewAccessClient(client, accountID)
 
-	_, err = accessClient.EnsureAccessForHostname(ctx, binding.Hostname, binding.PolicyDef, existing.AccessAppID)
+	appID := existing.AccessAppID
+	_, err = accessClient.EnsureAccessForHostname(ctx, binding.Hostname, binding.PolicyDef, appID)
+	if err != nil && appID != "" {
+		// If the app was deleted externally (404 or similar), recreate from scratch
+		log.Warn().Err(err).
+			Str("hostname", binding.Hostname).
+			Str("app_id", appID).
+			Msg("Failed to update Access App, retrying as new creation")
+
+		appID = ""
+		var newAppID string
+		newAppID, err = accessClient.EnsureAccessForHostname(ctx, binding.Hostname, binding.PolicyDef, "")
+		if err != nil {
+			return err
+		}
+		existing.CFID = newAppID
+		existing.AccessAppID = newAppID
+	}
 	if err != nil {
 		return err
 	}
@@ -289,6 +308,7 @@ func (o *AccessOperatorImpl) updateAccess(ctx context.Context, existing *storage
 }
 
 // RemoveAccess removes an Access Application.
+// If the CF resource was already deleted externally, it still cleans up storage.
 func (o *AccessOperatorImpl) RemoveAccess(ctx context.Context, resource *storage.ManagedResource) error {
 	if resource.AccessAppID == "" {
 		log.Warn().
@@ -313,10 +333,17 @@ func (o *AccessOperatorImpl) RemoveAccess(ctx context.Context, resource *storage
 	accessClient := cloudflare.NewAccessClient(client, accountID)
 
 	if err := accessClient.DeleteAccessApplication(ctx, resource.AccessAppID); err != nil {
-		return fmt.Errorf("failed to delete access app: %w", err)
+		// If the app is already gone on CF side, just clean up storage
+		if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
+			log.Warn().
+				Str("hostname", resource.Hostname).
+				Str("app_id", resource.AccessAppID).
+				Msg("Access App already deleted on CF, cleaning up storage")
+		} else {
+			return fmt.Errorf("failed to delete access app: %w", err)
+		}
 	}
 
-	// Hard-delete from storage (no more soft-delete)
 	return o.storage.DeleteResource(ctx, resource.ID)
 }
 
