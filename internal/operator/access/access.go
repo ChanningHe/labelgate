@@ -121,17 +121,27 @@ func (o *AccessOperatorImpl) ReconcileBindings(ctx context.Context, bindings []*
 				log.Error().Err(err).
 					Str("hostname", hostname).
 					Msg("Failed to create Access Application")
-			// Save resource in error state so Dashboard can see the failure
+			errAppName := binding.PolicyDef.AppName
+			if errAppName == "" {
+				errAppName = fmt.Sprintf("labelgate-%s", binding.PolicyDef.Name)
+			}
+			errDecision := ""
+			if len(binding.PolicyDef.Policies) > 0 {
+				errDecision = binding.PolicyDef.Policies[0].Decision
+			}
 			errResource := &storage.ManagedResource{
-				ResourceType:   storage.ResourceTypeAccessApp,
-				Hostname:       hostname,
-				ContainerID:    binding.ContainerID,
-				ContainerName:  binding.ContainerName,
-				ServiceName:    binding.ServiceName,
-				AgentID:        binding.AgentID,
-				Status:         storage.StatusError,
-				LastError:      err.Error(),
-				CleanupEnabled: binding.Cleanup,
+				ResourceType:     storage.ResourceTypeAccessApp,
+				Hostname:         hostname,
+				AccessAppName:    errAppName,
+				AccessPolicyName: binding.PolicyDef.Name,
+				AccessDecision:   errDecision,
+				ContainerID:      binding.ContainerID,
+				ContainerName:    binding.ContainerName,
+				ServiceName:      binding.ServiceName,
+				AgentID:          binding.AgentID,
+				Status:           storage.StatusError,
+				LastError:        err.Error(),
+				CleanupEnabled:   binding.Cleanup,
 			}
 				if saveErr := o.storage.SaveResource(ctx, errResource); saveErr != nil {
 					log.Error().Err(saveErr).Str("hostname", hostname).Msg("Failed to save error resource")
@@ -204,19 +214,31 @@ func (o *AccessOperatorImpl) EnsureAccess(ctx context.Context, binding *types.Re
 		return nil, err
 	}
 
+	appName := binding.PolicyDef.AppName
+	if appName == "" {
+		appName = fmt.Sprintf("labelgate-%s", binding.PolicyDef.Name)
+	}
+	decision := ""
+	if len(binding.PolicyDef.Policies) > 0 {
+		decision = binding.PolicyDef.Policies[0].Decision
+	}
+
 	// Save to storage
 	resource := &storage.ManagedResource{
-		ResourceType:   storage.ResourceTypeAccessApp,
-		Hostname:       binding.Hostname,
-		CFID:           appID,
-		AccessAppID:    appID,
-		AccountID:      accountID,
-		ContainerID:    binding.ContainerID,
-		ContainerName:  binding.ContainerName,
-		ServiceName:    binding.ServiceName,
-		AgentID:        binding.AgentID,
-		Status:         storage.StatusActive,
-		CleanupEnabled: binding.Cleanup,
+		ResourceType:     storage.ResourceTypeAccessApp,
+		Hostname:         binding.Hostname,
+		CFID:             appID,
+		AccessAppID:      appID,
+		AccountID:        accountID,
+		AccessAppName:    appName,
+		AccessPolicyName: binding.PolicyDef.Name,
+		AccessDecision:   decision,
+		ContainerID:      binding.ContainerID,
+		ContainerName:    binding.ContainerName,
+		ServiceName:      binding.ServiceName,
+		AgentID:          binding.AgentID,
+		Status:           storage.StatusActive,
+		CleanupEnabled:   binding.Cleanup,
 	}
 
 	if err := o.storage.SaveResource(ctx, resource); err != nil {
@@ -249,6 +271,15 @@ func (o *AccessOperatorImpl) updateAccess(ctx context.Context, existing *storage
 	}
 
 	// Update storage
+	appName := binding.PolicyDef.AppName
+	if appName == "" {
+		appName = fmt.Sprintf("labelgate-%s", binding.PolicyDef.Name)
+	}
+	existing.AccessAppName = appName
+	existing.AccessPolicyName = binding.PolicyDef.Name
+	if len(binding.PolicyDef.Policies) > 0 {
+		existing.AccessDecision = binding.PolicyDef.Policies[0].Decision
+	}
 	existing.ContainerID = binding.ContainerID
 	existing.ContainerName = binding.ContainerName
 	existing.ServiceName = binding.ServiceName

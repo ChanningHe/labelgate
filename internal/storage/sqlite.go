@@ -21,7 +21,8 @@ type SQLiteStorage struct {
 
 // resourceColumns is the standard column list for resource queries.
 const resourceColumns = `id, resource_type, cf_id, zone_id, hostname, record_type, content, proxied, ttl,
-	tunnel_id, service, path, access_app_id, account_id, container_id, container_name, service_name, agent_id,
+	tunnel_id, service, path, access_app_id, account_id, access_app_name, access_policy_name, access_decision,
+	container_id, container_name, service_name, agent_id,
 	status, cleanup_enabled, last_error, created_at, updated_at, deleted_at`
 
 // NewSQLiteStorage creates a new SQLite storage instance.
@@ -204,9 +205,10 @@ func (s *SQLiteStorage) SaveResource(ctx context.Context, resource *ManagedResou
 	query := `
 		INSERT INTO managed_resources (
 			id, resource_type, cf_id, zone_id, hostname, record_type, content, proxied, ttl,
-			tunnel_id, service, path, access_app_id, account_id, container_id, container_name, service_name, agent_id,
+			tunnel_id, service, path, access_app_id, account_id, access_app_name, access_policy_name, access_decision,
+			container_id, container_name, service_name, agent_id,
 			status, cleanup_enabled, last_error, created_at, updated_at, deleted_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(resource_type, hostname, record_type) DO UPDATE SET
 			cf_id = excluded.cf_id,
 			zone_id = excluded.zone_id,
@@ -218,6 +220,9 @@ func (s *SQLiteStorage) SaveResource(ctx context.Context, resource *ManagedResou
 			path = excluded.path,
 			access_app_id = excluded.access_app_id,
 			account_id = excluded.account_id,
+			access_app_name = excluded.access_app_name,
+			access_policy_name = excluded.access_policy_name,
+			access_decision = excluded.access_decision,
 			container_id = excluded.container_id,
 			container_name = excluded.container_name,
 			service_name = excluded.service_name,
@@ -233,7 +238,7 @@ func (s *SQLiteStorage) SaveResource(ctx context.Context, resource *ManagedResou
 		resource.ID, resource.ResourceType, resource.CFID, resource.ZoneID,
 		resource.Hostname, resource.RecordType, resource.Content, resource.Proxied, resource.TTL,
 		resource.TunnelID, resource.Service, resource.Path,
-		resource.AccessAppID, resource.AccountID,
+		resource.AccessAppID, resource.AccountID, resource.AccessAppName, resource.AccessPolicyName, resource.AccessDecision,
 		resource.ContainerID, resource.ContainerName, resource.ServiceName, resource.AgentID,
 		resource.Status, resource.CleanupEnabled, resource.LastError, resource.CreatedAt, resource.UpdatedAt, resource.DeletedAt,
 	)
@@ -472,14 +477,17 @@ func (s *SQLiteStorage) setSchemaVersion(ctx context.Context, version int) error
 
 func (s *SQLiteStorage) scanResource(row *sql.Row) (*ManagedResource, error) {
 	r := &ManagedResource{}
-	var cfID, zoneID, recordType, content, tunnelID, service, path, accessAppID, accountID, containerID, containerName, agentID, lastError sql.NullString
+	var cfID, zoneID, recordType, content, tunnelID, service, path sql.NullString
+	var accessAppID, accountID, accessAppName, accessPolicyName, accessDecision sql.NullString
+	var containerID, containerName, agentID, lastError sql.NullString
 	var proxied sql.NullBool
 	var ttl sql.NullInt64
 	var deletedAt sql.NullTime
 
 	err := row.Scan(
 		&r.ID, &r.ResourceType, &cfID, &zoneID, &r.Hostname, &recordType, &content, &proxied, &ttl,
-		&tunnelID, &service, &path, &accessAppID, &accountID, &containerID, &containerName, &r.ServiceName, &agentID,
+		&tunnelID, &service, &path, &accessAppID, &accountID, &accessAppName, &accessPolicyName, &accessDecision,
+		&containerID, &containerName, &r.ServiceName, &agentID,
 		&r.Status, &r.CleanupEnabled, &lastError, &r.CreatedAt, &r.UpdatedAt, &deletedAt,
 	)
 	if err == sql.ErrNoRows {
@@ -500,6 +508,9 @@ func (s *SQLiteStorage) scanResource(row *sql.Row) (*ManagedResource, error) {
 	r.Path = path.String
 	r.AccessAppID = accessAppID.String
 	r.AccountID = accountID.String
+	r.AccessAppName = accessAppName.String
+	r.AccessPolicyName = accessPolicyName.String
+	r.AccessDecision = accessDecision.String
 	r.ContainerID = containerID.String
 	r.ContainerName = containerName.String
 	r.AgentID = agentID.String
@@ -513,14 +524,17 @@ func (s *SQLiteStorage) scanResource(row *sql.Row) (*ManagedResource, error) {
 
 func (s *SQLiteStorage) scanResourceRows(rows *sql.Rows) (*ManagedResource, error) {
 	r := &ManagedResource{}
-	var cfID, zoneID, recordType, content, tunnelID, service, path, accessAppID, accountID, containerID, containerName, agentID, lastError sql.NullString
+	var cfID, zoneID, recordType, content, tunnelID, service, path sql.NullString
+	var accessAppID, accountID, accessAppName, accessPolicyName, accessDecision sql.NullString
+	var containerID, containerName, agentID, lastError sql.NullString
 	var proxied sql.NullBool
 	var ttl sql.NullInt64
 	var deletedAt sql.NullTime
 
 	err := rows.Scan(
 		&r.ID, &r.ResourceType, &cfID, &zoneID, &r.Hostname, &recordType, &content, &proxied, &ttl,
-		&tunnelID, &service, &path, &accessAppID, &accountID, &containerID, &containerName, &r.ServiceName, &agentID,
+		&tunnelID, &service, &path, &accessAppID, &accountID, &accessAppName, &accessPolicyName, &accessDecision,
+		&containerID, &containerName, &r.ServiceName, &agentID,
 		&r.Status, &r.CleanupEnabled, &lastError, &r.CreatedAt, &r.UpdatedAt, &deletedAt,
 	)
 	if err != nil {
@@ -538,6 +552,9 @@ func (s *SQLiteStorage) scanResourceRows(rows *sql.Rows) (*ManagedResource, erro
 	r.Path = path.String
 	r.AccessAppID = accessAppID.String
 	r.AccountID = accountID.String
+	r.AccessAppName = accessAppName.String
+	r.AccessPolicyName = accessPolicyName.String
+	r.AccessDecision = accessDecision.String
 	r.ContainerID = containerID.String
 	r.ContainerName = containerName.String
 	r.AgentID = agentID.String
@@ -690,6 +707,15 @@ var migrations = []Migration{
 		SQL: `
 			-- Add last_error field for per-resource error tracking
 			ALTER TABLE managed_resources ADD COLUMN last_error TEXT;
+		`,
+	},
+	{
+		Version: 5,
+		SQL: `
+			-- Add access display fields for dashboard
+			ALTER TABLE managed_resources ADD COLUMN access_app_name TEXT;
+			ALTER TABLE managed_resources ADD COLUMN access_policy_name TEXT;
+			ALTER TABLE managed_resources ADD COLUMN access_decision TEXT;
 		`,
 	},
 }

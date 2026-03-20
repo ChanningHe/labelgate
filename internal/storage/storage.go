@@ -68,8 +68,11 @@ type ManagedResource struct {
 	Path     string `json:"path,omitempty"`
 
 	// Access App fields
-	AccessAppID string `json:"access_app_id,omitempty"` // Cloudflare Access Application ID
-	AccountID   string `json:"account_id,omitempty"`    // Cloudflare Account ID
+	AccessAppID      string `json:"access_app_id,omitempty"`      // Cloudflare Access Application ID
+	AccountID        string `json:"account_id,omitempty"`         // Cloudflare Account ID
+	AccessAppName    string `json:"access_app_name,omitempty"`    // CF Access Application display name
+	AccessPolicyName string `json:"access_policy_name,omitempty"` // Labelgate policy template name
+	AccessDecision   string `json:"access_decision,omitempty"`    // Policy decision (allow, block, bypass, service_auth)
 
 	// Source information
 	ContainerID   string `json:"container_id,omitempty"`
