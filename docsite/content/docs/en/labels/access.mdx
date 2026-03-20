@@ -170,3 +170,26 @@ labels:
   labelgate.tunnel.admin.service: "http://admin:8080"
   labelgate.tunnel.admin.access: "internal"
 ```
+
+## Cleanup Behavior
+
+Access policies don't have their own `cleanup` label. Instead, the cleanup behavior is **inherited from the tunnel or DNS service** that references the access policy.
+
+```yaml
+labels:
+  labelgate.access.team.policy.decision: "allow"
+  labelgate.access.team.policy.include.emails_ending_in: "@company.io"
+
+  labelgate.tunnel.web.hostname: "app.company.io"
+  labelgate.tunnel.web.service: "http://app:80"
+  labelgate.tunnel.web.access: "team"
+  labelgate.tunnel.web.cleanup: "true"  # This controls access cleanup too
+```
+
+When `cleanup` is enabled on the referencing service:
+- If the container stops, the Access Application on Cloudflare will be removed after the configured `sync.remove_delay` (default: 30 minutes)
+- The associated reusable policies are also cleaned up if no other application references them
+
+When `cleanup` is disabled (default):
+- The Access Application is marked as **orphaned** in labelgate but preserved on Cloudflare
+- It will be reactivated automatically if the container restarts

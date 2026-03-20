@@ -170,3 +170,26 @@ labels:
   labelgate.tunnel.admin.service: "http://admin:8080"
   labelgate.tunnel.admin.access: "internal"
 ```
+
+## 清理行为
+
+Access 策略没有独立的 `cleanup` 标签。清理行为**继承自引用该策略的 tunnel 或 DNS 服务**。
+
+```yaml
+labels:
+  labelgate.access.team.policy.decision: "allow"
+  labelgate.access.team.policy.include.emails_ending_in: "@company.io"
+
+  labelgate.tunnel.web.hostname: "app.company.io"
+  labelgate.tunnel.web.service: "http://app:80"
+  labelgate.tunnel.web.access: "team"
+  labelgate.tunnel.web.cleanup: "true"  # 同时控制 access 的清理行为
+```
+
+当引用服务启用了 `cleanup` 时：
+- 容器停止后，Cloudflare 上的 Access Application 将在配置的 `sync.remove_delay`（默认 30 分钟）后被删除
+- 关联的可复用策略如果没有被其他应用引用，也会被一并清理
+
+当 `cleanup` 未启用时（默认）：
+- Access Application 在 labelgate 中标记为 **orphaned**，但在 Cloudflare 上保留
+- 容器重启后会自动重新激活
