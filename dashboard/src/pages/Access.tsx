@@ -26,7 +26,7 @@ import { useAccess } from '../hooks/useAPI';
 import { mockAccessResources } from '../mock/data';
 
 type SortDirection = 'asc' | 'desc';
-type SortColumn = 'hostname' | 'status' | 'container_name' | 'agent_id' | 'updated_at';
+type SortColumn = 'hostname' | 'status' | 'access_policy_name' | 'access_decision';
 
 const statusOptions = [
   { label: 'All', value: 'all' },
@@ -35,10 +35,17 @@ const statusOptions = [
   { label: 'Error', value: 'error' },
 ];
 
+const decisionColors: Record<string, string> = {
+  allow: 'green',
+  block: 'red',
+  bypass: 'orange',
+  service_auth: 'violet',
+};
+
 export function Access() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [sortColumn, setSortColumn] = useState<SortColumn>('hostname');
+  const [sortColumn, setSortColumn] = useState<SortColumn>('access_policy_name');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
   const [selectedResource, setSelectedResource] = useState<any>(null);
 
@@ -69,7 +76,13 @@ export function Access() {
 
   const filtered = useMemo(() => {
     let result = resources.filter((r: any) => {
-      if (search && !r.hostname.toLowerCase().includes(search.toLowerCase())) return false;
+      if (search) {
+        const q = search.toLowerCase();
+        const matchHostname = r.hostname?.toLowerCase().includes(q);
+        const matchPolicy = r.access_policy_name?.toLowerCase().includes(q);
+        const matchApp = r.access_app_name?.toLowerCase().includes(q);
+        if (!matchHostname && !matchPolicy && !matchApp) return false;
+      }
       if (useMock && statusFilter !== 'all' && r.status !== statusFilter) return false;
       return true;
     });
@@ -99,7 +112,7 @@ export function Access() {
           size="sm"
         />
         <TextInput
-          placeholder="Search hostname..."
+          placeholder="Search policy or hostname..."
           leftSection={<IconSearch size={16} />}
           value={search}
           onChange={(e) => setSearch(e.currentTarget.value)}
@@ -126,15 +139,30 @@ export function Access() {
                   Status
                 </SortableHeader>
                 <SortableHeader
+                  sorted={sortColumn === 'access_policy_name'}
+                  direction={sortColumn === 'access_policy_name' ? sortDirection : null}
+                  onSort={() => handleSort('access_policy_name')}
+                >
+                  Policy
+                </SortableHeader>
+                <SortableHeader
                   sorted={sortColumn === 'hostname'}
                   direction={sortColumn === 'hostname' ? sortDirection : null}
                   onSort={() => handleSort('hostname')}
-                  style={{ maxWidth: 200 }}
+                  style={{ maxWidth: 220 }}
                 >
                   Hostname
                 </SortableHeader>
-                <Table.Th>App Name</Table.Th>
-                {!isMobile && <Table.Th>Policies</Table.Th>}
+                {!isMobile && (
+                  <SortableHeader
+                    sorted={sortColumn === 'access_decision'}
+                    direction={sortColumn === 'access_decision' ? sortDirection : null}
+                    onSort={() => handleSort('access_decision')}
+                    style={{ width: 110 }}
+                  >
+                    Decision
+                  </SortableHeader>
+                )}
                 {isMobile && <Table.Th style={{ width: 50 }}></Table.Th>}
               </Table.Tr>
             </Table.Thead>
@@ -181,27 +209,26 @@ export function Access() {
                       )}
                     </Table.Td>
                     <Table.Td>
-                      <Code>{r.hostname}</Code>
+                      <Text size="sm" fw={500}>
+                        {r.access_policy_name || r.service_name || '—'}
+                      </Text>
                     </Table.Td>
                     <Table.Td>
-                      <Text size="sm" fw={500}>
-                        {r.app_name ?? r.service_name ?? '—'}
-                      </Text>
+                      <Code>{r.hostname}</Code>
                     </Table.Td>
                     {!isMobile && (
                       <Table.Td>
-                        <Group gap={4}>
-                          {(r.policies ?? []).slice(0, 2).map((p: string, i: number) => (
-                            <Badge key={i} variant="light" size="sm" color="teal">
-                              {p}
-                            </Badge>
-                          ))}
-                          {(r.policies?.length ?? 0) > 2 && (
-                            <Badge variant="outline" size="sm" color="gray">
-                              +{(r.policies?.length ?? 0) - 2}
-                            </Badge>
-                          )}
-                        </Group>
+                        {r.access_decision ? (
+                          <Badge
+                            variant="light"
+                            size="sm"
+                            color={decisionColors[r.access_decision] || 'gray'}
+                          >
+                            {r.access_decision}
+                          </Badge>
+                        ) : (
+                          <Text size="sm" c="dimmed">—</Text>
+                        )}
                       </Table.Td>
                     )}
                     {isMobile && (
@@ -221,7 +248,7 @@ export function Access() {
 
       <Group p="md" justify="space-between">
         <Text size="sm" c="dimmed">
-          Showing {filtered.length} policies
+          Showing {filtered.length} access {filtered.length === 1 ? 'app' : 'apps'}
         </Text>
       </Group>
     </Paper>

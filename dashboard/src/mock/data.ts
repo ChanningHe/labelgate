@@ -34,8 +34,9 @@ export interface AccessResource extends ResourceBase {
   resource_type: 'access_app';
   access_app_id: string;
   account_id: string;
-  app_name: string;
-  policies: string[];
+  access_app_name?: string;
+  access_policy_name?: string;
+  access_decision?: string;
 }
 
 export interface AgentInfo {
@@ -361,8 +362,9 @@ export const mockAccessResources: AccessResource[] = [
     resource_type: 'access_app',
     access_app_id: 'cf-app-001',
     account_id: 'acct-001',
-    app_name: 'Grafana',
-    policies: ['Allow: admin@example.com', 'Allow: *@example.com'],
+    access_app_name: 'labelgate-internal',
+    access_policy_name: 'internal',
+    access_decision: 'allow',
     container_id: 'ctr-mon001',
     container_name: 'monitoring',
     service_name: 'grafana',
@@ -378,8 +380,9 @@ export const mockAccessResources: AccessResource[] = [
     resource_type: 'access_app',
     access_app_id: 'cf-app-002',
     account_id: 'acct-001',
-    app_name: 'SSH Gateway',
-    policies: ['Allow: admin@example.com'],
+    access_app_name: 'labelgate-internal',
+    access_policy_name: 'internal',
+    access_decision: 'allow',
     container_id: 'ctr-ssh001',
     container_name: 'ssh-gateway',
     service_name: 'ssh',
@@ -395,8 +398,9 @@ export const mockAccessResources: AccessResource[] = [
     resource_type: 'access_app',
     access_app_id: 'cf-app-003',
     account_id: 'acct-001',
-    app_name: 'API Service Auth',
-    policies: ['Service Auth: api-token-xyz'],
+    access_app_name: 'API Service Auth',
+    access_policy_name: 'machine',
+    access_decision: 'service_auth',
     container_id: 'ctr-abc123',
     container_name: 'webapp',
     service_name: 'api',
@@ -412,8 +416,9 @@ export const mockAccessResources: AccessResource[] = [
     resource_type: 'access_app',
     access_app_id: '',
     account_id: 'acct-001',
-    app_name: 'Admin Panel',
-    policies: ['Allow: admin@example.com'],
+    access_app_name: 'labelgate-team',
+    access_policy_name: 'team',
+    access_decision: 'allow',
     container_id: 'ctr-admin01',
     container_name: 'admin-panel',
     service_name: 'admin',

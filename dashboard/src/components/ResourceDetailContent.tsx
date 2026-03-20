@@ -51,8 +51,10 @@ interface TunnelResource extends BaseResource {
 }
 
 interface AccessResource extends BaseResource {
-  app_name?: string;
-  policies?: string[];
+  access_app_id?: string;
+  access_app_name?: string;
+  access_policy_name?: string;
+  access_decision?: string;
 }
 
 type Resource = DNSResource | TunnelResource | AccessResource;
@@ -267,19 +269,41 @@ export function ResourceDetailContent({ resource, type, showHeader = true }: Res
         )}
         {type === 'access' && (
           <>
-            <DetailItem label="App Name" value={(resource as AccessResource).app_name || '—'} />
             <DetailItem
-              label="Policies"
+              label="Policy Name"
+              value={(resource as AccessResource).access_policy_name || '—'}
+            />
+            <DetailItem
+              label="App Name"
+              value={(resource as AccessResource).access_app_name || '—'}
+            />
+            <DetailItem
+              label="Decision"
               value={
-                (resource as AccessResource).policies &&
-                (resource as AccessResource).policies!.length > 0 ? (
-                  <Stack gap={4}>
-                    {(resource as AccessResource).policies!.map((p, i) => (
-                      <Badge key={i} variant="light" size="sm" color="teal">
-                        {p}
-                      </Badge>
-                    ))}
-                  </Stack>
+                (resource as AccessResource).access_decision ? (
+                  <Badge
+                    variant="light"
+                    size="sm"
+                    color={
+                      { allow: 'green', block: 'red', bypass: 'orange', service_auth: 'violet' }[
+                        (resource as AccessResource).access_decision!
+                      ] || 'gray'
+                    }
+                  >
+                    {(resource as AccessResource).access_decision}
+                  </Badge>
+                ) : (
+                  '—'
+                )
+              }
+            />
+            <DetailItem
+              label="App ID"
+              value={
+                (resource as AccessResource).access_app_id ? (
+                  <Code style={{ fontSize: '0.7rem' }}>
+                    {(resource as AccessResource).access_app_id}
+                  </Code>
                 ) : (
                   '—'
                 )
