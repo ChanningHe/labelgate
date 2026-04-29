@@ -727,15 +727,28 @@ func (r *Reconciler) checkExpectedAgentsLocked() bool {
 	return true
 }
 
-// RemoveAgentData removes container data for an agent.
+// RemoveAgentData removes container data for an agent and wakes the reconcile
+// loop so resources previously claimed by the agent are detected as orphans
+// without waiting for the next periodic tick.
 func (r *Reconciler) RemoveAgentData(agentID string) {
 	r.mu.Lock()
+	_, existed := r.agentData[agentID]
 	delete(r.agentData, agentID)
+	delete(r.agentFingerprints, agentID)
 	r.mu.Unlock()
+
+	if !existed {
+		return
+	}
 
 	log.Debug().
 		Str("agent", agentID).
-		Msg("Removed agent data")
+		Msg("Removed agent data, triggering reconciliation")
+
+	select {
+	case r.agentTrigger <- struct{}{}:
+	default:
+	}
 }
 
 // TriggerReconcile triggers an immediate reconciliation.
