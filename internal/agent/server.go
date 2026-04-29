@@ -25,12 +25,49 @@ type AgentConnection struct {
 	ID            string
 	Name          string
 	Conn          *websocket.Conn
-	Connected     bool
-	LastSeen      time.Time
-	PublicIP      string
 	DefaultTunnel string
 	send          chan *Message
 	done          chan struct{}
+
+	// mu guards the fields below, which the API/health endpoints read while
+	// the read/write pumps and disconnect handler are mutating them.
+	mu        sync.RWMutex
+	connected bool
+	lastSeen  time.Time
+	publicIP  string
+}
+
+// IsConnected reports whether the agent is currently connected.
+func (c *AgentConnection) IsConnected() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.connected
+}
+
+func (c *AgentConnection) setConnected(b bool) {
+	c.mu.Lock()
+	c.connected = b
+	c.mu.Unlock()
+}
+
+func (c *AgentConnection) updateLastSeen(t time.Time) {
+	c.mu.Lock()
+	c.lastSeen = t
+	c.mu.Unlock()
+}
+
+func (c *AgentConnection) setPublicIP(ip string) {
+	c.mu.Lock()
+	c.publicIP = ip
+	c.mu.Unlock()
+}
+
+// snapshot returns a consistent view of the mutable connection state for
+// callers that need more than one field at a time (e.g. the health endpoint).
+func (c *AgentConnection) snapshot() (connected bool, lastSeen time.Time, publicIP string) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.connected, c.lastSeen, c.publicIP
 }
 
 // Server is the WebSocket server for agent connections.
@@ -213,12 +250,12 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	agentConn := &AgentConnection{
 		ID:            auth.AgentID,
 		Conn:          conn,
-		Connected:     true,
-		LastSeen:      time.Now(),
 		DefaultTunnel: agentConfig.DefaultTunnel,
 		send:          make(chan *Message, 100),
 		done:          make(chan struct{}),
 	}
+	agentConn.setConnected(true)
+	agentConn.updateLastSeen(time.Now())
 
 	if existing, ok := s.connections[auth.AgentID]; ok {
 		close(existing.done)
@@ -266,7 +303,7 @@ func (s *Server) readPump(agent *AgentConnection) {
 
 	agent.Conn.SetReadLimit(1024 * 1024) // 1MB max message size
 	agent.Conn.SetPongHandler(func(string) error {
-		agent.LastSeen = time.Now()
+		agent.updateLastSeen(time.Now())
 		return nil
 	})
 
@@ -291,7 +328,7 @@ func (s *Server) readPump(agent *AgentConnection) {
 			continue
 		}
 
-		agent.LastSeen = time.Now()
+		agent.updateLastSeen(time.Now())
 		s.handleMessage(agent, &msg)
 	}
 }
@@ -354,8 +391,8 @@ func (s *Server) handleReport(agent *AgentConnection, msg *Message) {
 		return
 	}
 
-	agent.PublicIP = report.PublicIP
-	agent.LastSeen = report.Timestamp
+	agent.setPublicIP(report.PublicIP)
+	agent.updateLastSeen(report.Timestamp)
 
 	// Parse containers and update reconciler
 	var parsedContainers []*types.ParsedContainer
@@ -443,7 +480,7 @@ func (s *Server) handleDisconnect(agent *AgentConnection) {
 	}
 	s.mu.Unlock()
 
-	agent.Connected = false
+	agent.setConnected(false)
 	agent.Conn.Close()
 
 	// Remove agent data from reconciler
@@ -469,11 +506,12 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()
 	agents := make([]map[string]interface{}, 0, len(s.connections))
 	for _, conn := range s.connections {
+		connected, lastSeen, publicIP := conn.snapshot()
 		agents = append(agents, map[string]interface{}{
 			"id":        conn.ID,
-			"connected": conn.Connected,
-			"last_seen": conn.LastSeen,
-			"public_ip": conn.PublicIP,
+			"connected": connected,
+			"last_seen": lastSeen,
+			"public_ip": publicIP,
 		})
 	}
 	s.mu.RUnlock()
@@ -505,7 +543,7 @@ func (s *Server) SendQuery(agentID string, action string) error {
 	agent, ok := s.connections[agentID]
 	s.mu.RUnlock()
 
-	if !ok || !agent.Connected {
+	if !ok || !agent.IsConnected() {
 		return fmt.Errorf("agent not connected: %s", agentID)
 	}
 
@@ -532,7 +570,7 @@ func (s *Server) SendCommand(agentID string, action string) error {
 	agent, ok := s.connections[agentID]
 	s.mu.RUnlock()
 
-	if !ok || !agent.Connected {
+	if !ok || !agent.IsConnected() {
 		return fmt.Errorf("agent not connected: %s", agentID)
 	}
 
@@ -560,7 +598,7 @@ func (s *Server) GetConnectedAgents() []string {
 
 	agents := make([]string, 0, len(s.connections))
 	for id, conn := range s.connections {
-		if conn.Connected {
+		if conn.IsConnected() {
 			agents = append(agents, id)
 		}
 	}
@@ -573,7 +611,7 @@ func (s *Server) IsAgentConnected(agentID string) bool {
 	defer s.mu.RUnlock()
 
 	if conn, ok := s.connections[agentID]; ok {
-		return conn.Connected
+		return conn.IsConnected()
 	}
 	return false
 }

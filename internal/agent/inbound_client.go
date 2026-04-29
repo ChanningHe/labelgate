@@ -159,12 +159,12 @@ func (s *Server) dialInboundAgent(ctx context.Context, expectedAgentID, endpoint
 	agentConn := &AgentConnection{
 		ID:            auth.AgentID,
 		Conn:          conn,
-		Connected:     true,
-		LastSeen:      time.Now(),
 		DefaultTunnel: defaultTunnel,
 		send:          make(chan *Message, 100),
 		done:          make(chan struct{}),
 	}
+	agentConn.setConnected(true)
+	agentConn.updateLastSeen(time.Now())
 
 	s.mu.Lock()
 	if existing, ok := s.connections[auth.AgentID]; ok {
