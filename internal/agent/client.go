@@ -60,7 +60,7 @@ func (c *Client) Run(ctx context.Context) error {
 		}
 
 		if err := c.connect(ctx); err != nil {
-			c.lastError = err.Error()
+			c.setLastError(err.Error())
 			retryCount++
 
 			// Check max attempts (0 = infinite)

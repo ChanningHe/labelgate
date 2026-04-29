@@ -287,7 +287,7 @@ func (a *agentCore) handleCommand(msg *Message) {
 func (a *agentCore) sendReport() {
 	containers, err := a.provider.ListContainers(context.Background())
 	if err != nil {
-		a.lastError = err.Error()
+		a.setLastError(err.Error())
 		log.Error().Err(err).Msg("Failed to list containers")
 		return
 	}
@@ -439,17 +439,24 @@ func (a *agentCore) getPublicIP() string {
 	return strings.TrimSpace(string(data))
 }
 
-// getHealth returns the agent health status.
+// getHealth returns a consistent snapshot of agent health under a single lock,
+// so callers never observe a half-updated view (e.g. connected=true with a
+// stale lastError from a previous disconnect).
 func (a *agentCore) getHealth() *AgentHealth {
 	a.mu.RLock()
-	connected := a.connected
-	a.mu.RUnlock()
-
+	defer a.mu.RUnlock()
 	return &AgentHealth{
-		DockerConnected: connected,
+		DockerConnected: a.connected,
 		UptimeSeconds:   int64(time.Since(a.startTime).Seconds()),
 		LastError:       a.lastError,
 	}
+}
+
+// setLastError records the most recent error message. Safe for concurrent use.
+func (a *agentCore) setLastError(s string) {
+	a.mu.Lock()
+	a.lastError = s
+	a.mu.Unlock()
 }
 
 // isConnected returns whether the agent is connected.
