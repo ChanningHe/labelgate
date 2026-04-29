@@ -4,6 +4,7 @@ package dns
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"strings"
@@ -396,24 +397,37 @@ func getPublicIP() (string, error) {
 	client := &http.Client{Timeout: 5 * time.Second}
 
 	for _, svc := range services {
-		resp, err := client.Get(svc)
-		if err != nil {
-			continue
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode == http.StatusOK {
-			buf := make([]byte, 64)
-			n, _ := resp.Body.Read(buf)
-			ip := string(buf[:n])
-			ip = ip[:len(ip)-1] // Remove trailing newline if any
-			if net.ParseIP(ip) != nil {
-				return ip, nil
-			}
+		if ip, err := fetchPublicIP(client, svc); err == nil {
+			return ip, nil
 		}
 	}
 
 	return "", fmt.Errorf("failed to get public IP")
+}
+
+// fetchPublicIP queries a single endpoint and returns a validated IP address.
+// Body is bounded to avoid trusting an unknown remote with our memory.
+func fetchPublicIP(client *http.Client, url string) (string, error) {
+	resp, err := client.Get(url)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("unexpected status %d", resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 64))
+	if err != nil {
+		return "", err
+	}
+
+	ip := strings.TrimSpace(string(data))
+	if net.ParseIP(ip) == nil {
+		return "", fmt.Errorf("invalid IP response: %q", ip)
+	}
+	return ip, nil
 }
 
 // needsUpdate checks if a DNS record needs updating.

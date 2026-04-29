@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -430,9 +432,11 @@ func (a *agentCore) getPublicIP() string {
 	}
 	defer resp.Body.Close()
 
-	buf := make([]byte, 64)
-	n, _ := resp.Body.Read(buf)
-	return string(buf[:n])
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 64))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }
 
 // getHealth returns the agent health status.
