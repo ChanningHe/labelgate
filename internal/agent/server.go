@@ -87,9 +87,13 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/ws", s.handleWebSocket)
 	mux.HandleFunc("/health", s.handleHealth)
 
+	// Read/Write timeouts are deliberately omitted: WebSocket hijacks the
+	// connection and applies its own per-message deadlines.
 	server := &http.Server{
-		Addr:    s.config.Listen,
-		Handler: mux,
+		Addr:              s.config.Listen,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	// Configure TLS if provided

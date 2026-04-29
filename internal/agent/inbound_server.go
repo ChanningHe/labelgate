@@ -78,9 +78,13 @@ func (l *InboundListener) Run(ctx context.Context) error {
 		fmt.Fprintf(w, `{"status":"ok","agent_id":"%s","connected":%t}`, l.getAgentID(), l.isConnected())
 	})
 
+	// Read/Write timeouts are deliberately omitted: WebSocket hijacks the
+	// connection and applies its own per-message deadlines.
 	server := &http.Server{
-		Addr:    listenAddr,
-		Handler: mux,
+		Addr:              listenAddr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	// Configure TLS if provided

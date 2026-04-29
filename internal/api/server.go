@@ -59,8 +59,12 @@ func NewServer(cfg *Config) *Server {
 	})
 
 	s.server = &http.Server{
-		Addr:    cfg.Address,
-		Handler: mux,
+		Addr:              cfg.Address,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	return s
