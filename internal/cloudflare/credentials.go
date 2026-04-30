@@ -36,9 +36,13 @@ type HealthResult struct {
 }
 
 // CredentialManager manages multiple Cloudflare credentials.
+//
+// Credentials are stored as pointer slices so that defaultCredential and any
+// caller holding a *Credential remain valid after additional credentials are
+// appended (a value slice would invalidate addresses on reallocation).
 type CredentialManager struct {
-	credentials       []Credential
-	tunnelCredentials []TunnelCredential
+	credentials       []*Credential
+	tunnelCredentials []*TunnelCredential
 	defaultCredential *Credential
 	clients           map[string]*Client // credential name -> client
 	clientsMu         sync.RWMutex
@@ -51,58 +55,53 @@ type CredentialManager struct {
 // NewCredentialManager creates a new credential manager from config.
 func NewCredentialManager(cfg *config.Config) (*CredentialManager, error) {
 	cm := &CredentialManager{
-		credentials:       make([]Credential, 0),
-		tunnelCredentials: make([]TunnelCredential, 0),
-		clients:           make(map[string]*Client),
+		clients: make(map[string]*Client),
 	}
 
 	// Load default credential from root-level cloudflare config
 	if cfg.Cloudflare.APIToken != "" {
-		defaultCred := Credential{
+		defaultCred := &Credential{
 			Name:     "default",
 			APIToken: cfg.Cloudflare.APIToken,
 			Default:  true,
 		}
 		cm.credentials = append(cm.credentials, defaultCred)
-		cm.defaultCredential = &cm.credentials[0]
+		cm.defaultCredential = defaultCred
 	}
 
 	// Load additional named credentials from config
 	for name, cfgCred := range cfg.Cloudflare.Credentials {
-		cred := Credential{
+		cm.credentials = append(cm.credentials, &Credential{
 			Name:     name,
 			APIToken: cfgCred.APIToken,
 			Zones:    cfgCred.Zones,
 			Default:  false,
-		}
-		cm.credentials = append(cm.credentials, cred)
+		})
 	}
 
 	// If no default set, use the first one
 	if cm.defaultCredential == nil && len(cm.credentials) > 0 {
 		cm.credentials[0].Default = true
-		cm.defaultCredential = &cm.credentials[0]
+		cm.defaultCredential = cm.credentials[0]
 	}
 
 	// Load default tunnel from root-level cloudflare config
 	if cfg.Cloudflare.AccountID != "" && cfg.Cloudflare.TunnelID != "" {
-		tunnelCred := TunnelCredential{
+		cm.tunnelCredentials = append(cm.tunnelCredentials, &TunnelCredential{
 			TunnelID:   cfg.Cloudflare.TunnelID,
 			TunnelName: "default",
 			AccountID:  cfg.Cloudflare.AccountID,
-		}
-		cm.tunnelCredentials = append(cm.tunnelCredentials, tunnelCred)
+		})
 	}
 
 	// Load additional named tunnels from config
 	for name, tunnel := range cfg.Cloudflare.Tunnels {
-		tunnelCred := TunnelCredential{
+		cm.tunnelCredentials = append(cm.tunnelCredentials, &TunnelCredential{
 			TunnelID:   tunnel.TunnelID,
 			TunnelName: name,
 			AccountID:  tunnel.AccountID,
 			Credential: tunnel.Credential,
-		}
-		cm.tunnelCredentials = append(cm.tunnelCredentials, tunnelCred)
+		})
 	}
 
 	if len(cm.credentials) == 0 {
@@ -117,9 +116,9 @@ func NewCredentialManager(cfg *config.Config) (*CredentialManager, error) {
 func (cm *CredentialManager) GetCredentialForZone(hostname string, explicitCredName string) (*Credential, error) {
 	// 1. Check explicit credential name
 	if explicitCredName != "" {
-		for i := range cm.credentials {
-			if cm.credentials[i].Name == explicitCredName {
-				return &cm.credentials[i], nil
+		for _, cred := range cm.credentials {
+			if cred.Name == explicitCredName {
+				return cred, nil
 			}
 		}
 		return nil, fmt.Errorf("credential not found: %s", explicitCredName)
@@ -127,9 +126,9 @@ func (cm *CredentialManager) GetCredentialForZone(hostname string, explicitCredN
 
 	// 2. Match by zone — check if hostname belongs to any credential's zones
 	// using suffix matching against user-configured zone names.
-	for i := range cm.credentials {
-		if matchZone(&cm.credentials[i], hostname) {
-			return &cm.credentials[i], nil
+	for _, cred := range cm.credentials {
+		if matchZone(cred, hostname) {
+			return cred, nil
 		}
 	}
 
@@ -143,10 +142,9 @@ func (cm *CredentialManager) GetCredentialForZone(hostname string, explicitCredN
 
 // GetTunnelCredential returns the tunnel credential for a given tunnel ID or name.
 func (cm *CredentialManager) GetTunnelCredential(tunnelIDOrName string) (*TunnelCredential, error) {
-	for i := range cm.tunnelCredentials {
-		if cm.tunnelCredentials[i].TunnelID == tunnelIDOrName ||
-			cm.tunnelCredentials[i].TunnelName == tunnelIDOrName {
-			return &cm.tunnelCredentials[i], nil
+	for _, cred := range cm.tunnelCredentials {
+		if cred.TunnelID == tunnelIDOrName || cred.TunnelName == tunnelIDOrName {
+			return cred, nil
 		}
 	}
 	return nil, fmt.Errorf("tunnel credential not found: %s", tunnelIDOrName)
@@ -204,7 +202,7 @@ func (cm *CredentialManager) GetTunnelClient(tunnelIDOrName string) (*Client, *T
 			// Try to set account ID from first tunnel config
 			if len(cm.tunnelCredentials) > 0 {
 				client.SetAccountID(cm.tunnelCredentials[0].AccountID)
-				return client, &cm.tunnelCredentials[0], nil
+				return client, cm.tunnelCredentials[0], nil
 			}
 			return client, nil, nil
 		}
@@ -246,8 +244,7 @@ func (cm *CredentialManager) ListTunnels() []string {
 
 // Validate validates all configured credentials.
 func (cm *CredentialManager) Validate(ctx context.Context) error {
-	for i := range cm.credentials {
-		cred := &cm.credentials[i]
+	for _, cred := range cm.credentials {
 		client, err := cm.GetClient(cred)
 		if err != nil {
 			return fmt.Errorf("failed to create client for %s: %w", cred.Name, err)
