@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +20,7 @@ import (
 
 	"github.com/channinghe/labelgate/internal/config"
 	"github.com/channinghe/labelgate/internal/provider"
+	"github.com/channinghe/labelgate/internal/types"
 	"github.com/channinghe/labelgate/internal/version"
 )
 
@@ -356,11 +359,14 @@ func (a *agentCore) sendErrorResponse(requestID, code, message string) {
 }
 
 // watchContainers watches for container changes and signals the channel.
+// Changes are detected by fingerprinting IDs, names, and labels, so label
+// edits and same-count replacements are caught, not just count changes.
 func (a *agentCore) watchContainers(ctx context.Context, notify chan<- struct{}) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
-	var lastCount int
+	var lastFP uint64
+	first := true
 
 	for {
 		select {
@@ -373,12 +379,18 @@ func (a *agentCore) watchContainers(ctx context.Context, notify chan<- struct{})
 			if err != nil {
 				continue
 			}
-			if len(containers) != lastCount {
+			fp := containersFingerprint(containers)
+			if first {
+				// Baseline only — the initial report already covered this state
+				lastFP = fp
+				first = false
+				continue
+			}
+			if fp != lastFP {
 				log.Info().
-					Int("previous", lastCount).
-					Int("current", len(containers)).
-					Msg("Container count changed, triggering report")
-				lastCount = len(containers)
+					Int("containers", len(containers)).
+					Msg("Container set changed, triggering report")
+				lastFP = fp
 				select {
 				case notify <- struct{}{}:
 				default:
@@ -386,6 +398,25 @@ func (a *agentCore) watchContainers(ctx context.Context, notify chan<- struct{})
 			}
 		}
 	}
+}
+
+// containersFingerprint hashes the fields that affect reconciliation
+// (ID, name, labels), skipping volatile fields like state or timestamps.
+func containersFingerprint(containers []*types.ContainerInfo) uint64 {
+	sorted := make([]*types.ContainerInfo, len(containers))
+	copy(sorted, containers)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].ID < sorted[j].ID
+	})
+
+	h := fnv.New64a()
+	for _, c := range sorted {
+		fmt.Fprintf(h, "%s\x00%s\x00", c.ID, c.Name)
+		labels, _ := json.Marshal(c.Labels)
+		h.Write(labels)
+		h.Write([]byte{0})
+	}
+	return h.Sum64()
 }
 
 // disconnect closes the connection.
