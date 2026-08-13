@@ -479,6 +479,9 @@ func (r *Reconciler) cleanupExpiredOrphans(ctx context.Context) {
 }
 
 // getDesiredState returns the desired state from all sources.
+// The result is sorted deterministically (local containers first, then by
+// agent, container name, ID) so that "first wins" conflict arbitration in the
+// operators picks a stable winner instead of flapping with map iteration order.
 func (r *Reconciler) getDesiredState() []*types.ParsedContainer {
 	var desired []*types.ParsedContainer
 
@@ -491,6 +494,17 @@ func (r *Reconciler) getDesiredState() []*types.ParsedContainer {
 	for _, containers := range r.agentData {
 		desired = append(desired, containers...)
 	}
+
+	sort.Slice(desired, func(i, j int) bool {
+		a, b := desired[i], desired[j]
+		if a.AgentID != b.AgentID {
+			return a.AgentID < b.AgentID
+		}
+		if a.Info.Name != b.Info.Name {
+			return a.Info.Name < b.Info.Name
+		}
+		return a.Info.ID < b.Info.ID
+	})
 
 	return desired
 }
