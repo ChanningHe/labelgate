@@ -221,7 +221,7 @@ func (o *DNSOperatorImpl) CreateDNSRecord(ctx context.Context, container *types.
 	dnsClient := cloudflare.NewDNSClient(client)
 
 	// Resolve target IP if needed
-	target, err := o.resolveTarget(service.Target, container)
+	target, err := o.resolveTarget(ctx, service.Target, container)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve target: %w", err)
 	}
@@ -324,7 +324,7 @@ func (o *DNSOperatorImpl) UpdateDNSRecord(ctx context.Context, resource *storage
 	// Resolve new target if needed
 	target := service.Target
 	if target == "auto" || target == "" {
-		target, err = getPublicIP()
+		target, err = o.resolveAutoIP(ctx, resource.AgentID, "")
 		if err != nil {
 			return err
 		}
@@ -380,11 +380,26 @@ func (o *DNSOperatorImpl) DeleteDNSRecord(ctx context.Context, resource *storage
 	return o.storage.DeleteResource(ctx, resource.ID)
 }
 
+// resolveAutoIP resolves the public IP for an "auto" target. Containers
+// reported by an agent resolve to that agent host's public IP; local
+// containers resolve to this host's public IP.
+func (o *DNSOperatorImpl) resolveAutoIP(ctx context.Context, agentID, hostIP string) (string, error) {
+	if hostIP != "" {
+		return hostIP, nil
+	}
+	if agentID != "" {
+		if agent, err := o.storage.GetAgent(ctx, agentID); err == nil && agent.PublicIP != "" {
+			return agent.PublicIP, nil
+		}
+	}
+	return getPublicIP()
+}
+
 // resolveTarget resolves the target IP address.
-func (o *DNSOperatorImpl) resolveTarget(target string, container *types.ContainerInfo) (string, error) {
+func (o *DNSOperatorImpl) resolveTarget(ctx context.Context, target string, container *types.ContainerInfo) (string, error) {
 	switch target {
 	case "auto", "":
-		return getPublicIP()
+		return o.resolveAutoIP(ctx, "", container.HostPublicIP)
 	case "container":
 		// Get first network IP
 		for _, ip := range container.Networks {

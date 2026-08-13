@@ -56,6 +56,10 @@ type ContainerInfo struct {
 	// Networks maps network name to IP address
 	Networks map[string]string `json:"networks,omitempty"`
 
+	// HostPublicIP is the public IP of the host running this container,
+	// as reported by the agent. Empty for local containers.
+	HostPublicIP string `json:"host_public_ip,omitempty"`
+
 	// State is the container state (running, exited, etc.)
 	State string `json:"state"`
 

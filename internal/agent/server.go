@@ -398,6 +398,9 @@ func (s *Server) handleReport(agent *AgentConnection, msg *Message) {
 	var parsedContainers []*types.ParsedContainer
 	for _, cd := range report.Containers {
 		containerInfo := cd.ConvertToContainerInfo()
+		// Attach the agent host's public IP so DNS target=auto resolves to
+		// the agent's host instead of the main instance's host.
+		containerInfo.HostPublicIP = report.PublicIP
 		parsed := s.parseContainerLabels(containerInfo, agent.ID)
 		if parsed != nil {
 			parsedContainers = append(parsedContainers, parsed)
