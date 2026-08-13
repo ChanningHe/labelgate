@@ -163,10 +163,18 @@ func (o *TunnelOperatorImpl) reconcileTunnel(ctx context.Context, tunnelName str
 			Msg("Preparing tunnel ingress rule")
 	}
 
-	// Check if tunnel configuration actually changed before pushing
 	tunnelClient := cloudflare.NewTunnelClient(client, tunnelCred.AccountID)
-	configChanged := true
 	currentConfig, getErr := tunnelClient.GetTunnelConfiguration(ctx, tunnelID)
+
+	// Keep ingress rules for resources no longer desired (about to be marked
+	// orphaned). The full-config push would otherwise delete them from
+	// Cloudflare immediately, bypassing the remove_delay grace period —
+	// e.g. a brief agent disconnect would drop all of its rules at once.
+	// Actual CF removal happens later via RemoveIngressRule during orphan cleanup.
+	ingresses = append(ingresses, orphanedIngresses(desiredMap, current, currentConfig)...)
+
+	// Check if tunnel configuration actually changed before pushing
+	configChanged := true
 	if getErr == nil {
 		configChanged = !ingressConfigEqual(currentConfig, ingresses)
 	}
@@ -290,6 +298,45 @@ func (o *TunnelOperatorImpl) reconcileTunnel(ctx context.Context, tunnelName str
 	delete(currentByTunnel, tunnelID)
 
 	return nil
+}
+
+// orphanedIngresses returns ingress rules for stored resources that are no
+// longer desired, so they survive the full-config push until orphan cleanup
+// removes them after remove_delay. Rules are sourced from the live Cloudflare
+// config when available (preserving OriginRequest, which is not stored in DB),
+// falling back to the stored fields. Error-state resources are skipped: their
+// rules never made it to Cloudflare, so re-adding them would resurrect rules
+// for containers that are already gone.
+func orphanedIngresses(desired map[string]*desiredTunnel, current map[string]*storage.ManagedResource, liveConfig *types.TunnelConfiguration) []*types.TunnelIngress {
+	live := make(map[string]types.IngressRule)
+	if liveConfig != nil {
+		for _, rule := range liveConfig.Ingress {
+			if rule.Hostname != "" {
+				live[rule.Hostname+":"+rule.Path] = rule
+			}
+		}
+	}
+
+	var result []*types.TunnelIngress
+	for key, res := range current {
+		if _, ok := desired[key]; ok {
+			continue
+		}
+		if res.Status == storage.StatusError {
+			continue
+		}
+		ing := &types.TunnelIngress{
+			Hostname: res.Hostname,
+			Path:     res.Path,
+			Service:  res.Service,
+		}
+		if rule, ok := live[key]; ok {
+			ing.Service = rule.Service
+			ing.OriginRequest = rule.OriginRequest
+		}
+		result = append(result, ing)
+	}
+	return result
 }
 
 // ensureTunnelDNSRecords creates CNAME records for tunnel hostnames.
