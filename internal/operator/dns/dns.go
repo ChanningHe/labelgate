@@ -254,7 +254,7 @@ func (o *DNSOperatorImpl) CreateDNSRecord(ctx context.Context, container *types.
 		Proxied:  service.Proxied,
 		TTL:      service.TTL,
 		Priority: service.Priority,
-		Comment:  fmt.Sprintf("Managed by labelgate [container:%s service:%s]", container.Name, service.ServiceName),
+		Comment:  managedComment(service.Comment, container.Name, service.ServiceName),
 	}
 
 	created, err := dnsClient.CreateRecord(ctx, record)
@@ -361,6 +361,8 @@ func (o *DNSOperatorImpl) UpdateDNSRecord(ctx context.Context, resource *storage
 		Proxied:  service.Proxied,
 		TTL:      service.TTL,
 		Priority: service.Priority,
+		// Preserve the comment — the update body would otherwise clear it
+		Comment: managedComment(service.Comment, resource.ContainerName, service.ServiceName),
 	}
 
 	if _, err := dnsClient.UpdateRecord(ctx, record); err != nil {
@@ -551,6 +553,15 @@ func needsUpdate(current *storage.ManagedResource, desired *types.DNSService, ex
 	}
 
 	return false
+}
+
+// managedComment returns the user-specified comment from the label, falling
+// back to the managed-by marker that identifies labelgate-owned records.
+func managedComment(comment, containerName, serviceName string) string {
+	if comment != "" {
+		return comment
+	}
+	return fmt.Sprintf("Managed by labelgate [container:%s service:%s]", containerName, serviceName)
 }
 
 // findConflictingRecord looks for an A/AAAA/CNAME record of a different type
