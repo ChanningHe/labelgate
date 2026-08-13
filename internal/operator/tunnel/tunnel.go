@@ -380,13 +380,23 @@ func (o *TunnelOperatorImpl) ensureTunnelDNSRecords(ctx context.Context, tunnelI
 				continue
 			}
 
-			// Record exists but points elsewhere
+			// Record exists but points elsewhere. Only repoint records that
+			// already target a tunnel (e.g. a recreated tunnel with a new ID) —
+			// never hijack records managed by the user or another tool.
+			if !strings.HasSuffix(existingRecord.Content, ".cfargotunnel.com") {
+				log.Error().
+					Str("hostname", hostname).
+					Str("existing_content", existingRecord.Content).
+					Str("expected_content", tunnelTarget).
+					Msg("DNS CNAME exists but is not tunnel-managed, refusing to overwrite — remove it manually to route via tunnel")
+				continue
+			}
+
 			log.Warn().
 				Str("hostname", hostname).
-				Str("existing_type", string(existingRecord.Type)).
 				Str("existing_content", existingRecord.Content).
 				Str("expected_content", tunnelTarget).
-				Msg("DNS record exists but doesn't point to tunnel, updating")
+				Msg("DNS CNAME points to a different tunnel, updating")
 
 			// Update the record to point to tunnel
 			existingRecord.Type = types.DNSTypeCNAME
@@ -606,8 +616,38 @@ func (o *TunnelOperatorImpl) RemoveIngressRule(ctx context.Context, resource *st
 		return err
 	}
 
+	// Clean up the auto-created CNAME so it doesn't dangle in Cloudflare
+	if o.autoCreateDNS {
+		o.cleanupTunnelDNSRecord(ctx, tunnelCred.TunnelID, resource.Hostname)
+	}
+
 	// Hard-delete from storage (no more soft-delete)
 	return o.storage.DeleteResource(ctx, resource.ID)
+}
+
+// cleanupTunnelDNSRecord deletes the auto-created CNAME for a tunnel hostname,
+// but only when it still points at this tunnel's cfargotunnel.com target —
+// records managed by the user or another tunnel are left untouched.
+func (o *TunnelOperatorImpl) cleanupTunnelDNSRecord(ctx context.Context, tunnelID, hostname string) {
+	dnsClient, err := o.getDNSClientForHostname(hostname)
+	if err != nil {
+		log.Warn().Err(err).Str("hostname", hostname).Msg("Cannot create DNS client for tunnel CNAME cleanup")
+		return
+	}
+
+	record, err := dnsClient.GetRecordByName(ctx, hostname, types.DNSTypeCNAME)
+	if err != nil || record == nil {
+		return
+	}
+	if record.Content != tunnelID+".cfargotunnel.com" {
+		return
+	}
+
+	if err := dnsClient.DeleteRecord(ctx, record.ZoneID, record.ID); err != nil {
+		log.Error().Err(err).Str("hostname", hostname).Msg("Failed to delete auto-created tunnel CNAME")
+		return
+	}
+	log.Info().Str("hostname", hostname).Msg("Deleted auto-created tunnel CNAME")
 }
 
 // listTunnelCredentials returns all tunnel credentials.
