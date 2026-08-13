@@ -140,6 +140,7 @@ func (o *AccessOperatorImpl) ReconcileBindings(ctx context.Context, bindings []*
 				ContainerName:    binding.ContainerName,
 				ServiceName:      binding.ServiceName,
 				AgentID:          binding.AgentID,
+				Credential:       binding.Credential,
 				Status:           storage.StatusError,
 				LastError:        err.Error(),
 				CleanupEnabled:   binding.Cleanup,
@@ -177,27 +178,40 @@ func (o *AccessOperatorImpl) ReconcileBindings(ctx context.Context, bindings []*
 	return nil
 }
 
-// EnsureAccess creates or updates an Access Application for a resolved binding.
-func (o *AccessOperatorImpl) EnsureAccess(ctx context.Context, binding *types.ResolvedAccessBinding) (*storage.ManagedResource, error) {
-	// GetTunnelClient returns the API client + credential with AccountID.
-	// Access operations need the same client/account as tunnel operations.
-	client, tunnelCred, err := o.credManager.GetTunnelClient("default")
+// accessClientFor returns an AccessClient for the given hostname/credential.
+// The credential from the label is honored (falling back to zone matching if
+// it no longer exists); the account ID falls back from the given value to the
+// default tunnel's account, then to the client's account.
+func (o *AccessOperatorImpl) accessClientFor(hostname, credential, accountID string) (*cloudflare.AccessClient, string, error) {
+	client, err := o.credManager.GetClientForHostname(hostname, credential)
+	if err != nil && credential != "" {
+		client, err = o.credManager.GetClientForHostname(hostname, "")
+	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to get client for access: %w", err)
+		return nil, "", fmt.Errorf("failed to get client for access: %w", err)
 	}
 
-	accountID := ""
-	if tunnelCred != nil {
-		accountID = tunnelCred.AccountID
+	if accountID == "" {
+		if tunnelCred, tcErr := o.credManager.GetTunnelCredential("default"); tcErr == nil {
+			accountID = tunnelCred.AccountID
+		}
 	}
 	if accountID == "" {
 		accountID = client.AccountID()
 	}
 	if accountID == "" {
-		return nil, fmt.Errorf("account ID is required for access operations")
+		return nil, "", fmt.Errorf("account ID is required for access operations")
 	}
 
-	accessClient := cloudflare.NewAccessClient(client, accountID)
+	return cloudflare.NewAccessClient(client, accountID), accountID, nil
+}
+
+// EnsureAccess creates or updates an Access Application for a resolved binding.
+func (o *AccessOperatorImpl) EnsureAccess(ctx context.Context, binding *types.ResolvedAccessBinding) (*storage.ManagedResource, error) {
+	accessClient, accountID, err := o.accessClientFor(binding.Hostname, binding.Credential, "")
+	if err != nil {
+		return nil, err
+	}
 
 	// Check if an Access Application already exists for this hostname (not managed by labelgate)
 	existingAppID, existingAppName, err := accessClient.FindExistingAccessApp(ctx, binding.Hostname)
@@ -238,6 +252,7 @@ func (o *AccessOperatorImpl) EnsureAccess(ctx context.Context, binding *types.Re
 		ContainerName:    binding.ContainerName,
 		ServiceName:      binding.ServiceName,
 		AgentID:          binding.AgentID,
+		Credential:       binding.Credential,
 		Status:           storage.StatusActive,
 		CleanupEnabled:   binding.Cleanup,
 	}
@@ -252,20 +267,10 @@ func (o *AccessOperatorImpl) EnsureAccess(ctx context.Context, binding *types.Re
 // updateAccess updates an existing Access Application.
 // If the CF app was deleted externally, it resets the stored ID and recreates.
 func (o *AccessOperatorImpl) updateAccess(ctx context.Context, existing *storage.ManagedResource, binding *types.ResolvedAccessBinding) error {
-	client, tunnelCred, err := o.credManager.GetTunnelClient("default")
+	accessClient, _, err := o.accessClientFor(binding.Hostname, binding.Credential, existing.AccountID)
 	if err != nil {
-		return fmt.Errorf("failed to get client for access: %w", err)
+		return err
 	}
-
-	accountID := existing.AccountID
-	if accountID == "" && tunnelCred != nil {
-		accountID = tunnelCred.AccountID
-	}
-	if accountID == "" {
-		accountID = client.AccountID()
-	}
-
-	accessClient := cloudflare.NewAccessClient(client, accountID)
 
 	appID := existing.AccessAppID
 	_, err = accessClient.EnsureAccessForHostname(ctx, binding.Hostname, binding.PolicyDef, appID)
@@ -303,6 +308,7 @@ func (o *AccessOperatorImpl) updateAccess(ctx context.Context, existing *storage
 	existing.ContainerName = binding.ContainerName
 	existing.ServiceName = binding.ServiceName
 	existing.AgentID = binding.AgentID
+	existing.Credential = binding.Credential
 	existing.CleanupEnabled = binding.Cleanup
 	return o.storage.SaveResource(ctx, existing)
 }
@@ -317,20 +323,10 @@ func (o *AccessOperatorImpl) RemoveAccess(ctx context.Context, resource *storage
 		return o.storage.DeleteResource(ctx, resource.ID)
 	}
 
-	client, tunnelCred, err := o.credManager.GetTunnelClient("default")
+	accessClient, _, err := o.accessClientFor(resource.Hostname, resource.Credential, resource.AccountID)
 	if err != nil {
-		return fmt.Errorf("failed to get client for access: %w", err)
+		return err
 	}
-
-	accountID := resource.AccountID
-	if accountID == "" && tunnelCred != nil {
-		accountID = tunnelCred.AccountID
-	}
-	if accountID == "" {
-		accountID = client.AccountID()
-	}
-
-	accessClient := cloudflare.NewAccessClient(client, accountID)
 
 	if err := accessClient.DeleteAccessApplication(ctx, resource.AccessAppID); err != nil {
 		// If the app is already gone on CF side, just clean up storage
