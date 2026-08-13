@@ -270,6 +270,14 @@ func (o *DNSOperatorImpl) CreateDNSRecord(ctx context.Context, container *types.
 					Msg("DNS record already exists in Cloudflare, adopting it")
 				created = existing
 				err = nil
+			} else if lookupErr == nil {
+				// No record of the requested type exists — the hostname is
+				// occupied by a mutually exclusive record of another type.
+				// Surface the real conflict instead of a vague create error.
+				if conflict := findConflictingRecord(ctx, dnsClient, service.Hostname, service.Type); conflict != nil {
+					err = fmt.Errorf("hostname %s is already occupied by a %s record pointing to %s (possibly tunnel-managed); remove it or change the label type",
+						service.Hostname, conflict.Type, conflict.Content)
+				}
 			}
 		}
 		if err != nil {
@@ -543,6 +551,35 @@ func needsUpdate(current *storage.ManagedResource, desired *types.DNSService, ex
 	}
 
 	return false
+}
+
+// findConflictingRecord looks for an A/AAAA/CNAME record of a different type
+// occupying the hostname. Cloudflare treats these types as mutually exclusive
+// per name, so a create can fail with "already exists" even though no record
+// of the requested type exists.
+func findConflictingRecord(ctx context.Context, dnsClient *cloudflare.DNSClient, hostname string, requested types.DNSRecordType) *types.DNSRecord {
+	exclusive := []types.DNSRecordType{types.DNSTypeA, types.DNSTypeAAAA, types.DNSTypeCNAME}
+
+	isExclusive := false
+	for _, t := range exclusive {
+		if t == requested {
+			isExclusive = true
+			break
+		}
+	}
+	if !isExclusive {
+		return nil
+	}
+
+	for _, t := range exclusive {
+		if t == requested {
+			continue
+		}
+		if rec, err := dnsClient.GetRecordByName(ctx, hostname, t); err == nil && rec != nil {
+			return rec
+		}
+	}
+	return nil
 }
 
 // isAlreadyExistsError checks whether a Cloudflare API error indicates the record
