@@ -84,35 +84,7 @@ func (o *DNSOperatorImpl) Reconcile(ctx context.Context, desired []*types.Parsed
 	for key, desired := range desiredMap {
 		current, exists := currentMap[key]
 		if !exists {
-		// Create new record
-		if resource, err := o.CreateDNSRecord(ctx, desired.container.Info, desired.service); err != nil {
-				log.Error().Err(err).
-					Str("hostname", desired.service.Hostname).
-					Msg("Failed to create DNS record")
-			// Save resource in error state so Dashboard can see the failure
-			errResource := &storage.ManagedResource{
-				ResourceType:   storage.ResourceTypeDNS,
-				Hostname:       desired.service.Hostname,
-				RecordType:     string(desired.service.Type),
-				Content:        desired.service.Target,
-				Proxied:        desired.service.Proxied,
-				TTL:            desired.service.TTL,
-				ContainerID:    desired.container.Info.ID,
-				ContainerName:  desired.container.Info.Name,
-				ServiceName:    desired.service.ServiceName,
-				AgentID:        desired.container.AgentID,
-				Status:         storage.StatusError,
-				LastError:      err.Error(),
-				CleanupEnabled: desired.service.Cleanup,
-			}
-				if saveErr := o.storage.SaveResource(ctx, errResource); saveErr != nil {
-					log.Error().Err(saveErr).Str("hostname", desired.service.Hostname).Msg("Failed to save error resource")
-				}
-			} else if desired.container.AgentID != "" {
-				// CreateDNSRecord doesn't know about AgentID; patch it after creation
-				resource.AgentID = desired.container.AgentID
-				_ = o.storage.SaveResource(ctx, resource)
-			}
+			o.createAndTrack(ctx, desired)
 		} else {
 			// Update AgentID if it changed (e.g. resource was local, now from agent)
 			if current.AgentID != desired.container.AgentID {
@@ -121,7 +93,13 @@ func (o *DNSOperatorImpl) Reconcile(ctx context.Context, desired []*types.Parsed
 			}
 			// Check if update needed (also retry errors, reactivate orphaned)
 			if current.Status == storage.StatusError || current.Status == storage.StatusOrphaned || needsUpdate(current, desired.service) {
-				if err := o.UpdateDNSRecord(ctx, current, desired.service); err != nil {
+				if current.CFID == "" {
+					// Record never materialized in Cloudflare (a previous create
+					// failed) — retry create, not update. SaveResource upserts on
+					// (resource_type, hostname, record_type), so the existing
+					// error row is updated in place.
+					o.createAndTrack(ctx, desired)
+				} else if err := o.UpdateDNSRecord(ctx, current, desired.service); err != nil {
 					log.Error().Err(err).
 						Str("hostname", desired.service.Hostname).
 						Msg("Failed to update DNS record")
@@ -161,6 +139,43 @@ func (o *DNSOperatorImpl) Reconcile(ctx context.Context, desired []*types.Parsed
 	}
 
 	return nil
+}
+
+// createAndTrack creates a DNS record and records the outcome in storage.
+// On failure it upserts an error-state resource so the failure is visible in
+// the Dashboard and retried as a create on the next reconcile; on success it
+// preserves the AgentID which CreateDNSRecord doesn't know about.
+func (o *DNSOperatorImpl) createAndTrack(ctx context.Context, desired *desiredDNS) {
+	resource, err := o.CreateDNSRecord(ctx, desired.container.Info, desired.service)
+	if err != nil {
+		log.Error().Err(err).
+			Str("hostname", desired.service.Hostname).
+			Msg("Failed to create DNS record")
+		errResource := &storage.ManagedResource{
+			ResourceType:   storage.ResourceTypeDNS,
+			Hostname:       desired.service.Hostname,
+			RecordType:     string(desired.service.Type),
+			Content:        desired.service.Target,
+			Proxied:        desired.service.Proxied,
+			TTL:            desired.service.TTL,
+			ContainerID:    desired.container.Info.ID,
+			ContainerName:  desired.container.Info.Name,
+			ServiceName:    desired.service.ServiceName,
+			AgentID:        desired.container.AgentID,
+			Status:         storage.StatusError,
+			LastError:      err.Error(),
+			CleanupEnabled: desired.service.Cleanup,
+		}
+		if saveErr := o.storage.SaveResource(ctx, errResource); saveErr != nil {
+			log.Error().Err(saveErr).Str("hostname", desired.service.Hostname).Msg("Failed to save error resource")
+		}
+		return
+	}
+	if desired.container.AgentID != "" {
+		// CreateDNSRecord doesn't know about AgentID; patch it after creation
+		resource.AgentID = desired.container.AgentID
+		_ = o.storage.SaveResource(ctx, resource)
+	}
 }
 
 // Create creates a resource (generic interface).
