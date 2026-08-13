@@ -172,6 +172,7 @@ func (o *DNSOperatorImpl) createAndTrack(ctx context.Context, desired *desiredDN
 			ContainerName:  desired.container.Info.Name,
 			ServiceName:    desired.service.ServiceName,
 			AgentID:        desired.container.AgentID,
+			Credential:     desired.service.Credential,
 			Status:         storage.StatusError,
 			LastError:      err.Error(),
 			CleanupEnabled: desired.service.Cleanup,
@@ -196,6 +197,7 @@ func (o *DNSOperatorImpl) Create(ctx context.Context, resource *storage.ManagedR
 		Hostname:    resource.Hostname,
 		Type:        types.DNSRecordType(resource.RecordType),
 		Target:      resource.Content,
+		Credential:  resource.Credential,
 	}
 	_, err := o.CreateDNSRecord(ctx, &types.ContainerInfo{
 		ID:   resource.ContainerID,
@@ -211,6 +213,7 @@ func (o *DNSOperatorImpl) Update(ctx context.Context, resource *storage.ManagedR
 		Hostname:    resource.Hostname,
 		Type:        types.DNSRecordType(resource.RecordType),
 		Target:      resource.Content,
+		Credential:  resource.Credential,
 	}
 	return o.UpdateDNSRecord(ctx, resource, svc)
 }
@@ -287,6 +290,7 @@ func (o *DNSOperatorImpl) CreateDNSRecord(ctx context.Context, container *types.
 		ContainerID:    container.ID,
 		ContainerName:  container.Name,
 		ServiceName:    service.ServiceName,
+		Credential:     service.Credential,
 		Status:         storage.StatusActive,
 		CleanupEnabled: service.Cleanup,
 	}
@@ -360,6 +364,7 @@ func (o *DNSOperatorImpl) UpdateDNSRecord(ctx context.Context, resource *storage
 	resource.Proxied = service.Proxied
 	resource.TTL = service.TTL
 	resource.ServiceName = service.ServiceName
+	resource.Credential = service.Credential
 	resource.CleanupEnabled = service.Cleanup
 
 	return o.storage.SaveResource(ctx, resource)
@@ -367,7 +372,12 @@ func (o *DNSOperatorImpl) UpdateDNSRecord(ctx context.Context, resource *storage
 
 // DeleteDNSRecord deletes a DNS record.
 func (o *DNSOperatorImpl) DeleteDNSRecord(ctx context.Context, resource *storage.ManagedResource) error {
-	client, err := o.credManager.GetClientForHostname(resource.Hostname, "")
+	// Use the credential the record was created with; fall back to zone
+	// matching if that credential no longer exists in the config.
+	client, err := o.credManager.GetClientForHostname(resource.Hostname, resource.Credential)
+	if err != nil && resource.Credential != "" {
+		client, err = o.credManager.GetClientForHostname(resource.Hostname, "")
+	}
 	if err != nil {
 		return err
 	}

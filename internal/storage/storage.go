@@ -80,6 +80,10 @@ type ManagedResource struct {
 	ServiceName   string `json:"service_name"`
 	AgentID       string `json:"agent_id,omitempty"`
 
+	// Credential is the Cloudflare credential name used to create this
+	// resource, so update/delete operations use the same credential.
+	Credential string `json:"credential,omitempty"`
+
 	// Status
 	Status         ResourceStatus `json:"status"`
 	CleanupEnabled bool           `json:"cleanup_enabled"`

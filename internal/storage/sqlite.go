@@ -22,7 +22,7 @@ type SQLiteStorage struct {
 // resourceColumns is the standard column list for resource queries.
 const resourceColumns = `id, resource_type, cf_id, zone_id, hostname, record_type, content, proxied, ttl,
 	tunnel_id, service, path, access_app_id, account_id, access_app_name, access_policy_name, access_decision,
-	container_id, container_name, service_name, agent_id,
+	container_id, container_name, service_name, agent_id, credential,
 	status, cleanup_enabled, last_error, created_at, updated_at, deleted_at`
 
 // NewSQLiteStorage creates a new SQLite storage instance.
@@ -206,9 +206,9 @@ func (s *SQLiteStorage) SaveResource(ctx context.Context, resource *ManagedResou
 		INSERT INTO managed_resources (
 			id, resource_type, cf_id, zone_id, hostname, record_type, content, proxied, ttl,
 			tunnel_id, service, path, access_app_id, account_id, access_app_name, access_policy_name, access_decision,
-			container_id, container_name, service_name, agent_id,
+			container_id, container_name, service_name, agent_id, credential,
 			status, cleanup_enabled, last_error, created_at, updated_at, deleted_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(resource_type, hostname, record_type) DO UPDATE SET
 			cf_id = excluded.cf_id,
 			zone_id = excluded.zone_id,
@@ -227,6 +227,7 @@ func (s *SQLiteStorage) SaveResource(ctx context.Context, resource *ManagedResou
 			container_name = excluded.container_name,
 			service_name = excluded.service_name,
 			agent_id = excluded.agent_id,
+			credential = excluded.credential,
 			status = excluded.status,
 			cleanup_enabled = excluded.cleanup_enabled,
 			last_error = excluded.last_error,
@@ -239,7 +240,7 @@ func (s *SQLiteStorage) SaveResource(ctx context.Context, resource *ManagedResou
 		resource.Hostname, resource.RecordType, resource.Content, resource.Proxied, resource.TTL,
 		resource.TunnelID, resource.Service, resource.Path,
 		resource.AccessAppID, resource.AccountID, resource.AccessAppName, resource.AccessPolicyName, resource.AccessDecision,
-		resource.ContainerID, resource.ContainerName, resource.ServiceName, resource.AgentID,
+		resource.ContainerID, resource.ContainerName, resource.ServiceName, resource.AgentID, resource.Credential,
 		resource.Status, resource.CleanupEnabled, resource.LastError, resource.CreatedAt, resource.UpdatedAt, resource.DeletedAt,
 	)
 	return err
@@ -479,7 +480,7 @@ func (s *SQLiteStorage) scanResource(row *sql.Row) (*ManagedResource, error) {
 	r := &ManagedResource{}
 	var cfID, zoneID, recordType, content, tunnelID, service, path sql.NullString
 	var accessAppID, accountID, accessAppName, accessPolicyName, accessDecision sql.NullString
-	var containerID, containerName, agentID, lastError sql.NullString
+	var containerID, containerName, agentID, credential, lastError sql.NullString
 	var proxied sql.NullBool
 	var ttl sql.NullInt64
 	var deletedAt sql.NullTime
@@ -487,7 +488,7 @@ func (s *SQLiteStorage) scanResource(row *sql.Row) (*ManagedResource, error) {
 	err := row.Scan(
 		&r.ID, &r.ResourceType, &cfID, &zoneID, &r.Hostname, &recordType, &content, &proxied, &ttl,
 		&tunnelID, &service, &path, &accessAppID, &accountID, &accessAppName, &accessPolicyName, &accessDecision,
-		&containerID, &containerName, &r.ServiceName, &agentID,
+		&containerID, &containerName, &r.ServiceName, &agentID, &credential,
 		&r.Status, &r.CleanupEnabled, &lastError, &r.CreatedAt, &r.UpdatedAt, &deletedAt,
 	)
 	if err == sql.ErrNoRows {
@@ -514,6 +515,7 @@ func (s *SQLiteStorage) scanResource(row *sql.Row) (*ManagedResource, error) {
 	r.ContainerID = containerID.String
 	r.ContainerName = containerName.String
 	r.AgentID = agentID.String
+	r.Credential = credential.String
 	r.LastError = lastError.String
 	if deletedAt.Valid {
 		r.DeletedAt = &deletedAt.Time
@@ -526,7 +528,7 @@ func (s *SQLiteStorage) scanResourceRows(rows *sql.Rows) (*ManagedResource, erro
 	r := &ManagedResource{}
 	var cfID, zoneID, recordType, content, tunnelID, service, path sql.NullString
 	var accessAppID, accountID, accessAppName, accessPolicyName, accessDecision sql.NullString
-	var containerID, containerName, agentID, lastError sql.NullString
+	var containerID, containerName, agentID, credential, lastError sql.NullString
 	var proxied sql.NullBool
 	var ttl sql.NullInt64
 	var deletedAt sql.NullTime
@@ -534,7 +536,7 @@ func (s *SQLiteStorage) scanResourceRows(rows *sql.Rows) (*ManagedResource, erro
 	err := rows.Scan(
 		&r.ID, &r.ResourceType, &cfID, &zoneID, &r.Hostname, &recordType, &content, &proxied, &ttl,
 		&tunnelID, &service, &path, &accessAppID, &accountID, &accessAppName, &accessPolicyName, &accessDecision,
-		&containerID, &containerName, &r.ServiceName, &agentID,
+		&containerID, &containerName, &r.ServiceName, &agentID, &credential,
 		&r.Status, &r.CleanupEnabled, &lastError, &r.CreatedAt, &r.UpdatedAt, &deletedAt,
 	)
 	if err != nil {
@@ -558,6 +560,7 @@ func (s *SQLiteStorage) scanResourceRows(rows *sql.Rows) (*ManagedResource, erro
 	r.ContainerID = containerID.String
 	r.ContainerName = containerName.String
 	r.AgentID = agentID.String
+	r.Credential = credential.String
 	r.LastError = lastError.String
 	if deletedAt.Valid {
 		r.DeletedAt = &deletedAt.Time
@@ -716,6 +719,14 @@ var migrations = []Migration{
 			ALTER TABLE managed_resources ADD COLUMN access_app_name TEXT;
 			ALTER TABLE managed_resources ADD COLUMN access_policy_name TEXT;
 			ALTER TABLE managed_resources ADD COLUMN access_decision TEXT;
+		`,
+	},
+	{
+		Version: 6,
+		SQL: `
+			-- Persist the credential name so update/delete operations use the
+			-- same Cloudflare credential the resource was created with
+			ALTER TABLE managed_resources ADD COLUMN credential TEXT;
 		`,
 	},
 }
