@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -21,10 +22,19 @@ import (
 // ensure DNSOperatorImpl implements DNSOperator
 var _ operator.DNSOperator = (*DNSOperatorImpl)(nil)
 
+// publicIPCacheTTL bounds how often the external public IP services are hit
+// when reconcile cycles compare auto targets against the current IP.
+const publicIPCacheTTL = 5 * time.Minute
+
 // DNSOperatorImpl implements the DNS operator.
 type DNSOperatorImpl struct {
 	credManager *cloudflare.CredentialManager
 	storage     storage.Storage
+
+	// Cached public IP for auto targets
+	ipMu        sync.Mutex
+	cachedIP    string
+	ipFetchedAt time.Time
 }
 
 // NewDNSOperator creates a new DNS operator.
@@ -92,7 +102,7 @@ func (o *DNSOperatorImpl) Reconcile(ctx context.Context, desired []*types.Parsed
 				_ = o.storage.SaveResource(ctx, current)
 			}
 			// Check if update needed (also retry errors, reactivate orphaned)
-			if current.Status == storage.StatusError || current.Status == storage.StatusOrphaned || needsUpdate(current, desired.service) {
+			if current.Status == storage.StatusError || current.Status == storage.StatusOrphaned || needsUpdate(current, desired.service, o.expectedContent(ctx, desired)) {
 				if current.CFID == "" {
 					// Record never materialized in Cloudflare (a previous create
 					// failed) — retry create, not update. SaveResource upserts on
@@ -392,7 +402,45 @@ func (o *DNSOperatorImpl) resolveAutoIP(ctx context.Context, agentID, hostIP str
 			return agent.PublicIP, nil
 		}
 	}
-	return getPublicIP()
+	return o.getPublicIPCached()
+}
+
+// getPublicIPCached returns the local host's public IP, cached for
+// publicIPCacheTTL to avoid hitting external services every reconcile.
+func (o *DNSOperatorImpl) getPublicIPCached() (string, error) {
+	o.ipMu.Lock()
+	defer o.ipMu.Unlock()
+
+	if o.cachedIP != "" && time.Since(o.ipFetchedAt) < publicIPCacheTTL {
+		return o.cachedIP, nil
+	}
+
+	ip, err := getPublicIP()
+	if err != nil {
+		return "", err
+	}
+	o.cachedIP = ip
+	o.ipFetchedAt = time.Now()
+	return ip, nil
+}
+
+// expectedContent returns the content the desired service should currently
+// resolve to, or "" when it cannot be determined (content comparison is then
+// skipped). This lets auto targets follow public IP changes (DDNS behavior).
+func (o *DNSOperatorImpl) expectedContent(ctx context.Context, d *desiredDNS) string {
+	switch d.service.Target {
+	case "auto", "":
+		ip, err := o.resolveAutoIP(ctx, d.container.AgentID, d.container.Info.HostPublicIP)
+		if err != nil {
+			return ""
+		}
+		return ip
+	case "container":
+		// Container IPs are only resolved at creation time
+		return ""
+	default:
+		return d.service.Target
+	}
 }
 
 // resolveTarget resolves the target IP address.
@@ -460,10 +508,12 @@ func fetchPublicIP(client *http.Client, url string) (string, error) {
 	return ip, nil
 }
 
-// needsUpdate checks if a DNS record needs updating.
-func needsUpdate(current *storage.ManagedResource, desired *types.DNSService) bool {
-	// Check if target changed
-	if desired.Target != "auto" && desired.Target != current.Content {
+// needsUpdate checks if a DNS record needs updating. expectedContent is the
+// resolved content the record should have ("" = undeterminable, skip check).
+func needsUpdate(current *storage.ManagedResource, desired *types.DNSService, expectedContent string) bool {
+	// Check if content drifted from what the target should resolve to
+	// (covers auto targets following public IP changes)
+	if expectedContent != "" && expectedContent != current.Content {
 		return true
 	}
 
