@@ -1,0 +1,73 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "schedule:weekly"],
+  "lockFileMaintenance": {
+    "enabled": true
+  },
+  "postUpdateOptions": ["gomodTidy", "gomodUpdateImportPaths"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Distroless base images pinned by digest in workflow env (BASE_NONROOT, BASE_DEBUG)",
+      "managerFilePatterns": ["/^\\.github/workflows/[^/]+\\.ya?ml$/"],
+      "matchStrings": [
+        "(?<depName>gcr\\.io/distroless/[a-z0-9-]+):(?<currentValue>[a-z0-9.-]+)@(?<currentDigest>sha256:[a-f0-9]{64})"
+      ],
+      "datasourceTemplate": "docker"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Wait before proposing npm releases to skip yanked or compromised versions",
+      "matchDatasources": ["npm"],
+      "minimumReleaseAge": "3 days"
+    },
+    {
+      "description": "Mantine packages must share one version; @mantine/spotlight is pinned to match @mantine/core",
+      "matchFileNames": ["dashboard/**"],
+      "matchPackageNames": ["/^@mantine\\//"],
+      "groupName": "Mantine"
+    },
+    {
+      "matchFileNames": ["dashboard/**"],
+      "matchPackageNames": ["react", "react-dom", "@types/react", "@types/react-dom"],
+      "groupName": "React"
+    },
+    {
+      "matchFileNames": ["dashboard/**"],
+      "matchPackageNames": ["vite", "vitest", "/^@vitejs\\//"],
+      "groupName": "Vite and Vitest"
+    },
+    {
+      "matchFileNames": ["dashboard/**"],
+      "matchPackageNames": ["eslint", "globals", "typescript", "typescript-eslint", "/^@eslint\\//", "/^eslint-plugin-/"],
+      "groupName": "Lint and TypeScript"
+    },
+    {
+      "matchFileNames": ["dashboard/**"],
+      "matchPackageNames": ["/^@fontsource(-variable)?\\//"],
+      "groupName": "Fonts"
+    },
+    {
+      "description": "The docs site is low risk; batch its non-major updates into one PR",
+      "matchFileNames": ["docsite/**"],
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "groupName": "docsite dependencies"
+    },
+    {
+      "matchManagers": ["gomod"],
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "groupName": "Go modules"
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "groupName": "GitHub Actions"
+    },
+    {
+      "description": "Base images in Dockerfiles and workflow env",
+      "matchDatasources": ["docker"],
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "groupName": "Container images"
+    }
+  ]
+}
