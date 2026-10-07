@@ -101,6 +101,7 @@ export interface OverviewData {
   version: string;
   uptime: string;
   started_at: string;
+  label_prefix: string;
 }
 
 export interface ManagedResource {

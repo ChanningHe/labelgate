@@ -20,6 +20,14 @@ export function useOverview() {
   });
 }
 
+// Matches labels.DefaultPrefix in pkg/labels; used until the server answers.
+export const DEFAULT_LABEL_PREFIX = 'labelgate';
+
+export function useLabelPrefix(): string {
+  const { data } = useOverview();
+  return data?.label_prefix || DEFAULT_LABEL_PREFIX;
+}
+
 export function useDNS(params?: Record<string, string>) {
   const key = params
     ? `/api/resources/dns?${new URLSearchParams(params).toString()}`
