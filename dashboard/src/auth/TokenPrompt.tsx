@@ -45,7 +45,7 @@ export function TokenPrompt({ onAccepted }: TokenPromptProps) {
       <Paper withBorder radius="md" p="xl" w="100%" maw={420}>
         <form onSubmit={handleSubmit}>
           <Stack gap="md">
-            <ThemeIcon size={40} radius="md" color="orange">
+            <ThemeIcon size={40} radius="md" color="brand">
               <IconLock size={22} />
             </ThemeIcon>
             <div>

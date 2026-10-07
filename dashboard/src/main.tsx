@@ -1,22 +1,18 @@
 import '@mantine/core/styles.css';
+import './styles/fonts.css';
+import './styles/tokens.css';
 import './global.css';
 
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { MantineProvider, createTheme } from '@mantine/core';
+import { MantineProvider } from '@mantine/core';
 import { LazyMotion, MotionConfig, domAnimation } from 'framer-motion';
 import App from './App';
-
-const theme = createTheme({
-  primaryColor: 'orange',
-  fontFamily:
-    '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
-  defaultRadius: 'md',
-});
+import { theme, cssVariablesResolver } from './theme';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <MantineProvider theme={theme} defaultColorScheme="auto">
+    <MantineProvider theme={theme} cssVariablesResolver={cssVariablesResolver} defaultColorScheme="auto">
       <LazyMotion features={domAnimation} strict>
         <MotionConfig reducedMotion="user">
           <App />

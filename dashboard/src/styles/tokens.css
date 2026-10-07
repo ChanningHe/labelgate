@@ -1,0 +1,71 @@
+/* Labelgate design tokens.
+   Neutrals are zinc (no hue) so the Cloudflare-orange accent stays the only warm color.
+   Resource kinds have fixed hues: DNS blue, Tunnel violet, Access teal.
+   Mantine sets data-mantine-color-scheme on <html> to the resolved scheme. */
+
+:root {
+  --lg-font-ui: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --lg-font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --lg-radius-sm: 6px;
+  --lg-radius-md: 10px;
+  --lg-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --lg-sidebar-width: 236px;
+  --lg-topbar-height: 53px;
+}
+
+:root,
+:root[data-mantine-color-scheme='dark'] {
+  --lg-bg: #0a0a0a;
+  --lg-surface: #121212;
+  --lg-raised: #181818;
+  --lg-hover: #1f1f1f;
+  --lg-border: #262626;
+  --lg-border-strong: #343434;
+  --lg-fg: #ededed;
+  --lg-fg-2: #c2c2c2;
+  --lg-muted: #8a8a8a;
+  --lg-faint: #5a5a5a;
+  --lg-off: #666666;
+  --lg-accent: #f6821f;
+  --lg-accent-fg: #1a0d00;
+  --lg-dns: #5b9bff;
+  --lg-tunnel: #a78bfa;
+  --lg-access: #34d3b4;
+  --lg-ok: #3fcf8e;
+  --lg-warn: #f2b441;
+  --lg-err: #f2626a;
+  --lg-code-bg: #0e0e0e;
+  --lg-t-key: #dedede;
+  --lg-t-str: #a5d68f;
+  --lg-t-com: #666666;
+  --lg-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  --lg-backdrop: rgba(0, 0, 0, 0.55);
+}
+
+:root[data-mantine-color-scheme='light'] {
+  --lg-bg: #fafafa;
+  --lg-surface: #ffffff;
+  --lg-raised: #fcfcfc;
+  --lg-hover: #f2f2f2;
+  --lg-border: #e5e5e5;
+  --lg-border-strong: #d4d4d4;
+  --lg-fg: #171717;
+  --lg-fg-2: #3a3a3a;
+  --lg-muted: #6b6b6b;
+  --lg-faint: #a3a3a3;
+  --lg-off: #a3a3a3;
+  --lg-accent: #e0690a;
+  --lg-accent-fg: #ffffff;
+  --lg-dns: #2563eb;
+  --lg-tunnel: #7c3aed;
+  --lg-access: #0f8f84;
+  --lg-ok: #13915a;
+  --lg-warn: #b4740b;
+  --lg-err: #d4373f;
+  --lg-code-bg: #fafafa;
+  --lg-t-key: #262626;
+  --lg-t-str: #2f7a2f;
+  --lg-t-com: #999999;
+  --lg-shadow: 0 16px 48px rgba(0, 0, 0, 0.1);
+  --lg-backdrop: rgba(0, 0, 0, 0.3);
+}
