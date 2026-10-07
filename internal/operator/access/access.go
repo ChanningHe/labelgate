@@ -122,29 +122,29 @@ func (o *AccessOperatorImpl) ReconcileBindings(ctx context.Context, bindings []*
 				log.Error().Err(err).
 					Str("hostname", hostname).
 					Msg("Failed to create Access Application")
-			errAppName := binding.PolicyDef.AppName
-			if errAppName == "" {
-				errAppName = fmt.Sprintf("labelgate:%s", binding.Hostname)
-			}
-			errDecision := ""
-			if len(binding.PolicyDef.Policies) > 0 {
-				errDecision = binding.PolicyDef.Policies[0].Decision
-			}
-			errResource := &storage.ManagedResource{
-				ResourceType:     storage.ResourceTypeAccessApp,
-				Hostname:         hostname,
-				AccessAppName:    errAppName,
-				AccessPolicyName: binding.PolicyDef.Name,
-				AccessDecision:   errDecision,
-				ContainerID:      binding.ContainerID,
-				ContainerName:    binding.ContainerName,
-				ServiceName:      binding.ServiceName,
-				AgentID:          binding.AgentID,
-				Credential:       binding.Credential,
-				Status:           storage.StatusError,
-				LastError:        err.Error(),
-				CleanupEnabled:   binding.Cleanup,
-			}
+				errAppName := binding.PolicyDef.AppName
+				if errAppName == "" {
+					errAppName = fmt.Sprintf("labelgate:%s", binding.Hostname)
+				}
+				errDecision := ""
+				if len(binding.PolicyDef.Policies) > 0 {
+					errDecision = binding.PolicyDef.Policies[0].Decision
+				}
+				errResource := &storage.ManagedResource{
+					ResourceType:     storage.ResourceTypeAccessApp,
+					Hostname:         hostname,
+					AccessAppName:    errAppName,
+					AccessPolicyName: binding.PolicyDef.Name,
+					AccessDecision:   errDecision,
+					ContainerID:      binding.ContainerID,
+					ContainerName:    binding.ContainerName,
+					ServiceName:      binding.ServiceName,
+					AgentID:          binding.AgentID,
+					Credential:       binding.Credential,
+					Status:           storage.StatusError,
+					LastError:        err.Error(),
+					CleanupEnabled:   binding.Cleanup,
+				}
 				if saveErr := o.storage.SaveResource(ctx, errResource); saveErr != nil {
 					log.Error().Err(saveErr).Str("hostname", hostname).Msg("Failed to save error resource")
 				}

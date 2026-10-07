@@ -61,9 +61,9 @@ type OriginRequestConfig struct {
 	CAPool           string `json:"ca_pool,omitempty"`
 
 	// HTTP settings
-	HTTPHostHeader          string `json:"http_host_header,omitempty"`
-	NoHappyEyeballs         bool   `json:"no_happy_eyeballs,omitempty"`
-	DisableChunkedEncoding  bool   `json:"disable_chunked_encoding,omitempty"`
+	HTTPHostHeader         string `json:"http_host_header,omitempty"`
+	NoHappyEyeballs        bool   `json:"no_happy_eyeballs,omitempty"`
+	DisableChunkedEncoding bool   `json:"disable_chunked_encoding,omitempty"`
 
 	// Protocol settings
 	ProxyType string `json:"proxy_type,omitempty"` // "", "socks"
@@ -79,13 +79,13 @@ type TunnelIngress struct {
 
 // Tunnel represents a Cloudflare Tunnel.
 type Tunnel struct {
-	ID              string           `json:"id"`
-	Name            string           `json:"name"`
-	AccountID       string           `json:"account_id"`
-	Status          string           `json:"status"`
-	RemoteConfig    bool             `json:"remote_config"`
-	ConnectorID     string           `json:"connector_id,omitempty"`
-	IngressRules    []*TunnelIngress `json:"ingress_rules,omitempty"`
+	ID           string           `json:"id"`
+	Name         string           `json:"name"`
+	AccountID    string           `json:"account_id"`
+	Status       string           `json:"status"`
+	RemoteConfig bool             `json:"remote_config"`
+	ConnectorID  string           `json:"connector_id,omitempty"`
+	IngressRules []*TunnelIngress `json:"ingress_rules,omitempty"`
 }
 
 // DefaultTunnelService returns a TunnelService with default values.

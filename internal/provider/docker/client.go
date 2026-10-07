@@ -308,7 +308,7 @@ func (p *DockerProvider) createHTTPClient() (*http.Client, error) {
 // createSSHClient creates an HTTP client that tunnels through SSH.
 func (p *DockerProvider) createSSHClient(ctx context.Context) (*http.Client, error) {
 	endpoint := p.config.Endpoint
-	
+
 	// Parse SSH URL: ssh://user@host:port
 	sshURL := strings.TrimPrefix(endpoint, "ssh://")
 	parts := strings.Split(sshURL, "@")

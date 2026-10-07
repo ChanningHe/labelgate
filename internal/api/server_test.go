@@ -17,8 +17,8 @@ type mockStorage struct {
 	agents    []*storage.Agent
 }
 
-func (m *mockStorage) Initialize(ctx context.Context) error                    { return nil }
-func (m *mockStorage) Close() error                                            { return nil }
+func (m *mockStorage) Initialize(ctx context.Context) error { return nil }
+func (m *mockStorage) Close() error                         { return nil }
 func (m *mockStorage) GetResource(ctx context.Context, id string) (*storage.ManagedResource, error) {
 	return nil, storage.ErrNotFound
 }

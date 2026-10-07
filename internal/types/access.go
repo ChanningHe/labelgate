@@ -93,7 +93,7 @@ const (
 
 // ValidAccessSelectors contains all valid access rule selectors.
 var ValidAccessSelectors = map[string]bool{
-	SelectorEmails:        true,
+	SelectorEmails:         true,
 	SelectorEmailsEndingIn: true,
 	SelectorIPRanges:       true,
 	SelectorCountry:        true,

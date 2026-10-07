@@ -92,7 +92,7 @@ func (p *Parser) Parse(labels map[string]string) *ParseResult {
 			continue
 		}
 
-		labelType := parts[0]  // dns, tunnel, access
+		labelType := parts[0]   // dns, tunnel, access
 		serviceName := parts[1] // web, api, etc.
 		property := parts[2]    // hostname, type, etc.
 

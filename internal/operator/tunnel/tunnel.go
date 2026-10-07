@@ -195,21 +195,21 @@ func (o *TunnelOperatorImpl) reconcileTunnel(ctx context.Context, tunnelName str
 				}
 				delete(current, key)
 			} else {
-			// Save new resource in error state
-			errResource := &storage.ManagedResource{
-				ResourceType:   storage.ResourceTypeTunnelIngress,
-				TunnelID:       tunnelID,
-				Hostname:       d.service.Hostname,
-				Service:        d.service.Service,
-				Path:           d.service.Path,
-				ContainerID:    d.container.Info.ID,
-				ContainerName:  d.container.Info.Name,
-				ServiceName:    d.service.ServiceName,
-				AgentID:        d.container.AgentID,
-				Status:         storage.StatusError,
-				LastError:      err.Error(),
-				CleanupEnabled: d.service.Cleanup,
-			}
+				// Save new resource in error state
+				errResource := &storage.ManagedResource{
+					ResourceType:   storage.ResourceTypeTunnelIngress,
+					TunnelID:       tunnelID,
+					Hostname:       d.service.Hostname,
+					Service:        d.service.Service,
+					Path:           d.service.Path,
+					ContainerID:    d.container.Info.ID,
+					ContainerName:  d.container.Info.Name,
+					ServiceName:    d.service.ServiceName,
+					AgentID:        d.container.AgentID,
+					Status:         storage.StatusError,
+					LastError:      err.Error(),
+					CleanupEnabled: d.service.Cleanup,
+				}
 				if saveErr := o.storage.SaveResource(ctx, errResource); saveErr != nil {
 					log.Error().Err(saveErr).Str("hostname", d.service.Hostname).Msg("Failed to save error resource")
 				}
@@ -251,8 +251,8 @@ func (o *TunnelOperatorImpl) reconcileTunnel(ctx context.Context, tunnelName str
 			}
 			delete(current, key)
 		} else {
-		// Create new resource record
-		resource := &storage.ManagedResource{
+			// Create new resource record
+			resource := &storage.ManagedResource{
 				ResourceType:   storage.ResourceTypeTunnelIngress,
 				TunnelID:       tunnelID,
 				Hostname:       d.service.Hostname,

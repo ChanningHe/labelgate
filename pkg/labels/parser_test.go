@@ -12,7 +12,7 @@ func TestParser_Parse_DNS(t *testing.T) {
 	tests := []struct {
 		name    string
 		labels  map[string]string
-		want    int    // expected DNS services count
+		want    int // expected DNS services count
 		wantErr bool
 	}{
 		{
@@ -114,10 +114,10 @@ func TestParser_Parse_Tunnel(t *testing.T) {
 		{
 			name: "Tunnel with origin config",
 			labels: map[string]string{
-				"labelgate.tunnel.web.hostname":              "app.example.com",
-				"labelgate.tunnel.web.service":               "http://localhost:8080",
+				"labelgate.tunnel.web.hostname":               "app.example.com",
+				"labelgate.tunnel.web.service":                "http://localhost:8080",
 				"labelgate.tunnel.web.origin.connect_timeout": "30s",
-				"labelgate.tunnel.web.origin.no_tls_verify":  "true",
+				"labelgate.tunnel.web.origin.no_tls_verify":   "true",
 			},
 			want:    1,
 			wantErr: false,
@@ -176,7 +176,7 @@ func TestParser_CustomPrefix(t *testing.T) {
 	parser := NewParser("myprefix")
 
 	labels := map[string]string{
-		"myprefix.dns.web.hostname": "web.example.com",
+		"myprefix.dns.web.hostname":  "web.example.com",
 		"labelgate.dns.api.hostname": "api.example.com", // Should be ignored
 	}
 
@@ -420,11 +420,11 @@ func TestParser_Parse_Access_Selectors(t *testing.T) {
 	parser := NewParser("labelgate")
 
 	tests := []struct {
-		name          string
-		selector      string
-		value         string
-		wantValues    []string
-		wantSelector  string
+		name         string
+		selector     string
+		value        string
+		wantValues   []string
+		wantSelector string
 	}{
 		{
 			name:         "emails single",
@@ -501,7 +501,7 @@ func TestParser_Parse_Access_Selectors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			labels := map[string]string{
-				"labelgate.access.test.policy.decision":                       "bypass",
+				"labelgate.access.test.policy.decision":               "bypass",
 				"labelgate.access.test.policy.include." + tt.selector: tt.value,
 			}
 
@@ -604,9 +604,9 @@ func TestParser_Parse_Access_SessionDuration(t *testing.T) {
 	parser := NewParser("labelgate")
 
 	labels := map[string]string{
-		"labelgate.access.test.session_duration":      "12h",
-		"labelgate.access.test.app_name":              "My App",
-		"labelgate.access.test.policy.decision":       "bypass",
+		"labelgate.access.test.session_duration":        "12h",
+		"labelgate.access.test.app_name":                "My App",
+		"labelgate.access.test.policy.decision":         "bypass",
 		"labelgate.access.test.policy.include.everyone": "",
 	}
 

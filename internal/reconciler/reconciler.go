@@ -23,17 +23,17 @@ import (
 
 // Reconciler manages the reconciliation of desired vs actual state.
 type Reconciler struct {
-	provider   provider.Provider
-	storage    storage.Storage
-	parser     *labels.Parser
-	dnsOp       operator.DNSOperator
-	tunnelOp    operator.TunnelOperator
-	accessOp    operator.AccessOperator
-	interval    time.Duration
-	orphanTTL   time.Duration // 0 = never auto-clean orphans from DB
-	removeDelay time.Duration // delay before cleaning up orphaned CF resources
-	mu          sync.RWMutex
-	containers  map[string]*types.ParsedContainer   // containerID -> parsed container
+	provider          provider.Provider
+	storage           storage.Storage
+	parser            *labels.Parser
+	dnsOp             operator.DNSOperator
+	tunnelOp          operator.TunnelOperator
+	accessOp          operator.AccessOperator
+	interval          time.Duration
+	orphanTTL         time.Duration // 0 = never auto-clean orphans from DB
+	removeDelay       time.Duration // delay before cleaning up orphaned CF resources
+	mu                sync.RWMutex
+	containers        map[string]*types.ParsedContainer   // containerID -> parsed container
 	agentData         map[string][]*types.ParsedContainer // agentID -> containers
 	agentFingerprints map[string]uint64                   // agentID -> data hash
 
@@ -69,22 +69,22 @@ type Config struct {
 // NewReconciler creates a new reconciler.
 func NewReconciler(cfg *Config) *Reconciler {
 	return &Reconciler{
-		provider:       cfg.Provider,
-		storage:        cfg.Storage,
-		parser:         labels.NewParser(cfg.LabelPrefix),
-		dnsOp:          cfg.DNSOperator,
-		tunnelOp:       cfg.TunnelOp,
-		accessOp:       cfg.AccessOp,
-		interval:       cfg.PollInterval,
-		orphanTTL:      cfg.OrphanTTL,
-		removeDelay:    cfg.RemoveDelay,
-		containers:     make(map[string]*types.ParsedContainer),
+		provider:          cfg.Provider,
+		storage:           cfg.Storage,
+		parser:            labels.NewParser(cfg.LabelPrefix),
+		dnsOp:             cfg.DNSOperator,
+		tunnelOp:          cfg.TunnelOp,
+		accessOp:          cfg.AccessOp,
+		interval:          cfg.PollInterval,
+		orphanTTL:         cfg.OrphanTTL,
+		removeDelay:       cfg.RemoveDelay,
+		containers:        make(map[string]*types.ParsedContainer),
 		agentData:         make(map[string][]*types.ParsedContainer),
 		agentFingerprints: make(map[string]uint64),
 		agentTrigger:      make(chan struct{}, 1),
-		expectedAgents: cfg.ExpectedAgents,
-		agentReady:     make(chan struct{}),
-		startedAt:      time.Now(),
+		expectedAgents:    cfg.ExpectedAgents,
+		agentReady:        make(chan struct{}),
+		startedAt:         time.Now(),
 	}
 }
 
