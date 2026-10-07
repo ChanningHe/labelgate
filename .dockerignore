@@ -1,0 +1,11 @@
+# Keep host build output, dependencies and local secrets out of
+# docker/Dockerfile's build context. The image installs its own node_modules
+# (Alpine/musl) and builds the dashboard itself.
+.git
+bin/
+dev/
+dashboard/node_modules/
+dashboard/static/
+docsite/
+coverage.out
+coverage.html
