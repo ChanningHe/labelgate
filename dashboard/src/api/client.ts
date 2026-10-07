@@ -2,35 +2,59 @@
 // In dev mode, Vite proxy forwards /api to the Go backend.
 // In production, the Go binary serves both /api and /dashboard.
 
+import { tokenStore } from './token';
+
 const API_BASE = '/api';
 
-// Token can be set for authenticated API access.
-let authToken: string | null = null;
+export class ApiError extends Error {
+  readonly status: number;
 
-export function setAuthToken(token: string) {
-  authToken = token;
+  constructor(status: number, statusText: string) {
+    super(`API error: ${status} ${statusText}`);
+    this.name = 'ApiError';
+    this.status = status;
+  }
 }
 
-async function fetchAPI<T>(path: string, params?: Record<string, string>): Promise<T> {
-  const url = new URL(API_BASE + path, window.location.origin);
-  if (params) {
-    Object.entries(params).forEach(([k, v]) => {
-      if (v) url.searchParams.set(k, v);
-    });
+// Thrown when the server has api.token set and the request carried no token
+// or a wrong one. The app reacts by asking the user for a token.
+export class UnauthorizedError extends ApiError {
+  constructor(statusText: string) {
+    super(401, statusText);
+    this.name = 'UnauthorizedError';
   }
+}
 
-  const headers: Record<string, string> = {
-    'Accept': 'application/json',
-  };
-  if (authToken) {
-    headers['Authorization'] = `Bearer ${authToken}`;
-  }
+function buildURL(path: string, params?: Record<string, string>): string {
+  const query = new URLSearchParams(
+    Object.entries(params ?? {}).filter(([, v]) => v !== ''),
+  ).toString();
+  return `${API_BASE}${path}${query ? `?${query}` : ''}`;
+}
 
-  const res = await fetch(url.toString(), { headers });
-  if (!res.ok) {
-    throw new Error(`API error: ${res.status} ${res.statusText}`);
-  }
+function headersFor(token: string | null): Record<string, string> {
+  return token
+    ? { Accept: 'application/json', Authorization: `Bearer ${token}` }
+    : { Accept: 'application/json' };
+}
+
+function toError(res: Response): ApiError {
+  return res.status === 401 ? new UnauthorizedError(res.statusText) : new ApiError(res.status, res.statusText);
+}
+
+export async function fetchAPI<T>(path: string, params?: Record<string, string>): Promise<T> {
+  const res = await fetch(buildURL(path, params), { headers: headersFor(tokenStore.read()) });
+  if (!res.ok) throw toError(res);
   return res.json();
+}
+
+// verifyToken checks a candidate token against an authenticated endpoint
+// without touching the stored token.
+export async function verifyToken(token: string): Promise<boolean> {
+  const res = await fetch(buildURL('/version'), { headers: headersFor(token.trim()) });
+  if (res.ok) return true;
+  if (res.status === 401) return false;
+  throw toError(res);
 }
 
 // --- API Types ---

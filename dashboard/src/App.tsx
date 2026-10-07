@@ -7,6 +7,7 @@ import { Tunnels } from './pages/Tunnels';
 import { Access } from './pages/Access';
 import { Agents } from './pages/Agents';
 import { PageTransition } from './components/PageTransition';
+import { AuthGate } from './auth/AuthGate';
 
 function AnimatedRoutes() {
   const location = useLocation();
@@ -29,8 +30,10 @@ function AnimatedRoutes() {
 
 export default function App() {
   return (
-    <BrowserRouter basename="/dashboard">
-      <AnimatedRoutes />
-    </BrowserRouter>
+    <AuthGate>
+      <BrowserRouter basename="/dashboard">
+        <AnimatedRoutes />
+      </BrowserRouter>
+    </AuthGate>
   );
 }
