@@ -208,6 +208,16 @@
   color: var(--tone);
 }
 
+.tabs {
+  padding: 0 8px;
+}
+
+.note {
+  margin: 0;
+  color: var(--lg-muted);
+  font-size: 12.5px;
+}
+
 .detailBody {
   display: flex;
   flex-direction: column;

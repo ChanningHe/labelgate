@@ -1,9 +1,12 @@
-import type { CSSProperties, ReactNode } from 'react';
-import { IconAlertTriangle, IconInfoCircle } from '@tabler/icons-react';
+import { useState, type CSSProperties, type ReactNode } from 'react';
+import { Tabs } from '@mantine/core';
+import { IconAlertTriangle, IconInfoCircle, IconTag } from '@tabler/icons-react';
 import type { ManagedResource } from '../api/client';
 import { KindIcon, StatusPill } from '../components/Badges';
+import { CodeBlock } from '../labels/CodeBlock';
 import { describeProblem } from './attention';
 import { CopyAction } from './cells';
+import { equivalentLabels } from './equivalentLabels';
 import type { DetailSection, ResourceKind } from './kinds';
 import type { ResourceIndex } from './useResourceIndex';
 import classes from './ResourcePage.module.css';
@@ -66,11 +69,41 @@ export function ResourceDetailHeader({ kind, resource, headerAction }: Omit<Reso
   );
 }
 
+type DetailTab = 'details' | 'labels';
+
+function LabelsPanel({ kind, resource, index }: Omit<ResourceDetailProps, 'headerAction'>) {
+  return (
+    <div className={classes.detailBody}>
+      <p className={classes.note}>
+        Equivalent labels for this {kind.noun}, rebuilt from what labelgate stored. Paste them under the service in
+        compose.yaml.
+      </p>
+      <CodeBlock lines={equivalentLabels(kind.id, resource, index)} />
+    </div>
+  );
+}
+
 export function ResourceDetail({ kind, resource, index, headerAction }: ResourceDetailProps) {
+  // Lives across row selections so the chosen tab sticks while browsing.
+  const [tab, setTab] = useState<DetailTab>('details');
+
   return (
     <>
       <ResourceDetailHeader kind={kind} resource={resource} headerAction={headerAction} />
-      <DetailSections sections={kind.details(resource, index)} />
+      <Tabs value={tab} onChange={(v) => setTab((v as DetailTab) ?? 'details')} keepMounted={false}>
+        <Tabs.List className={classes.tabs}>
+          <Tabs.Tab value="details">Details</Tabs.Tab>
+          <Tabs.Tab value="labels" leftSection={<IconTag size={14} stroke={1.75} />}>
+            Labels
+          </Tabs.Tab>
+        </Tabs.List>
+        <Tabs.Panel value="details">
+          <DetailSections sections={kind.details(resource, index)} />
+        </Tabs.Panel>
+        <Tabs.Panel value="labels">
+          <LabelsPanel kind={kind} resource={resource} index={index} />
+        </Tabs.Panel>
+      </Tabs>
     </>
   );
 }

@@ -4,7 +4,7 @@ import { Chip, DecisionPill, StatusPill } from '../components/Badges';
 import { formatRelative, shortId } from '../utils/format';
 import { KIND_META, type KindId, type KindMeta } from './meta';
 import { agentLabel, type ResourceField } from './query';
-import type { ResourceIndex } from './useResourceIndex';
+import { attachingKind, type ResourceIndex } from './useResourceIndex';
 import { AccessChip, HostnameCell, Mono, OpenAction, ProxyStatus, ServiceURL, SourceCell } from './cells';
 
 // One descriptor per resource kind. The shared ResourcePage, table and detail
@@ -168,13 +168,6 @@ const tunnel: ResourceKind = {
       r,
     ),
 };
-
-// The DNS or tunnel service whose access label created this Access app.
-export function attachingKind(r: ManagedResource, index: ResourceIndex): 'tunnel' | 'dns' | undefined {
-  if (index.byHostname.tunnel.has(r.hostname)) return 'tunnel';
-  if (index.byHostname.dns.has(r.hostname)) return 'dns';
-  return undefined;
-}
 
 const access: ResourceKind = {
   ...KIND_META.access,

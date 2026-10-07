@@ -17,6 +17,13 @@ export function buildResourceIndex(lists: Partial<Record<KindId, readonly Manage
   };
 }
 
+// The DNS or tunnel service whose access label created this Access app.
+export function attachingKind(r: ManagedResource, index: ResourceIndex): 'tunnel' | 'dns' | undefined {
+  if (index.byHostname.tunnel.has(r.hostname)) return 'tunnel';
+  if (index.byHostname.dns.has(r.hostname)) return 'dns';
+  return undefined;
+}
+
 export function useResourceIndex() {
   const dns = useResources('dns');
   const tunnel = useResources('tunnel');
