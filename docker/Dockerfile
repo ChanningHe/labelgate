@@ -5,6 +5,12 @@
 #   docker build -f docker/Dockerfile .
 #   docker build -f docker/Dockerfile --build-arg BASE_IMAGE=gcr.io/distroless/static-debian13:debug-nonroot@sha256:b80e889821affbb581c2743235fe72fca378182a64e7e6313c36aa9a60f6f244 .
 
+# Runtime base image. Must be declared before the first FROM so the final
+# stage's FROM can use it.
+# Default: distroless nonroot (production)
+# Full:    pass --build-arg BASE_IMAGE=gcr.io/distroless/static-debian13:debug-nonroot@sha256:b80e889821affbb581c2743235fe72fca378182a64e7e6313c36aa9a60f6f244
+ARG BASE_IMAGE=gcr.io/distroless/static-debian13:nonroot@sha256:01e550fdb7ab79ee7be5ff440a563a58f1fd000ad9e0c532e65c3d23f917f1c5
+
 # Stage 1: Build dashboard frontend (runs on host arch — output is platform-independent)
 FROM --platform=$BUILDPLATFORM node:22-alpine AS dashboard-builder
 
@@ -38,10 +44,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
     -ldflags "-s -w -X github.com/channinghe/labelgate/internal/version.Version=${VERSION} -X github.com/channinghe/labelgate/internal/version.Commit=${COMMIT} -X github.com/channinghe/labelgate/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     -o /app/labelgate ./cmd/labelgate
 
-# Stage 3: Runtime
-# Default: distroless nonroot (production)
-# Full:    pass --build-arg BASE_IMAGE=gcr.io/distroless/static-debian13:debug-nonroot@sha256:b80e889821affbb581c2743235fe72fca378182a64e7e6313c36aa9a60f6f244
-ARG BASE_IMAGE=gcr.io/distroless/static-debian13:nonroot@sha256:01e550fdb7ab79ee7be5ff440a563a58f1fd000ad9e0c532e65c3d23f917f1c5
+# Stage 3: Runtime (base image set by BASE_IMAGE at the top of this file)
 FROM ${BASE_IMAGE}
 
 WORKDIR /app
