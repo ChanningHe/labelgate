@@ -1,0 +1,266 @@
+.anatomy {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 4px;
+  margin-bottom: 16px;
+  padding: 18px;
+}
+
+.segment {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.segment code {
+  padding: 6px 10px;
+  border: 1px solid var(--lg-border);
+  border-radius: 6px;
+  background: var(--lg-code-bg);
+  color: var(--tone, var(--lg-fg));
+  font: 500 15px var(--lg-font-mono);
+  white-space: nowrap;
+}
+
+.segment small {
+  max-width: 18ch;
+  padding-left: 2px;
+  color: var(--lg-muted);
+  font-size: 11.5px;
+}
+
+.separator code {
+  padding: 6px 0;
+  border-color: transparent;
+  background: none;
+  color: var(--lg-faint);
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 16px;
+  align-items: start;
+}
+
+/* Two columns only when each card can show a full label line. */
+.recipes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(420px, 100%), 1fr));
+  gap: 12px;
+}
+
+.recipe {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 14px;
+  animation: lg-enter 0.24s var(--lg-ease) both;
+  animation-delay: calc(var(--i, 0) * 25ms);
+}
+
+.recipe h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.recipe p {
+  margin: 0 0 4px;
+  color: var(--lg-muted);
+  font-size: 12.5px;
+}
+
+.recipe > :last-child {
+  margin-top: auto;
+}
+
+.props {
+  position: sticky;
+  top: calc(var(--lg-topbar-height) + 20px);
+}
+
+.propsTitle {
+  font-family: var(--lg-font-mono);
+  font-size: 13px;
+  color: var(--kind);
+}
+
+.propsTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.propsTable td {
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--lg-border);
+  vertical-align: top;
+}
+
+.propsTable td:first-child {
+  white-space: nowrap;
+}
+
+.propName {
+  font-family: var(--lg-font-mono);
+}
+
+.required {
+  margin-left: 6px;
+  color: var(--lg-accent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.default {
+  color: var(--lg-muted);
+  font-family: var(--lg-font-mono);
+  font-size: 11.5px;
+}
+
+.propsFoot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+}
+
+.footTitle {
+  margin: 0;
+  color: var(--lg-faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.rules {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.rule {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+}
+
+.rule h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.rule p {
+  margin: 0;
+  color: var(--lg-muted);
+  font-size: 13px;
+}
+
+.verdict {
+  color: var(--tone);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.pattern {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--lg-border);
+  border-radius: 8px;
+  background: var(--lg-code-bg);
+  color: var(--lg-t-str);
+  font: 400 12.5px var(--lg-font-mono);
+  overflow-x: auto;
+}
+
+.drawerHead {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px;
+  border-bottom: 1px solid var(--lg-border);
+}
+
+.drawerHead > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.drawerHead h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.drawerHead p {
+  margin: 2px 0 0;
+  color: var(--lg-muted);
+  font-size: 13px;
+}
+
+.drawerBody {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+
+.drawerBody .recipe {
+  background: var(--lg-raised);
+}
+
+.link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  color: var(--lg-accent);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+@media (max-width: 1180px) {
+  .body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .props {
+    position: static;
+  }
+}
+
+@media (max-width: 900px) {
+  .rules {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

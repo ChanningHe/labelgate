@@ -93,6 +93,9 @@ export function Sidebar({ isOpen, onNavigate }: SidebarProps) {
           );
         })}
 
+        <div className={classes.sectionTitle}>Reference</div>
+        <NavItem to="/labels" label="Labels" icon={IconTag} color="var(--lg-accent)" onNavigate={onNavigate} />
+
         <div className={classes.sectionTitle}>System</div>
         <NavItem to="/agents" label="Agents" icon={IconServer} badge={agentBadge(data?.agents)} onNavigate={onNavigate} />
       </nav>

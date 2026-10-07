@@ -1,10 +1,11 @@
 import { useMemo, useState, type CSSProperties } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { ActionIcon, Button, Drawer, SegmentedControl, TextInput } from '@mantine/core';
-import { useMediaQuery } from '@mantine/hooks';
-import { IconAlertTriangle, IconSearch, IconX } from '@tabler/icons-react';
+import { useDisclosure, useMediaQuery } from '@mantine/hooks';
+import { IconAlertTriangle, IconSearch, IconTag, IconX } from '@tabler/icons-react';
 import type { ManagedResource } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
+import { ExamplesDrawer } from '../labels/ExamplesDrawer';
 import { RESOURCE_KINDS } from './kinds';
 import type { KindId } from './meta';
 import {
@@ -25,7 +26,14 @@ const SIDE_PANEL_QUERY = '(min-width: 1181px)';
 const SELECTED_PARAM = 'id';
 const NO_ROWS: readonly ManagedResource[] = [];
 
-function EmptyState({ noun, isFiltered, onClear }: { noun: string; isFiltered: boolean; onClear: () => void }) {
+interface EmptyStateProps {
+  noun: string;
+  isFiltered: boolean;
+  onClear: () => void;
+  onShowExamples: () => void;
+}
+
+function EmptyState({ noun, isFiltered, onClear, onShowExamples }: EmptyStateProps) {
   if (isFiltered) {
     return (
       <div className={classes.empty}>
@@ -41,6 +49,9 @@ function EmptyState({ noun, isFiltered, onClear }: { noun: string; isFiltered: b
     <div className={classes.empty}>
       <b>No {noun}s yet</b>
       <span>Add labels to a container and labelgate creates them on the next sync.</span>
+      <Button variant="subtle" size="xs" leftSection={<IconTag size={14} />} onClick={onShowExamples}>
+        Show label examples
+      </Button>
     </div>
   );
 }
@@ -66,6 +77,7 @@ export function ResourcePage({ kind: kindId }: { kind: KindId }) {
   const [sort, setSort] = useState<SortState>({ key: 'hostname', direction: 'asc' });
   const [params, setParams] = useSearchParams();
   const hasSidePanel = useMediaQuery(SIDE_PANEL_QUERY, true);
+  const [isExamplesOpen, { open: openExamples, close: closeExamples }] = useDisclosure(false);
 
   const selectedId = params.get(SELECTED_PARAM);
   const selected = rows.find((r) => r.id === selectedId) ?? null;
@@ -95,7 +107,13 @@ export function ResourcePage({ kind: kindId }: { kind: KindId }) {
         title={kind.title}
         description={kind.description}
         eyebrow={{ label: 'Resources', icon: kind.icon, color: kind.color }}
+        actions={
+          <Button variant="default" size="sm" leftSection={<IconTag size={16} stroke={1.75} />} onClick={openExamples}>
+            Label examples
+          </Button>
+        }
       />
+      <ExamplesDrawer kind={kindId} isOpen={isExamplesOpen} onClose={closeExamples} />
 
       <div className={classes.layout} style={{ '--kind': kind.color } as CSSProperties}>
         <section className={`lg-panel ${classes.tablePanel}`} aria-label={kind.title}>
@@ -140,7 +158,14 @@ export function ResourcePage({ kind: kindId }: { kind: KindId }) {
               sort={sort}
               onSort={toggleSort}
               isLoading={isLoading && !data}
-              empty={<EmptyState noun={kind.noun} isFiltered={rows.length > 0} onClear={clearFilters} />}
+              empty={
+                <EmptyState
+                  noun={kind.noun}
+                  isFiltered={rows.length > 0}
+                  onClear={clearFilters}
+                  onShowExamples={openExamples}
+                />
+              }
             />
           )}
 
