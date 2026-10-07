@@ -216,6 +216,59 @@
   border-radius: 7px;
 }
 
+.search {
+  display: flex;
+  flex: 0 1 380px;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--lg-border);
+  border-radius: var(--lg-radius-sm);
+  background: var(--lg-surface);
+  color: var(--lg-muted);
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.search:hover {
+  border-color: var(--lg-border-strong);
+}
+
+.searchText {
+  flex: 1;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kbd {
+  padding: 1px 6px;
+  border: 1px solid var(--lg-border-strong);
+  border-radius: 4px;
+  background: var(--lg-raised);
+  color: var(--lg-muted);
+  font: 500 11px var(--lg-font-mono);
+  white-space: nowrap;
+}
+
+/* Phones: the search box collapses to an icon button. */
+@media (max-width: 560px) {
+  .search {
+    flex: none;
+    padding: 7px;
+    border-color: transparent;
+    background: none;
+  }
+
+  .searchText,
+  .kbd {
+    display: none;
+  }
+}
+
 .topbarActions {
   margin-left: auto;
   display: flex;
