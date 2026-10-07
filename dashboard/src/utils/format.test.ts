@@ -1,5 +1,23 @@
 import { describe, expect, test } from 'vitest';
-import { formatRelative, formatVersion } from './format';
+import { formatRelative, formatVersion, maskIP } from './format';
+
+describe('maskIP', () => {
+  test('keeps the first two IPv4 octets', () => {
+    expect(maskIP('198.51.100.42')).toBe('198.51.•••.••');
+  });
+
+  test('keeps the first two IPv6 groups', () => {
+    expect(maskIP('2001:db8:85a3::8a2e:370:7334')).toBe('2001:db8:••••');
+  });
+
+  test('returns a dash when there is no address', () => {
+    expect(maskIP(undefined)).toBe('—');
+  });
+
+  test('fully masks anything that is not an IP', () => {
+    expect(maskIP('unknown')).toBe('•••');
+  });
+});
 
 describe('formatVersion', () => {
   test('keeps a tag that already starts with v', () => {

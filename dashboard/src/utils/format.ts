@@ -31,9 +31,18 @@ export function formatRelative(iso: string | null | undefined, now: number = Dat
   });
 }
 
-/** Kept for pages that have not moved to formatRelative yet. */
-export function formatTime(iso: string): string {
-  return formatRelative(iso);
+const IPV4 = /^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/;
+
+/**
+ * Hide the host part of a public IP so it is not exposed on a shared screen.
+ * The real value is only rendered when the user reveals it.
+ */
+export function maskIP(ip: string | undefined): string {
+  if (!ip) return '—';
+  const v4 = IPV4.exec(ip);
+  if (v4) return `${v4[1]}.${v4[2]}.•••.••`;
+  if (ip.includes(':')) return `${ip.split(':').slice(0, 2).join(':')}:••••`;
+  return '•••';
 }
 
 /**

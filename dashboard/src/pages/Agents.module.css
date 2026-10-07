@@ -1,0 +1,81 @@
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
+  gap: 12px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  animation: lg-enter 0.26s var(--lg-ease) both;
+  animation-delay: calc(var(--i) * 35ms);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.head h3 {
+  margin: 0;
+  font-family: var(--lg-font-mono);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.head small {
+  color: var(--lg-muted);
+  font-family: var(--lg-font-mono);
+  font-size: 11.5px;
+}
+
+.head > :last-child {
+  margin-left: auto;
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 8px 12px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.kv dt {
+  color: var(--lg-muted);
+}
+
+.kv dd {
+  min-width: 0;
+  margin: 0;
+}
+
+.ip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--lg-font-mono);
+  font-size: 12.5px;
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 40px 16px;
+  color: var(--lg-muted);
+  text-align: center;
+}
+
+.empty b {
+  color: var(--lg-fg);
+}
+
+.empty a {
+  color: var(--lg-accent);
+  font-weight: 500;
+}
