@@ -7,16 +7,18 @@ import (
 	"time"
 
 	"github.com/channinghe/labelgate/internal/storage"
+	"github.com/channinghe/labelgate/pkg/labels"
 )
 
 type overviewResponse struct {
-	Resources  resourceOverview  `json:"resources"`
-	Agents     agentOverview     `json:"agents"`
-	Sync       syncOverview      `json:"sync"`
-	Cloudflare cloudflareStatus  `json:"cloudflare"`
-	Version    string            `json:"version"`
-	Uptime     string            `json:"uptime"`
-	StartedAt  time.Time         `json:"started_at"`
+	Resources   resourceOverview `json:"resources"`
+	Agents      agentOverview    `json:"agents"`
+	Sync        syncOverview     `json:"sync"`
+	Cloudflare  cloudflareStatus `json:"cloudflare"`
+	Version     string           `json:"version"`
+	Uptime      string           `json:"uptime"`
+	StartedAt   time.Time        `json:"started_at"`
+	LabelPrefix string           `json:"label_prefix"`
 }
 
 type resourceCounts struct {
@@ -92,13 +94,23 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 			TunnelIngress: tunnelCounts,
 			AccessApp:     accessCounts,
 		},
-		Agents:     agentCounts,
-		Sync:       syncStatus,
-		Cloudflare: cfStatus,
-		Version:    s.config.Version,
-		Uptime:     uptime,
-		StartedAt:  startedAt,
+		Agents:      agentCounts,
+		Sync:        syncStatus,
+		Cloudflare:  cfStatus,
+		Version:     s.config.Version,
+		Uptime:      uptime,
+		StartedAt:   startedAt,
+		LabelPrefix: s.labelPrefix(),
 	})
+}
+
+// labelPrefix returns the configured container label prefix, falling back to
+// the parser default so the dashboard always renders usable label examples.
+func (s *Server) labelPrefix() string {
+	if s.config.LabelPrefix == "" {
+		return labels.DefaultPrefix
+	}
+	return s.config.LabelPrefix
 }
 
 // countResources counts resources by type and status.

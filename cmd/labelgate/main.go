@@ -211,6 +211,7 @@ func runMain(ctx context.Context, cfg *config.Config) error {
 			AgentServer: agentServer,
 			CredManager: credManager,
 			Version:     version.Version,
+			LabelPrefix: cfg.LabelPrefix,
 		})
 		go func() {
 			if err := apiServer.Start(ctx); err != nil && err != context.Canceled {

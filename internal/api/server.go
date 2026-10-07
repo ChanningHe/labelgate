@@ -24,6 +24,7 @@ type Config struct {
 	AgentServer *agent.Server
 	CredManager *cloudflare.CredentialManager
 	Version     string
+	LabelPrefix string
 }
 
 // Server is the HTTP API server.

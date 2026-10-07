@@ -292,3 +292,38 @@ func TestOverviewEndpoint(t *testing.T) {
 		t.Fatalf("expected version 0.1.0-test, got %s", body.Version)
 	}
 }
+
+func TestOverviewEndpointReportsLabelPrefix(t *testing.T) {
+	tests := []struct {
+		name       string
+		configured string
+		want       string
+	}{
+		{name: "custom prefix", configured: "lg", want: "lg"},
+		{name: "empty falls back to default", configured: "", want: "labelgate"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := NewServer(&Config{
+				Address:     ":0",
+				BasePath:    "/api",
+				Storage:     &mockStorage{},
+				Version:     "0.1.0-test",
+				LabelPrefix: tt.configured,
+			})
+			req := httptest.NewRequest("GET", "/api/overview", nil)
+			w := httptest.NewRecorder()
+
+			s.handleOverview(w, req)
+
+			var body overviewResponse
+			if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if body.LabelPrefix != tt.want {
+				t.Fatalf("expected label_prefix %q, got %q", tt.want, body.LabelPrefix)
+			}
+		})
+	}
+}
