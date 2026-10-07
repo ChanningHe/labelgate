@@ -25,23 +25,21 @@ import {
 } from '@tabler/icons-react';
 import { StatusBadge } from '../components/StatusBadge';
 import { useAgents } from '../hooks/useAPI';
-import { mockAgents } from '../mock/data';
-import { formatTime } from '../utils/format';
+import { formatRelative } from '../utils/format';
 
 export function Agents() {
-  const { data: apiData, error, isLoading } = useAgents();
+  const { data: apiData, isLoading } = useAgents();
   const [revealedIPs, setRevealedIPs] = useState<Set<string>>(new Set());
 
   const toggleIP = (agentId: string) =>
     setRevealedIPs((prev) => {
       const next = new Set(prev);
-      next.has(agentId) ? next.delete(agentId) : next.add(agentId);
+      if (next.has(agentId)) next.delete(agentId);
+      else next.add(agentId);
       return next;
     });
 
-  // Only fall back to mock data in dev mode when the API is unreachable
-  const useMock = !apiData && !!error && import.meta.env.DEV;
-  const agents = useMock ? mockAgents : (apiData?.agents ?? []);
+  const agents = apiData?.agents ?? [];
 
   if (isLoading && !apiData) {
     return (
@@ -69,7 +67,7 @@ export function Agents() {
           </Card>
         ) : (
           <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }}>
-            {agents.map((agent: any) => (
+            {agents.map((agent) => (
               <Card key={agent.id} withBorder padding="lg" radius="md">
                 <Group justify="space-between" mb="md">
                   <Group gap="sm">
@@ -161,7 +159,7 @@ export function Agents() {
                       Last Seen
                     </Text>
                     <Text size="sm">
-                      {formatTime(agent.last_seen)}
+                      {formatRelative(agent.last_seen)}
                     </Text>
                   </Group>
 
@@ -170,7 +168,7 @@ export function Agents() {
                       Registered
                     </Text>
                     <Text size="sm">
-                      {formatTime(agent.created_at)}
+                      {formatRelative(agent.created_at)}
                     </Text>
                   </Group>
                 </Stack>

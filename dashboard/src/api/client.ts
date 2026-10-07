@@ -104,9 +104,17 @@ export interface OverviewData {
   label_prefix: string;
 }
 
+// Mirrors storage.ResourceStatus. pending_cleanup is defined server-side but
+// not currently assigned; orphaned covers both cleanup on and off.
+export type ResourceStatus = 'active' | 'orphaned' | 'pending_cleanup' | 'deleted' | 'error';
+
+// Mirrors storage.ResourceType.
+export type StorageResourceType = 'dns' | 'tunnel_ingress' | 'access_app';
+
+// Mirrors storage.ManagedResource; omitempty fields are optional.
 export interface ManagedResource {
   id: string;
-  resource_type: string;
+  resource_type: StorageResourceType;
   cf_id?: string;
   zone_id?: string;
   hostname: string;
@@ -119,15 +127,20 @@ export interface ManagedResource {
   path?: string;
   access_app_id?: string;
   account_id?: string;
-  container_id: string;
-  container_name: string;
+  access_app_name?: string;
+  access_policy_name?: string;
+  access_decision?: string;
+  container_id?: string;
+  container_name?: string;
   service_name: string;
-  agent_id: string;
-  status: string;
+  agent_id?: string;
+  credential?: string;
+  status: ResourceStatus;
   cleanup_enabled: boolean;
   last_error?: string;
   created_at: string;
   updated_at: string;
+  deleted_at?: string;
 }
 
 export interface ResourceListResponse {
@@ -135,14 +148,15 @@ export interface ResourceListResponse {
   total: number;
 }
 
+// Mirrors agentResponse in internal/api/agents.go.
 export interface AgentInfo {
   id: string;
-  name: string;
+  name?: string;
   connected: boolean;
-  last_seen: string | null;
-  public_ip: string;
-  default_tunnel: string;
-  status: string;
+  last_seen?: string;
+  public_ip?: string;
+  default_tunnel?: string;
+  status: 'active' | 'disconnected' | 'removed';
   resource_count: number;
   created_at: string;
 }
@@ -158,16 +172,16 @@ export function fetchOverview() {
   return fetchAPI<OverviewData>('/overview');
 }
 
-export function fetchDNS(params?: Record<string, string>) {
-  return fetchAPI<ResourceListResponse>('/resources/dns', params);
+export function fetchDNS() {
+  return fetchAPI<ResourceListResponse>('/resources/dns');
 }
 
-export function fetchTunnels(params?: Record<string, string>) {
-  return fetchAPI<ResourceListResponse>('/resources/tunnels', params);
+export function fetchTunnels() {
+  return fetchAPI<ResourceListResponse>('/resources/tunnels');
 }
 
-export function fetchAccess(params?: Record<string, string>) {
-  return fetchAPI<ResourceListResponse>('/resources/access', params);
+export function fetchAccess() {
+  return fetchAPI<ResourceListResponse>('/resources/access');
 }
 
 export function fetchAgents() {

@@ -30,6 +30,33 @@ a {
   font-variant-numeric: tabular-nums;
 }
 
+.lg-dim {
+  color: var(--lg-muted);
+}
+
+/* A bordered surface that sets one block apart from the page. */
+.lg-panel {
+  min-width: 0;
+  background: var(--lg-surface);
+  border: 1px solid var(--lg-border);
+  border-radius: var(--lg-radius-md);
+}
+
+.lg-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--lg-border);
+}
+
+.lg-panel-head h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
 @keyframes lg-enter {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: none; }

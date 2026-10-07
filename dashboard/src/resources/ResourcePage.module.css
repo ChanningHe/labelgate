@@ -1,0 +1,269 @@
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  gap: 12px;
+  align-items: start;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px;
+  border-bottom: 1px solid var(--lg-border);
+}
+
+.search {
+  flex: 0 1 300px;
+  min-width: 0;
+}
+
+.count {
+  margin-left: 6px;
+  color: var(--lg-faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.count[data-error='true'] {
+  color: var(--lg-err);
+}
+
+/* ---------- table ---------- */
+
+/* The table panel is a size container so secondary columns hide by the
+   space the table actually has, not by viewport width. */
+.tablePanel {
+  container-type: inline-size;
+}
+
+.tableWrap {
+  position: relative;
+  overflow-x: auto;
+}
+
+@container (max-width: 820px) {
+  .secondary {
+    display: none;
+  }
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.th {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--lg-border);
+  color: var(--lg-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.sortButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.sortButton:hover {
+  color: var(--lg-fg);
+}
+
+.sortIcon {
+  opacity: 0;
+}
+
+.th[aria-sort] .sortIcon {
+  opacity: 1;
+  color: var(--lg-accent);
+}
+
+.row {
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.row:hover {
+  background: var(--lg-hover);
+}
+
+.row[aria-selected='true'] {
+  background: color-mix(in srgb, var(--lg-accent) 8%, transparent);
+}
+
+.td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--lg-border);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.row:last-child .td {
+  border-bottom: 0;
+}
+
+.indicator {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 1;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--lg-accent);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.24s var(--lg-ease), height 0.24s var(--lg-ease), opacity 0.15s;
+}
+
+.skeletons {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 36px 16px;
+  color: var(--lg-muted);
+  text-align: center;
+}
+
+.empty b {
+  color: var(--lg-fg);
+}
+
+.foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--lg-border);
+  color: var(--lg-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- detail ---------- */
+
+.detail {
+  position: sticky;
+  top: calc(var(--lg-topbar-height) + 20px);
+  max-height: calc(100vh - var(--lg-topbar-height) - 40px);
+  overflow-y: auto;
+}
+
+.detailHead {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border-bottom: 1px solid var(--lg-border);
+}
+
+.detailRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.detailHost {
+  min-width: 0;
+  font: 600 15px var(--lg-font-mono);
+  overflow-wrap: anywhere;
+}
+
+.callout {
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--tone) 30%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--tone) 10%, transparent);
+  color: var(--lg-fg-2);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.callout svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--tone);
+}
+
+.detailBody {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 16px;
+}
+
+.sectionTitle {
+  margin: 0 0 8px;
+  color: var(--lg-faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 8px 12px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.kv dt {
+  color: var(--lg-muted);
+}
+
+.kv dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.detailEmpty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 48px 24px;
+  color: var(--lg-muted);
+  text-align: center;
+}
+
+.detailEmpty b {
+  color: var(--lg-fg);
+}
+
+@media (max-width: 1180px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 560px) {
+  .search {
+    flex: 1 1 100%;
+  }
+}

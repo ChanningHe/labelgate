@@ -27,7 +27,7 @@ import {
 } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import { useOverview } from '../hooks/useAPI';
-import { mockOverview, type OverviewData } from '../mock/data';
+import type { OverviewData } from '../api/client';
 import { formatTime } from '../utils/format';
 
 interface StatCardProps {
@@ -126,10 +126,7 @@ function StatCard({ title, icon: Icon, color, total, breakdowns, to }: StatCardP
 }
 
 export function Overview() {
-  const { data: apiData, error, isLoading } = useOverview();
-
-  // Only fall back to mock data in dev mode when the API is unreachable
-  const useMock = !apiData && !!error && import.meta.env.DEV;
+  const { data: apiData, isLoading } = useOverview();
   const emptyOverview: OverviewData = {
     resources: {
       dns: { total: 0, active: 0, orphaned: 0, error: 0 },
@@ -142,8 +139,9 @@ export function Overview() {
     version: '',
     uptime: '',
     started_at: '',
+    label_prefix: '',
   };
-  const data: OverviewData = useMock ? mockOverview : (apiData ?? emptyOverview);
+  const data: OverviewData = apiData ?? emptyOverview;
 
   if (isLoading && !apiData) {
     return (

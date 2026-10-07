@@ -1,10 +1,8 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppLayout } from './layouts/AppLayout';
 import { Overview } from './pages/Overview';
-import { DNS } from './pages/DNS';
-import { Tunnels } from './pages/Tunnels';
-import { Access } from './pages/Access';
 import { Agents } from './pages/Agents';
+import { ResourcePage } from './resources/ResourcePage';
 import { AuthGate } from './auth/AuthGate';
 
 export default function App() {
@@ -14,9 +12,9 @@ export default function App() {
         <Routes>
           <Route element={<AppLayout />}>
             <Route index element={<Overview />} />
-            <Route path="dns" element={<DNS />} />
-            <Route path="tunnels" element={<Tunnels />} />
-            <Route path="access" element={<Access />} />
+            <Route path="dns" element={<ResourcePage kind="dns" />} />
+            <Route path="tunnels" element={<ResourcePage kind="tunnel" />} />
+            <Route path="access" element={<ResourcePage kind="access" />} />
             <Route path="agents" element={<Agents />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
