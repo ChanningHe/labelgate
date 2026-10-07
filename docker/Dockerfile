@@ -12,7 +12,7 @@
 ARG BASE_IMAGE=gcr.io/distroless/static-debian13:nonroot@sha256:01e550fdb7ab79ee7be5ff440a563a58f1fd000ad9e0c532e65c3d23f917f1c5
 
 # Stage 1: Build dashboard frontend (runs on host arch — output is platform-independent)
-FROM --platform=$BUILDPLATFORM node:22-alpine AS dashboard-builder
+FROM --platform=$BUILDPLATFORM node:24-alpine AS dashboard-builder
 
 WORKDIR /app/dashboard
 
