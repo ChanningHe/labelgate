@@ -1,349 +1,292 @@
-import {
-  SimpleGrid,
-  Text,
-  Group,
-  Stack,
-  ThemeIcon,
-  Title,
-  Paper,
-  RingProgress,
-  Center,
-  Box,
-  Skeleton,
-} from '@mantine/core';
-import {
-  IconWorldWww,
-  IconArrowsTransferDown,
-  IconShieldLock,
-  IconServer,
-  IconRefresh,
-  IconCloud,
-  IconInfoCircle,
-  IconCircleCheck,
-  IconAlertTriangle,
-  IconPlugConnected,
-  IconPlugConnectedX,
-  IconCircleX,
-} from '@tabler/icons-react';
-import { useNavigate } from 'react-router-dom';
-import { useOverview } from '../hooks/useAPI';
-import type { OverviewData } from '../api/client';
-import { formatTime } from '../utils/format';
+import type { CSSProperties } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Skeleton } from '@mantine/core';
+import { IconArrowRight, IconServer, type Icon } from '@tabler/icons-react';
+import type { AgentInfo, OverviewData } from '../api/client';
+import { KindIcon, StatusPill } from '../components/Badges';
+import { PageHeader } from '../components/PageHeader';
+import { useAgents, useOverview } from '../hooks/useAPI';
+import { useCountUp } from '../hooks/useCountUp';
+import { useNow } from '../hooks/useNow';
+import { recipesFor } from '../labels/catalog';
+import { CodeBlock } from '../labels/CodeBlock';
+import { collectAttention, describeProblem, type AttentionItem } from '../resources/attention';
+import { KIND_IDS, KIND_META } from '../resources/meta';
+import { useResourceIndex } from '../resources/useResourceIndex';
+import { formatRelative, formatVersion } from '../utils/format';
+import classes from './Overview.module.css';
 
-interface StatCardProps {
-  title: string;
-  icon: React.ElementType;
-  color: string;
-  total: number;
-  breakdowns: { label: string; value: number; color: string; icon: React.ElementType }[];
-  to?: string;
+const OK = 'var(--lg-ok)';
+const WARN = 'var(--lg-warn)';
+const ERR = 'var(--lg-err)';
+const QUICK_START = recipesFor('tunnel')[0];
+
+const tone = (color: string, extra?: CSSProperties) => ({ '--tone': color, ...extra }) as CSSProperties;
+
+/* ---------- status strip ---------- */
+
+interface StripItemProps {
+  label: string;
+  value: string;
+  detail: string;
+  color?: string;
+  isMono?: boolean;
 }
 
-function StatCard({ title, icon: Icon, color, total, breakdowns, to }: StatCardProps) {
-  const navigate = useNavigate();
-
-  const handleClick = () => {
-    if (to) {
-      navigate(to);
-    }
-  };
-  const sections = breakdowns
-    .filter((b) => b.value > 0 && total > 0)
-    .map((b) => ({
-      value: Math.round((b.value / total) * 100),
-      color: b.color,
-      tooltip: `${b.label}: ${b.value}`,
-    }));
-
+function StripItem({ label, value, detail, color, isMono }: StripItemProps) {
   return (
-    <Paper
-      withBorder
-      p="xl"
-      radius="md"
-      onClick={handleClick}
-      style={{
-        cursor: to ? 'pointer' : 'default',
-        transition: 'transform 0.15s ease, box-shadow 0.15s ease',
-      }}
-      onMouseEnter={(e) => {
-        if (to) {
-          e.currentTarget.style.transform = 'translateY(-2px)';
-          e.currentTarget.style.boxShadow = 'var(--mantine-shadow-md)';
-        }
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.transform = 'translateY(0)';
-        e.currentTarget.style.boxShadow = 'none';
-      }}
-    >
-      <Group justify="space-between" mb="lg">
-        <Text fw={700} size="lg">
-          {title}
-        </Text>
-      </Group>
-      <Group wrap="nowrap" gap="xl">
-        <RingProgress
-          roundCaps
-          thickness={8}
-          size={120}
-          sections={sections.length > 0 ? sections : [{ value: 100, color: 'gray.3' }]}
-          label={
-            <Center>
-              <ThemeIcon variant="light" color={color} size={48} radius="xl">
-                <Icon size={26} />
-              </ThemeIcon>
-            </Center>
-          }
-        />
-        <Stack gap="sm" style={{ flex: 1 }}>
-          {breakdowns.map((b) => {
-            const BIcon = b.icon;
-            return (
-              <Group key={b.label} justify="space-between">
-                <Group gap="xs">
-                  <ThemeIcon variant="light" color={b.color} size="sm" radius="xl">
-                    <BIcon size={12} />
-                  </ThemeIcon>
-                  <div>
-                    <Text size="sm" fw={500}>
-                      {b.label}
-                    </Text>
-                    <Text size="xs" c="dimmed">
-                      {total > 0 ? Math.round((b.value / total) * 100) : 0}%
-                    </Text>
-                  </div>
-                </Group>
-                <Text fw={700} size="lg">
-                  {b.value}
-                </Text>
-              </Group>
-            );
-          })}
-        </Stack>
-      </Group>
-    </Paper>
+    <div className={classes.stripItem}>
+      <span className={classes.stripLabel}>{label}</span>
+      <span className={`${classes.stripValue} ${isMono ? 'lg-mono' : ''}`} style={color ? tone(color) : undefined}>
+        {color && <span className={classes.stripDot} />}
+        {value}
+      </span>
+      <span className={classes.stripDetail} title={detail}>
+        {detail}
+      </span>
+    </div>
   );
 }
 
-export function Overview() {
-  const { data: apiData, isLoading } = useOverview();
-  const emptyOverview: OverviewData = {
-    resources: {
-      dns: { total: 0, active: 0, orphaned: 0, error: 0 },
-      tunnel_ingress: { total: 0, active: 0, orphaned: 0, error: 0 },
-      access_app: { total: 0, active: 0, orphaned: 0, error: 0 },
-    },
-    agents: { total: 0, connected: 0, disconnected: 0 },
-    sync: { last_sync: '', status: 'success', error: '' },
-    cloudflare: { reachable: false, last_check: '' },
-    version: '',
-    uptime: '',
-    started_at: '',
-    label_prefix: '',
-  };
-  const data: OverviewData = apiData ?? emptyOverview;
+function agentDetail(data: OverviewData, agents: readonly AgentInfo[], now: number): string {
+  if (data.agents.total === 0) return 'Only the local Docker host';
+  const offline = agents.find((a) => !a.connected);
+  if (!offline) return 'All reporting';
+  return `${offline.name || offline.id} last seen ${formatRelative(offline.last_seen, now)}`;
+}
 
-  if (isLoading && !apiData) {
-    return (
-      <Box maw={1200} mx="auto">
-        <Stack gap="xl">
-          <Title order={2}>Overview</Title>
-          <SimpleGrid cols={{ base: 1, md: 3 }}>
-            {[1, 2, 3].map((i) => <Skeleton key={i} height={200} radius="md" />)}
-          </SimpleGrid>
-        </Stack>
-      </Box>
-    );
-  }
+function StatusStrip({ data, agents }: { data: OverviewData; agents: readonly AgentInfo[] }) {
+  const now = useNow();
+  const isSyncOk = data.sync.status === 'success';
+  const { connected, total } = data.agents;
 
   return (
-    <Box maw={1200} mx="auto">
-      <Stack gap="xl">
-        <Title order={2}>Overview</Title>
+    <div className={`lg-panel ${classes.strip}`}>
+      <StripItem
+        label="Last sync"
+        value={isSyncOk ? 'Succeeded' : 'Failed'}
+        color={isSyncOk ? OK : ERR}
+        detail={isSyncOk ? formatRelative(data.sync.last_sync, now) : data.sync.error}
+      />
+      <StripItem
+        label="Cloudflare API"
+        value={data.cloudflare.reachable ? 'Reachable' : 'Unreachable'}
+        color={data.cloudflare.reachable ? OK : ERR}
+        detail={`checked ${formatRelative(data.cloudflare.last_check, now)}`}
+      />
+      <StripItem
+        label="Agents"
+        value={total === 0 ? 'None' : `${connected} of ${total} connected`}
+        color={connected === total ? OK : WARN}
+        detail={agentDetail(data, agents, now)}
+      />
+      <StripItem
+        label="Labelgate"
+        value={formatVersion(data.version)}
+        isMono
+        detail={`up ${data.uptime || '—'} · prefix ${data.label_prefix || 'labelgate'}`}
+      />
+    </div>
+  );
+}
 
-        {/* Resources section */}
-        <div>
-          <Text size="sm" fw={600} c="dimmed" tt="uppercase" mb="md">
-            Resources
-          </Text>
-          <SimpleGrid cols={{ base: 1, md: 3 }}>
-            <StatCard
-              title="DNS Records"
-              icon={IconWorldWww}
-              color="blue"
-              total={data.resources.dns.total}
-              to="/dns"
-              breakdowns={[
-                { label: 'Active', value: data.resources.dns.active, color: 'green', icon: IconCircleCheck },
-                { label: 'Orphaned', value: data.resources.dns.orphaned, color: 'yellow', icon: IconAlertTriangle },
-                { label: 'Error', value: data.resources.dns.error, color: 'red', icon: IconCircleX },
-              ]}
-            />
-            <StatCard
-              title="Tunnel Ingress"
-              icon={IconArrowsTransferDown}
-              color="violet"
-              total={data.resources.tunnel_ingress.total}
-              to="/tunnels"
-              breakdowns={[
-                { label: 'Active', value: data.resources.tunnel_ingress.active, color: 'green', icon: IconCircleCheck },
-                { label: 'Orphaned', value: data.resources.tunnel_ingress.orphaned, color: 'yellow', icon: IconAlertTriangle },
-                { label: 'Error', value: data.resources.tunnel_ingress.error, color: 'red', icon: IconCircleX },
-              ]}
-            />
-            <StatCard
-              title="Access Policies"
-              icon={IconShieldLock}
-              color="teal"
-              total={data.resources.access_app.total}
-              to="/access"
-              breakdowns={[
-                { label: 'Active', value: data.resources.access_app.active, color: 'green', icon: IconCircleCheck },
-                { label: 'Orphaned', value: data.resources.access_app.orphaned, color: 'yellow', icon: IconAlertTriangle },
-                { label: 'Error', value: data.resources.access_app.error, color: 'red', icon: IconCircleX },
-              ]}
-            />
-          </SimpleGrid>
+/* ---------- tiles ---------- */
+
+interface Segment {
+  label: string;
+  value: number;
+  color: string;
+}
+
+interface StatTileProps {
+  title: string;
+  to: string;
+  icon: Icon;
+  color: string;
+  total: number;
+  segments: Segment[];
+  order: number;
+}
+
+function StatTile({ title, to, icon, color, total, segments, order }: StatTileProps) {
+  const shown = useCountUp(total);
+  return (
+    <Link to={to} className={`lg-panel ${classes.tile}`} style={{ '--kind': color, '--i': order } as CSSProperties}>
+      <div className={classes.tileTop}>
+        <KindIcon icon={icon} color={color} />
+        {title}
+        <IconArrowRight size={16} className={classes.tileGo} />
+      </div>
+      <div className={classes.tileNumber} aria-label={`${total} ${title}`}>
+        {shown}
+      </div>
+      <div className={classes.bar} aria-hidden="true">
+        {segments
+          .filter((s) => s.value > 0)
+          .map((s) => (
+            <span key={s.label} style={tone(s.color, { flex: s.value })} />
+          ))}
+      </div>
+      <div className={classes.legend}>
+        {segments.map((s) => (
+          <span key={s.label} style={tone(s.color)}>
+            <i />
+            <b>{s.value}</b> {s.label}
+          </span>
+        ))}
+      </div>
+    </Link>
+  );
+}
+
+const TILE_TITLES = { dns: 'DNS records', tunnel: 'Tunnel ingress', access: 'Access apps' } as const;
+
+function Tiles({ data }: { data: OverviewData }) {
+  return (
+    <div className={classes.tiles}>
+      {KIND_IDS.map((id, i) => {
+        const meta = KIND_META[id];
+        const counts = data.resources[meta.overviewKey];
+        return (
+          <StatTile
+            key={id}
+            title={TILE_TITLES[id]}
+            to={meta.path}
+            icon={meta.icon}
+            color={meta.color}
+            total={counts.total}
+            order={i}
+            segments={[
+              { label: 'active', value: counts.active, color: OK },
+              { label: 'orphaned', value: counts.orphaned, color: WARN },
+              { label: 'error', value: counts.error, color: ERR },
+            ]}
+          />
+        );
+      })}
+      <StatTile
+        title="Agents"
+        to="/agents"
+        icon={IconServer}
+        color="var(--lg-accent)"
+        total={data.agents.total}
+        order={KIND_IDS.length}
+        segments={[
+          { label: 'connected', value: data.agents.connected, color: OK },
+          { label: 'offline', value: data.agents.disconnected, color: ERR },
+        ]}
+      />
+    </div>
+  );
+}
+
+/* ---------- attention ---------- */
+
+function AttentionList({ items }: { items: AttentionItem[] }) {
+  const navigate = useNavigate();
+  const now = useNow();
+  const hasErrors = items.some((x) => x.resource.status === 'error');
+
+  return (
+    <section className="lg-panel" aria-label="Needs attention">
+      <div className="lg-panel-head">
+        <h2>Needs attention</h2>
+        <span className={classes.badge} data-error={hasErrors}>
+          {items.length}
+        </span>
+      </div>
+      {items.length === 0 ? (
+        <div className={classes.calm}>Everything is in sync.</div>
+      ) : (
+        <ul className={classes.attention}>
+          {items.map(({ kind, resource }) => {
+            const meta = KIND_META[kind];
+            return (
+              <li key={`${kind}-${resource.id}`}>
+                <button
+                  type="button"
+                  className={classes.attentionItem}
+                  style={tone(resource.status === 'error' ? ERR : WARN)}
+                  onClick={() => navigate(`${meta.path}?id=${encodeURIComponent(resource.id)}`)}
+                >
+                  <span className={classes.stripe} />
+                  <KindIcon icon={meta.icon} color={meta.color} />
+                  <span style={{ minWidth: 0 }}>
+                    <span className={classes.attentionHost}>
+                      {resource.hostname}
+                      <StatusPill status={resource.status} />
+                    </span>
+                    <p className={classes.attentionText}>{describeProblem(resource, meta.noun)}</p>
+                  </span>
+                  <span className={classes.when}>{formatRelative(resource.updated_at, now)}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function QuickStart() {
+  return (
+    <section className="lg-panel" aria-label="Expose a container">
+      <div className="lg-panel-head">
+        <h2>Expose a container</h2>
+        <KindIcon icon={KIND_META.tunnel.icon} color={KIND_META.tunnel.color} />
+      </div>
+      <div className={classes.quick}>
+        <p>
+          Add two labels to any service on the cloudflared network. Labelgate creates the ingress rule and Cloudflare adds
+          the DNS record.
+        </p>
+        <CodeBlock lines={QUICK_START.lines} image={QUICK_START.image} />
+        <Link className={classes.link} to="/labels?tab=tunnel">
+          Browse all label recipes <IconArrowRight size={14} />
+        </Link>
+      </div>
+    </section>
+  );
+}
+
+/* ---------- page ---------- */
+
+export function Overview() {
+  const { data } = useOverview();
+  const { data: agentList } = useAgents();
+  const { lists } = useResourceIndex();
+  const attention = collectAttention({
+    dns: lists.dns.data?.resources,
+    tunnel: lists.tunnel.data?.resources,
+    access: lists.access.data?.resources,
+  });
+
+  return (
+    <>
+      <PageHeader
+        title="Overview"
+        description="Container labels in, Cloudflare resources out. Data refreshes every 10 seconds."
+      />
+      {data ? (
+        <div className={classes.stack}>
+          <StatusStrip data={data} agents={agentList?.agents ?? []} />
+          <Tiles data={data} />
+          <div className={classes.columns}>
+            <AttentionList items={attention} />
+            <QuickStart />
+          </div>
         </div>
-
-        {/* Agents section */}
-        <div>
-          <Text size="sm" fw={600} c="dimmed" tt="uppercase" mb="md">
-            Agents
-          </Text>
-          <SimpleGrid cols={{ base: 1, md: 3 }}>
-            <StatCard
-              title="Agents"
-              icon={IconServer}
-              color="orange"
-              total={data.agents.total}
-              to="/agents"
-              breakdowns={[
-                { label: 'Connected', value: data.agents.connected, color: 'green', icon: IconPlugConnected },
-                { label: 'Disconnected', value: data.agents.disconnected, color: 'red', icon: IconPlugConnectedX },
-              ]}
-            />
-          </SimpleGrid>
+      ) : (
+        <div className={classes.stack}>
+          <Skeleton height={68} radius="md" />
+          <div className={classes.tiles}>
+            {[0, 1, 2, 3].map((i) => (
+              <Skeleton key={i} height={150} radius="md" />
+            ))}
+          </div>
         </div>
-
-        {/* Health section */}
-        <div>
-          <Text size="sm" fw={600} c="dimmed" tt="uppercase" mb="md">
-            Health
-          </Text>
-          <SimpleGrid cols={{ base: 1, md: 3 }}>
-            <Paper withBorder p="xl" radius="md">
-              <Group gap="sm" mb="lg">
-                <ThemeIcon variant="light" color="blue" size="md" radius="md">
-                  <IconRefresh size={18} />
-                </ThemeIcon>
-                <Text fw={700} size="lg">
-                  Last Sync
-                </Text>
-              </Group>
-              <Stack gap="sm">
-                <Group justify="space-between">
-                  <Text size="sm" c="dimmed">Time</Text>
-                  <Text size="sm">{formatTime(data.sync.last_sync)}</Text>
-                </Group>
-                <Group justify="space-between">
-                  <Text size="sm" c="dimmed">Status</Text>
-                  <Group gap={6}>
-                    <ThemeIcon
-                      variant="light"
-                      color={data.sync.status === 'success' ? 'green' : 'red'}
-                      size="sm"
-                      radius="xl"
-                    >
-                      {data.sync.status === 'success' ? (
-                        <IconCircleCheck size={12} />
-                      ) : (
-                        <IconAlertTriangle size={12} />
-                      )}
-                    </ThemeIcon>
-                    <Text size="sm" fw={500}>
-                      {data.sync.status}
-                    </Text>
-                  </Group>
-                </Group>
-                {data.sync.error && (
-                  <Text size="xs" c="red">
-                    {data.sync.error}
-                  </Text>
-                )}
-              </Stack>
-            </Paper>
-
-            <Paper withBorder p="xl" radius="md">
-              <Group gap="sm" mb="lg">
-                <ThemeIcon variant="light" color="orange" size="md" radius="md">
-                  <IconCloud size={18} />
-                </ThemeIcon>
-                <Text fw={700} size="lg">
-                  Cloudflare API
-                </Text>
-              </Group>
-              <Stack gap="sm">
-                <Group justify="space-between">
-                  <Text size="sm" c="dimmed">Last Check</Text>
-                  <Text size="sm">{formatTime(data.cloudflare.last_check)}</Text>
-                </Group>
-                <Group justify="space-between">
-                  <Text size="sm" c="dimmed">Status</Text>
-                  <Group gap={6}>
-                    <ThemeIcon
-                      variant="light"
-                      color={data.cloudflare.reachable ? 'green' : 'red'}
-                      size="sm"
-                      radius="xl"
-                    >
-                      {data.cloudflare.reachable ? (
-                        <IconCircleCheck size={12} />
-                      ) : (
-                        <IconAlertTriangle size={12} />
-                      )}
-                    </ThemeIcon>
-                    <Text size="sm" fw={500}>
-                      {data.cloudflare.reachable ? 'Reachable' : 'Unreachable'}
-                    </Text>
-                  </Group>
-                </Group>
-              </Stack>
-            </Paper>
-
-            <Paper withBorder p="xl" radius="md">
-              <Group gap="sm" mb="lg">
-                <ThemeIcon variant="light" color="gray" size="md" radius="md">
-                  <IconInfoCircle size={18} />
-                </ThemeIcon>
-                <Text fw={700} size="lg">
-                  System
-                </Text>
-              </Group>
-              <Stack gap="sm">
-                <Group justify="space-between">
-                  <Text size="sm" c="dimmed">Version</Text>
-                  <Text size="sm" fw={500} ff="monospace">
-                    v{data.version}
-                  </Text>
-                </Group>
-                <Group justify="space-between">
-                  <Text size="sm" c="dimmed">Uptime</Text>
-                  <Text size="sm" fw={500}>
-                    {data.uptime}
-                  </Text>
-                </Group>
-                <Group justify="space-between">
-                  <Text size="sm" c="dimmed">Started</Text>
-                  <Text size="sm">
-                    {formatTime(data.started_at)}
-                  </Text>
-                </Group>
-              </Stack>
-            </Paper>
-          </SimpleGrid>
-        </div>
-      </Stack>
-    </Box>
+      )}
+    </>
   );
 }
