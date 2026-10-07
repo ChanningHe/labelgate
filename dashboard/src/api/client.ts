@@ -2,6 +2,7 @@
 // In dev mode, Vite proxy forwards /api to the Go backend.
 // In production, the Go binary serves both /api and /dashboard.
 
+import { liveStatus } from './liveStatus';
 import { tokenStore } from './token';
 
 const API_BASE = '/api';
@@ -43,9 +44,20 @@ function toError(res: Response): ApiError {
 }
 
 export async function fetchAPI<T>(path: string, params?: Record<string, string>): Promise<T> {
-  const res = await fetch(buildURL(path, params), { headers: headersFor(tokenStore.read()) });
-  if (!res.ok) throw toError(res);
-  return res.json();
+  let res: Response;
+  try {
+    res = await fetch(buildURL(path, params), { headers: headersFor(tokenStore.read()) });
+  } catch (err) {
+    liveStatus.reportFailure();
+    throw err;
+  }
+  if (!res.ok) {
+    liveStatus.reportFailure();
+    throw toError(res);
+  }
+  const data: T = await res.json();
+  liveStatus.reportSuccess();
+  return data;
 }
 
 // verifyToken checks a candidate token against an authenticated endpoint
