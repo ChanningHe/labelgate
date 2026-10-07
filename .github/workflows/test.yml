@@ -56,6 +56,18 @@ jobs:
           mkdir -p dashboard/static
           echo '<html><body>Dashboard not built</body></html>' > dashboard/static/index.html
 
+      # Only tracked files, so docsite/dashboard node_modules are never scanned.
+      - name: Check formatting
+        run: |
+          unformatted=$(git ls-files -z '*.go' | xargs -0 gofmt -l)
+          if [ -n "$unformatted" ]; then
+            printf '%s\n' "$unformatted" | while read -r f; do
+              echo "::error file=$f::File is not gofmt-formatted"
+            done
+            echo "Run gofmt -w on the files above."
+            exit 1
+          fi
+
       - name: Vet
         run: go vet ./...
 
