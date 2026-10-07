@@ -9,7 +9,7 @@
 # stage's FROM can use it.
 # Default: distroless nonroot (production)
 # Full:    pass --build-arg BASE_IMAGE=gcr.io/distroless/static-debian13:debug-nonroot@sha256:b80e889821affbb581c2743235fe72fca378182a64e7e6313c36aa9a60f6f244
-ARG BASE_IMAGE=gcr.io/distroless/static-debian13:nonroot@sha256:01e550fdb7ab79ee7be5ff440a563a58f1fd000ad9e0c532e65c3d23f917f1c5
+ARG BASE_IMAGE=gcr.io/distroless/static-debian13:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3
 
 # Stage 1: Build dashboard frontend (runs on host arch — output is platform-independent)
 FROM --platform=$BUILDPLATFORM node:22-alpine AS dashboard-builder
@@ -23,7 +23,7 @@ COPY dashboard/ .
 RUN yarn build
 
 # Stage 2: Build Go binary (runs on host arch — cross-compiles via GOARCH)
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS builder
 
 ARG TARGETARCH
 ARG VERSION=dev

@@ -3,7 +3,7 @@
 #
 # Used by CI/CD workflows; for local development use docker/Dockerfile instead.
 
-ARG BASE_IMAGE=gcr.io/distroless/static-debian13:nonroot@sha256:01e550fdb7ab79ee7be5ff440a563a58f1fd000ad9e0c532e65c3d23f917f1c5
+ARG BASE_IMAGE=gcr.io/distroless/static-debian13:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3
 FROM ${BASE_IMAGE}
 
 ARG TARGETARCH
