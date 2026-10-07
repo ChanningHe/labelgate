@@ -4,6 +4,7 @@ import './global.css';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { MantineProvider, createTheme } from '@mantine/core';
+import { LazyMotion, MotionConfig, domAnimation } from 'framer-motion';
 import App from './App';
 
 const theme = createTheme({
@@ -16,7 +17,11 @@ const theme = createTheme({
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <MantineProvider theme={theme} defaultColorScheme="auto">
-      <App />
+      <LazyMotion features={domAnimation} strict>
+        <MotionConfig reducedMotion="user">
+          <App />
+        </MotionConfig>
+      </LazyMotion>
     </MantineProvider>
   </StrictMode>,
 );

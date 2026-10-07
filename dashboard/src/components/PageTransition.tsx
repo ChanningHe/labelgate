@@ -1,41 +1,25 @@
-import { motion } from 'framer-motion';
+import { m } from 'framer-motion';
 import type { ReactNode } from 'react';
 
+// Enter-only transition: a short fade and lift when the route changes.
+// There is no exit animation, so navigation never waits on the old page.
+const ENTER_DURATION_S = 0.18;
+const EASE_OUT: [number, number, number, number] = [0.2, 0.8, 0.2, 1];
+
 interface PageTransitionProps {
+  routeKey: string;
   children: ReactNode;
 }
 
-const pageVariants = {
-  initial: {
-    opacity: 0,
-    x: 20,
-  },
-  animate: {
-    opacity: 1,
-    x: 0,
-  },
-  exit: {
-    opacity: 0,
-    x: -20,
-  },
-};
-
-const pageTransition = {
-  type: 'tween' as const,
-  ease: 'easeOut' as const,
-  duration: 0.2,
-};
-
-export function PageTransition({ children }: PageTransitionProps) {
+export function PageTransition({ routeKey, children }: PageTransitionProps) {
   return (
-    <motion.div
-      initial="initial"
-      animate="animate"
-      exit="exit"
-      variants={pageVariants}
-      transition={pageTransition}
+    <m.div
+      key={routeKey}
+      initial={{ opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: ENTER_DURATION_S, ease: EASE_OUT }}
     >
       {children}
-    </motion.div>
+    </m.div>
   );
 }

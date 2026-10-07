@@ -15,6 +15,7 @@ import {
   Tooltip,
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
+import { PageTransition } from '../components/PageTransition';
 import {
   IconLayoutDashboard,
   IconWorldWww,
@@ -182,7 +183,9 @@ export function AppLayout() {
       </AppShell.Navbar>
 
       <AppShell.Main>
-        <Outlet />
+        <PageTransition routeKey={location.pathname}>
+          <Outlet />
+        </PageTransition>
       </AppShell.Main>
     </AppShell>
   );
