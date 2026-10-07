@@ -1,0 +1,63 @@
+name: Test
+
+# Lint and test only; this workflow never publishes anything.
+# Runs on every pull request (including Renovate's) and is called by
+# ci.yml and release.yml so binaries and images are only built from code that passes.
+on:
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  dashboard:
+    name: Dashboard lint, tests and type check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: dashboard/yarn.lock
+
+      - name: Install
+        run: yarn install --frozen-lockfile
+
+      - name: Lint
+        run: yarn lint
+
+      - name: Unit tests
+        run: yarn test
+
+      # tsc -b runs as part of the build; the output is discarded here.
+      - name: Type check and build
+        run: yarn build
+
+  go:
+    name: Go vet and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # dashboard/embed.go embeds dashboard/static, which only exists after a
+      # frontend build. Tests don't use the assets, so a placeholder is enough.
+      - name: Placeholder dashboard assets
+        run: |
+          mkdir -p dashboard/static
+          echo '<html><body>Dashboard not built</body></html>' > dashboard/static/index.html
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race ./...
