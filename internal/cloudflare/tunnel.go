@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	cf "github.com/cloudflare/cloudflare-go/v6"
-	"github.com/cloudflare/cloudflare-go/v6/zero_trust"
+	cf "github.com/cloudflare/cloudflare-go/v7"
+	"github.com/cloudflare/cloudflare-go/v7/zero_trust"
 	"github.com/rs/zerolog/log"
 
 	"github.com/channinghe/labelgate/internal/types"
