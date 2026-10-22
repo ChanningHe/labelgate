@@ -17,7 +17,7 @@
     "@mantine/hooks": "^8.3.14",
     "@mantine/spotlight": "8.3.18",
     "@tabler/icons-react": "^3.36.1",
-    "framer-motion": "^12.34.3",
+    "framer-motion": "^14.0.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.13.0",
