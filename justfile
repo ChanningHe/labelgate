@@ -54,3 +54,18 @@ test-cover:
 clean:
     rm -rf bin/ dashboard/static/* coverage.out coverage.html
     @echo '<html><body>Run yarn build to generate dashboard assets</body></html>' > dashboard/static/index.html
+
+# Tag and push a release (triggers the release workflow): just release 0.2.0
+release VERSION:
+    #!/usr/bin/env sh
+    set -eu
+    TAG="v{{VERSION}}"
+    echo "{{VERSION}}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "error: version must be X.Y.Z, got '{{VERSION}}'" >&2; exit 1; }
+    [ "$(git rev-parse --abbrev-ref HEAD)" = "main" ] || { echo "error: must release from main" >&2; exit 1; }
+    [ -z "$(git status --porcelain)" ] || { echo "error: working tree is dirty" >&2; exit 1; }
+    git fetch --quiet --tags origin main
+    [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] || { echo "error: main is not in sync with origin/main" >&2; exit 1; }
+    if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then echo "error: tag ${TAG} already exists" >&2; exit 1; fi
+    git tag -a "${TAG}" -m "${TAG}"
+    git push origin "${TAG}"
+    echo "Released ${TAG}"
