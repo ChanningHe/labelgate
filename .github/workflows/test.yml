@@ -39,6 +39,29 @@ jobs:
       - name: Type check and build
         run: yarn build
 
+  # docs.yml only runs on tags, so dependency bumps would otherwise first
+  # break the docsite at release time.
+  docsite:
+    name: Docsite build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: docsite
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: yarn
+          cache-dependency-path: docsite/yarn.lock
+
+      - name: Install
+        run: yarn install --frozen-lockfile
+
+      - name: Type check and build
+        run: yarn build
+
   go:
     name: Go vet and tests
     runs-on: ubuntu-latest

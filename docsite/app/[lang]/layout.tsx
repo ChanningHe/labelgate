@@ -17,21 +17,20 @@ export const metadata: Metadata = {
 const inter = Inter({ subsets: ['latin'] });
 
 const { provider } = defineI18nUI(i18n, {
-  translations: {
-    en: {
-      displayName: 'English',
-    },
-    zh: {
-      displayName: '中文',
-      search: '搜索文档',
-      searchNoResult: '未找到结果',
-      toc: '目录',
-      tocNoHeadings: '无标题',
-      lastUpdate: '最后更新',
-      previousPage: '上一页',
-      nextPage: '下一页',
-      chooseLanguage: '选择语言',
-    },
+  en: {
+    displayName: 'English',
+  },
+  zh: {
+    displayName: '中文',
+    'Search(search trigger)': '搜索文档',
+    'Search(search dialog)': '搜索文档',
+    'No results found(search dialog)': '未找到结果',
+    'On this page(table of contents)': '目录',
+    'No Headings(table of contents)': '无标题',
+    'Last updated on(page footer)': '最后更新',
+    'Previous Page(pagination)': '上一页',
+    'Next Page(pagination)': '下一页',
+    'Choose a language(language switcher)': '选择语言',
   },
 });
 
