@@ -9,7 +9,7 @@
 # stage's FROM can use it.
 # Default: distroless nonroot (production)
 # Full:    pass --build-arg BASE_IMAGE=gcr.io/distroless/static-debian13:debug-nonroot@sha256:b80e889821affbb581c2743235fe72fca378182a64e7e6313c36aa9a60f6f244
-ARG BASE_IMAGE=gcr.io/distroless/static-debian13:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3
+ARG BASE_IMAGE=gcr.io/distroless/static-debian13:nonroot@sha256:18f4cc26c9ffa7f20a359298be7deadac5c607c8e03a02b8119f1a5fc2f82c99
 
 # Stage 1: Build dashboard frontend (runs on host arch — output is platform-independent)
 FROM --platform=$BUILDPLATFORM node:24-alpine AS dashboard-builder
