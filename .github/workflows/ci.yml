@@ -15,8 +15,8 @@ env:
   REGISTRY: ghcr.io
   IMAGE_BASE: ghcr.io/channinghe/labelgate
   # Pinned base images for reproducible builds
-  BASE_NONROOT: gcr.io/distroless/static-debian13:nonroot@sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329
-  BASE_DEBUG: gcr.io/distroless/static-debian13:debug-nonroot@sha256:12c2026b21e05857a4c730b4dbf812becf02b396cb7916166c8305f45f140ab0
+  BASE_NONROOT: gcr.io/distroless/static-debian13:nonroot@sha256:aafe993665bf6200db38a02c11a9351e782a84b6a45e7f33b6695638c88e3931
+  BASE_DEBUG: gcr.io/distroless/static-debian13:debug-nonroot@sha256:7df9fac2f5d3927260696af33fc2391da26366825838a47337088ed78f854a0c
 
 jobs:
   # Lint and tests run in parallel with the dashboard build; binaries wait for both.
