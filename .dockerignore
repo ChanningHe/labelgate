@@ -2,10 +2,22 @@
 # docker/Dockerfile's build context. The image installs its own node_modules
 # (Alpine/musl) and builds the dashboard itself.
 .git
+.github/
 bin/
 dev/
-dashboard/node_modules/
-dashboard/static/
-docsite/
+
+# local secrets
+.env
+*.env
+!.env.example
+
+# coverage
 coverage.out
 coverage.html
+*.coverprofile
+
+# dependencies and build output
+dashboard/node_modules/
+dashboard/static/
+dashboard/.vite/
+docsite/
