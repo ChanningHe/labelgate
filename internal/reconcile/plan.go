@@ -124,7 +124,7 @@ func (lc *lifecycle) holdError(t model.Resource, reason string) {
 }
 
 // orphan applies the orphan transition and schedules deletion/purge.
-func (lc *lifecycle) orphan(t model.Resource, in planInput, classes map[string]string) {
+func (lc *lifecycle) orphan(t model.Resource, in planInput, classes map[string]hostUse) {
 	k := keyOf(t)
 	n := t
 	if n.OrphanedAt.IsZero() {
@@ -136,8 +136,11 @@ func (lc *lifecycle) orphan(t model.Resource, in planInput, classes map[string]s
 		lc.transitions = append(lc.transitions, n)
 	}
 	lc.rows[k] = n
-	cls, ok := classes[n.Hostname]
-	if ok && rowClass(n) != "" && cls != rowClass(n) && (n.Cleanup || ownSwitch(n, in.Winners)) {
+	if classes[n.Hostname].supersedes(n) {
+		if !n.Cleanup { // forget: the live object stays, a clash is reported
+			lc.purge = append(lc.purge, k)
+			return
+		}
 		lc.superseded[k], lc.due[k] = true, true
 		return
 	}
@@ -160,36 +163,37 @@ func (lc *lifecycle) orphan(t model.Resource, in planInput, classes map[string]s
 	}
 }
 
-// ownSwitch reports whether the row's own container now wins its hostname
-// (with another class): only such a switch may delete a cleanup=false
-// resource before its time. Other owners never supersede it.
-func ownSwitch(r model.Resource, winners []claim) bool {
-	for _, w := range winners {
-		o := w.Res.Owner
-		if w.Res.Hostname == r.Hostname && o.AgentID == r.Owner.AgentID && o.ContainerName == r.Owner.ContainerName {
-			return true
-		}
-	}
-	return false
-}
-
 func (lc *lifecycle) later(at time.Time) {
 	if lc.deadline.IsZero() || at.Before(lc.deadline) {
 		lc.deadline = at
 	}
 }
 
-// winningClasses maps hostname -> class of winners and held rows.
-func winningClasses(in planInput) map[string]string {
-	out := map[string]string{}
+// hostUse is the class a hostname is used with this cycle and its source.
+type hostUse struct {
+	class  string
+	source string
+}
+
+// supersedes reports whether an orphaned row is replaced now: its own source
+// uses its hostname with another class (an intentional switch). Rows of
+// other sources are never superseded; they follow their own lifecycle.
+func (u hostUse) supersedes(r model.Resource) bool {
+	cls := rowClass(r)
+	return u.class != "" && cls != "" && cls != u.class && u.source == sourceOf(r.Owner)
+}
+
+// winningClasses maps hostname -> class and source of winners and held rows.
+func winningClasses(in planInput) map[string]hostUse {
+	out := map[string]hostUse{}
 	for _, w := range in.Winners {
 		if w.Class != "" {
-			out[w.Res.Hostname] = w.Class
+			out[w.Res.Hostname] = hostUse{class: w.Class, source: sourceOf(w.Res.Owner)}
 		}
 	}
 	for _, t := range sortRows(in.Tracked) {
 		if _, ok := out[t.Hostname]; !ok && rowClass(t) != "" && in.Held.has(t) {
-			out[t.Hostname] = rowClass(t)
+			out[t.Hostname] = hostUse{class: rowClass(t), source: sourceOf(t.Owner)}
 		}
 	}
 	return out

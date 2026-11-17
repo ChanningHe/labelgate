@@ -81,7 +81,7 @@ func shuffled[T any](rng *rand.Rand, in []T) []T {
 
 func planFor(claims []claim, tracked []model.Resource) (resolution, plan) {
 	held := holdSet{agents: map[string]bool{}, rows: map[int64]string{}}
-	res := resolve(claims, tracked, held, time.Unix(1e9, 0), time.Minute)
+	res := resolve(claims, tracked, held)
 	live := liveState{Zones: map[string]zoneLive{"": {}}, Tunnels: map[string]tunnelLive{}, Accounts: map[string]accountLive{}}
 	for _, tid := range []string{tunnelA, tunnelB} {
 		live.Tunnels[tid] = tunnelLive{Tunnel: cloudflare.Tunnel{ID: tid}}

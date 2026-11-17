@@ -164,9 +164,10 @@ func TestTransientAbsenceCannotDowngradeAccess(t *testing.T) {
 	h.wantOnlyRejected("evil", ownedByLocal, 1)
 }
 
-// Another owner's class claim never supersedes (deletes) an orphaned
-// cleanup=false record, neither during nor after remove_delay.
-func TestOtherOwnerNeverSupersedesCleanupFalse(t *testing.T) {
+// A class switch within the source supersedes an orphaned cleanup=false
+// row at once, but only forgets it: the record stays on Cloudflare and the
+// new class reports the clash instead of deleting it.
+func TestSupersededCleanupFalseIsForgottenNotDeleted(t *testing.T) {
 	h := newHarness(t)
 	local := dnsSpec("web", appHost)
 	local.Target, local.Cleanup = "192.0.2.1", false
@@ -181,35 +182,69 @@ func TestOtherOwnerNeverSupersedesCleanupFalse(t *testing.T) {
 		if len(recs) != 1 || recs[0].Content != "192.0.2.1" {
 			t.Fatalf("after %s: records %+v", step, recs)
 		}
+		h.noRow(model.KindDNS, appKey)
 	}
 	if row := h.row(model.KindDNS, cnameKey); row.Status != model.StatusError || !strings.Contains(row.LastError, "cleanup=false") {
 		t.Fatalf("cname row %+v", row)
 	}
 }
 
-// The reservation of an absent owner ends at remove_delay: then another
-// source may take over the row (cleanup=true would delete it at that time).
-func TestOrphanReservationEndsAtRemoveDelay(t *testing.T) {
+// An absent owner's source keeps the hostname until its last row is gone:
+// the cycle that deletes the record (cleanup=true at remove_delay) still
+// rejects the other source, which only then creates its own record.
+func TestHostnameChangesSourceOnlyAfterRowsAreGone(t *testing.T) {
 	h := newHarness(t)
 	h.src.set(ctr("web", dnsOnly(dnsSpec("web", appHost))))
 	h.cycle()
 	recID := h.row(model.KindDNS, appKey).CFID
 	h.src.set()
-	h.st.setAgents(agentSnap("edge", h.clk.now(), ctr("x", dnsOnly(dnsSpec("web", appHost)))))
+	agent := agentSnap("edge", h.clk.now(), ctr("x", dnsOnly(dnsSpec("web", appHost))))
+	h.st.setAgents(agent)
 	h.cycle()
 	h.wantOnlyRejected("edge", ownedByLocal, 1)
-	h.clk.advance(29 * time.Minute)
-	h.st.setAgents(agentSnap("edge", h.clk.now(), ctr("x", dnsOnly(dnsSpec("web", appHost)))))
+	h.clk.advance(30 * time.Minute)
+	h.st.setAgents(agentSnap("edge", h.clk.now(), agent.Containers...))
 	h.cycle()
 	h.wantOnlyRejected("edge", ownedByLocal, 1)
-	h.clk.advance(time.Minute)
+	h.noRow(model.KindDNS, appKey)
+	if len(h.recordsNamed(appHost)) != 0 {
+		t.Fatalf("records %+v", h.records())
+	}
 	h.cycle()
 	row := h.row(model.KindDNS, appKey)
-	if row.Owner.AgentID != "edge" || row.CFID != recID || row.Status != model.StatusActive {
+	if row.Owner.AgentID != "edge" || row.CFID == recID || row.Status != model.StatusActive {
 		t.Fatalf("row %+v", row)
 	}
 	if len(h.st.list(true)) != 0 {
 		t.Fatal("rejection not cleared")
+	}
+}
+
+// An orphaned cleanup=false row keeps the hostname for its source past
+// remove_delay, until orphan_ttl forgets it.
+func TestCleanupFalseRowKeepsHostnameUntilForgotten(t *testing.T) {
+	h := newHarness(t, func(s *Settings) { s.OrphanTTL = 2 * time.Hour })
+	local := dnsSpec("web", appHost)
+	local.Cleanup = false
+	h.src.set(ctr("web", dnsOnly(local)))
+	h.cycle()
+	h.src.set()
+	h.cycle()
+	other := dnsSpec("v6", appHost)
+	other.Type, other.Target = model.DNSTypeAAAA, "2001:db8::66"
+	for _, step := range []time.Duration{31 * time.Minute, time.Hour} {
+		h.clk.advance(step)
+		h.st.setAgents(agentSnap("edge", h.clk.now(), ctr("x", dnsOnly(other))))
+		h.cycle()
+		h.wantOnlyRejected("edge", ownedByLocal, 1)
+	}
+	h.clk.advance(time.Hour) // orphan_ttl: the row is forgotten
+	h.cycle()
+	h.noRow(model.KindDNS, appKey)
+	h.st.setAgents(agentSnap("edge", h.clk.now(), ctr("x", dnsOnly(other))))
+	h.cycle()
+	if row := h.row(model.KindDNS, model.DNSKey(appHost, model.DNSTypeAAAA, "")); row.Owner.AgentID != "edge" {
+		t.Fatalf("row %+v", row)
 	}
 }
 
