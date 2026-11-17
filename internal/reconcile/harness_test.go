@@ -110,7 +110,7 @@ func ctr(name string, pl model.ParsedLabels) model.Container {
 	}
 	return model.Container{
 		ID: "id-" + name, Name: name, Labels: map[string]string{specLabel: string(raw)},
-		Networks: map[string]string{"bridge": "172.17.0.5", "v6net": "fd00::5"},
+		Networks: map[string]string{"bridge": "172.17.0.5"}, Networks6: map[string]string{"v6net": "fd00::5"},
 	}
 }
 

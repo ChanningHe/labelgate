@@ -376,6 +376,51 @@ func TestDNSContainerTargetWithoutAddress(t *testing.T) {
 	}
 }
 
+// "container" targets: A reads IPv4 from Networks (ignoring IPv6 fallback
+// values), AAAA reads Networks6; networks are taken in name order.
+func TestDNSContainerTargetFamilies(t *testing.T) {
+	a := dnsSpec("v4", "a.example.com")
+	a.Target, a.Proxied = model.TargetContainer, false
+	aaaa := model.DNSSpec{Service: "v6", Hostname: "aaaa.example.com", Type: model.DNSTypeAAAA, Target: model.TargetContainer, Cleanup: true}
+	tests := []struct {
+		name          string
+		nets, nets6   map[string]string
+		wantA, want6  string // "" = error expected
+		errA, errAAAA string
+	}{
+		{"dual stack", map[string]string{"b": "10.0.0.2", "a": "172.18.0.2"}, map[string]string{"b": "2001:db8::b", "a": "2001:db8::a"},
+			"172.18.0.2", "2001:db8::a", "", ""},
+		{"v6-only network", map[string]string{"v6only": "2001:db8::9"}, map[string]string{"v6only": "2001:db8::9"},
+			"", "2001:db8::9", "no IPv4 address", ""},
+		{"no IPv6 recorded", map[string]string{"bridge": "172.17.0.5", "old": "2001:db8::7"}, nil,
+			"172.17.0.5", "", "", "no IPv6 address"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			c := ctr("web", dnsOnly(a, aaaa))
+			c.Networks, c.Networks6 = tc.nets, tc.nets6
+			h.src.set(c)
+			h.cycle()
+			check := func(host string, typ model.DNSType, want, errWant string) {
+				t.Helper()
+				row := h.row(model.KindDNS, model.DNSKey(host, typ, ""))
+				if want == "" {
+					if !strings.Contains(row.LastError, errWant) || len(h.recordsNamed(host)) != 0 {
+						t.Fatalf("%s: row %+v", host, row)
+					}
+					return
+				}
+				if recs := h.recordsNamed(host); len(recs) != 1 || recs[0].Content != want {
+					t.Fatalf("%s: records %+v (row %q)", host, recs, row.LastError)
+				}
+			}
+			check("a.example.com", model.DNSTypeA, tc.wantA, tc.errA)
+			check("aaaa.example.com", model.DNSTypeAAAA, tc.want6, tc.errAAAA)
+		})
+	}
+}
+
 func TestLocalSourceErrorHoldsResources(t *testing.T) {
 	h := newHarness(t)
 	h.src.set(ctr("web", dnsOnly(dnsSpec("web", appHost))))

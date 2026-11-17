@@ -201,10 +201,16 @@ func (o *observer) target(ctx context.Context, w claim) (netip.Addr, error) {
 	return res.addr, nil
 }
 
-// containerIP returns the first address of the right family, networks sorted by name.
+// containerIP returns the first address of the right family, networks sorted
+// by name: IPv4 from Networks (IPv6 fallback values there are skipped), IPv6
+// from Networks6.
 func containerIP(c *model.Container, v6 bool, family string) (netip.Addr, error) {
-	for _, name := range sortedKeys(c.Networks) {
-		if a, err := netip.ParseAddr(c.Networks[name]); err == nil && familyOK(a, v6) {
+	nets := c.Networks
+	if v6 {
+		nets = c.Networks6
+	}
+	for _, name := range sortedKeys(nets) {
+		if a, err := netip.ParseAddr(nets[name]); err == nil && familyOK(a, v6) {
 			return a, nil
 		}
 	}
