@@ -217,11 +217,14 @@ func newHoldSet(sources []*sourceInfo, holds []labelHold, tracked []model.Resour
 		}
 	}
 	for _, r := range tracked {
-		if r.Rejected || h.agents[r.Owner.AgentID] || stillClaimed(r, claims) {
+		if r.Rejected || h.agents[r.Owner.AgentID] {
 			continue
 		}
+		claimed := stillClaimed(r, claims)
 		for _, lh := range holds {
-			if lh.matches(r) {
+			// A broken access definition holds its rows even though the
+			// referencing service still parses (its binding cannot be built).
+			if lh.matches(r) && (!claimed || lh.Type == "access") {
 				h.rows[r.ID] = lh.Reason
 				break
 			}
