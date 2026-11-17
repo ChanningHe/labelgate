@@ -141,7 +141,12 @@ func TestSnapshotMapsAndFiltersContainers(t *testing.T) {
 	if len(alpha.Networks) != 2 || alpha.Networks["v4"] != wantNets["v4"] || alpha.Networks["v6"] != wantNets["v6"] {
 		t.Errorf("networks (IPv4 preferred, IPv6 fallback, empty omitted) = %v", alpha.Networks)
 	}
-	if zeta := snap.Containers[2]; zeta.Networks["bridge"] != "172.17.0.3" {
+	// Every IPv6 address is recorded, also on networks that have an IPv4.
+	wantNets6 := map[string]string{"v4": "2001:db8::2", "v6": "2001:db8::3"}
+	if len(alpha.Networks6) != 2 || alpha.Networks6["v4"] != wantNets6["v4"] || alpha.Networks6["v6"] != wantNets6["v6"] {
+		t.Errorf("networks6 (all global IPv6, empty omitted) = %v", alpha.Networks6)
+	}
+	if zeta := snap.Containers[2]; zeta.Networks["bridge"] != "172.17.0.3" || len(zeta.Networks6) != 0 {
 		t.Errorf("zeta = %+v", zeta)
 	}
 	if snap.Containers[0].Labels == nil {

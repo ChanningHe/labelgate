@@ -9,11 +9,17 @@ import (
 // Container is a running container as seen by a source (local Docker or agent).
 // It is also the wire format of agent reports (JSON tags are protocol).
 type Container struct {
-	ID       string            `json:"id"`
-	Name     string            `json:"name"` // without leading slash
-	Labels   map[string]string `json:"labels"`
-	Networks map[string]string `json:"networks,omitempty"` // network name -> IP address
-	State    string            `json:"state"`
+	ID     string            `json:"id"`
+	Name   string            `json:"name"` // without leading slash
+	Labels map[string]string `json:"labels"`
+	// Networks maps network name -> IPv4 address; for compatibility with
+	// consumers that predate Networks6 it falls back to the global IPv6
+	// address on networks without an IPv4.
+	Networks map[string]string `json:"networks,omitempty"`
+	// Networks6 maps network name -> global IPv6 address (always recorded,
+	// also on dual-stack networks). AAAA "container" targets must use it.
+	Networks6 map[string]string `json:"networks6,omitempty"`
+	State     string            `json:"state"`
 }
 
 // Snapshot is the complete container list of one source at one point in time.
