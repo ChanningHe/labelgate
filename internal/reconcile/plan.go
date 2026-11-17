@@ -320,12 +320,12 @@ func planTunnel(in planInput, lc lifecycle, id string) tunnelOp {
 	m := mergeIngress(tl.Config, owned, keep)
 	op.Put, op.Config = m.Changed, m.Config
 	conflicted := map[rowKey]bool{}
-	for _, k := range m.Conflicts {
+	for _, k := range m.Conflicts { // winners, held and orphaned rows alike
 		conflicted[k] = true
+		op.Failed = append(op.Failed, rowFail{Key: k, Msg: model.ConflictNotOwned + " (unmanaged ingress rule uses this hostname)"})
 	}
 	for _, k := range winners {
 		if conflicted[k] {
-			op.Failed = append(op.Failed, rowFail{Key: k, Msg: model.ConflictNotOwned + " (unmanaged ingress rule uses this hostname)"})
 			continue
 		}
 		op.Applied = append(op.Applied, k)

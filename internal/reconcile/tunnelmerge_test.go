@@ -91,6 +91,14 @@ func TestMergeIngress(t *testing.T) {
 			conflicts: 1,
 		},
 		{
+			name:      "conflicting owned rule already live is kept verbatim",
+			live:      `{"ingress":[{"hostname":"a.example.com","service":"http://old"},{"hostname":"a.example.com","path":"/m","service":"http://h"},{"service":"http_status:404"}]}`,
+			owned:     ids("a.example.com", ""),
+			keep:      []keepRule{keep("a.example.com", "", "http://new")},
+			want:      []string{"a.example.com=>http://old", "a.example.com/m=>http://h", "=>http_status:404"},
+			conflicts: 1,
+		},
+		{
 			name:    "duplicate owned live rules collapse",
 			live:    `{"ingress":[{"hostname":"a.example.com","service":"http://old"},{"hostname":"a.example.com","service":"http://dup"},{"service":"http_status:404"}]}`,
 			owned:   ids("a.example.com", ""),

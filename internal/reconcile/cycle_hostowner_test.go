@@ -213,6 +213,30 @@ func TestOrphanReservationEndsAtRemoveDelay(t *testing.T) {
 	}
 }
 
+// A held owned rule whose hostname gains an unmanaged rule stays in the live
+// configuration and its row reports the conflict.
+func TestHeldTunnelRuleKeptBesideUnmanagedSameHost(t *testing.T) {
+	h := newHarness(t)
+	h.st.setAgents(agentSnap("edge", h.clk.now(), ctr("web", tunOnly(tunSpec("web", "h1.example.com", "http://203.0.113.5:80")))))
+	h.cycle()
+	held := agentSnap("edge", h.clk.now())
+	held.Complete = false
+	h.st.setAgents(held)
+	raw := strings.Replace(h.cf.TunnelConfigJSON(tunnelA), `{"service":"http_status:404"}`,
+		`{"hostname":"h1.example.com","path":"/manual","service":"http://manual:80"},{"service":"http_status:404"}`, 1)
+	h.cf.SetTunnelConfig(tunnelA, raw)
+	h.src.set(ctr("loc", tunOnly(tunSpec("loc", "h2.example.com", "http://loc:80"))))
+	h.cycle()
+	cfg := h.cf.TunnelConfigJSON(tunnelA)
+	if !strings.Contains(cfg, `"service":"http://203.0.113.5:80"`) || !strings.Contains(cfg, "http://manual:80") {
+		t.Fatalf("config %s", cfg)
+	}
+	row := h.row(model.KindTunnel, model.TunnelKey(tunnelA, "h1.example.com", ""))
+	if row.Status != model.StatusError || !strings.Contains(row.LastError, model.ConflictNotOwned) {
+		t.Fatalf("held row %+v", row)
+	}
+}
+
 // With rows of several sources on one hostname (written by older versions),
 // the source of the oldest row keeps the hostname.
 func TestMixedSourceRowsOldestWins(t *testing.T) {
