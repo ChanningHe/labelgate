@@ -2,6 +2,7 @@ package reconcile
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/netip"
 	"sort"
@@ -69,23 +70,60 @@ type ipResult struct {
 	err  error
 }
 
-// observe resolves zones and dynamic DNS content of winners, then reads the
-// live state referenced by winners and mutable tracked rows.
-func (r *Reconciler) observe(ctx context.Context, winners []claim, tracked []model.Resource, held holdSet) ([]claim, liveState, error) {
+// observed is the outcome of observe.
+type observed struct {
+	Winners []claim
+	Tracked []model.Resource // zone bindings repaired by rebind
+	Live    liveState
+}
+
+// observe resolves zones and dynamic DNS content of winners, repairs the zone
+// binding of tracked rows, then reads the live state referenced by winners
+// and mutable tracked rows.
+func (r *Reconciler) observe(ctx context.Context, winners []claim, tracked []model.Resource, held holdSet) (observed, error) {
 	o := &observer{r: r, zones: map[string]zoneResult{}, ips: map[bool]ipResult{}}
 	resolved := make([]claim, len(winners))
 	for i, w := range winners {
 		resolved[i] = o.resolveWinner(ctx, w)
 	}
+	rows := make([]model.Resource, len(tracked))
+	for i, t := range tracked {
+		rows[i] = o.rebind(ctx, t, held)
+	}
 	live := liveState{
-		Zones:    r.observeZones(ctx, resolved, tracked, held),
-		Tunnels:  r.observeTunnels(ctx, resolved, tracked, held),
-		Accounts: r.observeAccounts(ctx, resolved, tracked, held),
+		Zones:    r.observeZones(ctx, resolved, rows, held),
+		Tunnels:  r.observeTunnels(ctx, resolved, rows, held),
+		Accounts: r.observeAccounts(ctx, resolved, rows, held),
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, liveState{}, err
+		return observed{}, err
 	}
-	return resolved, live, nil
+	return observed{Winners: resolved, Tracked: rows, Live: live}, nil
+}
+
+// rebind repairs the zone binding of a DNS or Access row Labelgate may still
+// have to read or delete: a row whose credential no longer exists (e.g.
+// "default" migrated from v0.2 while the v0.3 config has no root token) or
+// that has no zone is re-resolved by automatic zone matching. A zone or
+// account different from the recorded one is never adopted.
+func (o *observer) rebind(ctx context.Context, r model.Resource, held holdSet) model.Resource {
+	if (r.Kind != model.KindDNS && r.Kind != model.KindAccess) || !needsLive(r, held) {
+		return r
+	}
+	z, err := o.zone(ctx, r.Hostname, r.Credential)
+	switch {
+	case errors.Is(err, cloudflare.ErrUnknownCredential):
+		if z, err = o.zone(ctx, r.Hostname, ""); err != nil {
+			return r
+		}
+	case err != nil, r.ZoneID != "" && r.AccountID != "":
+		return r
+	}
+	if (r.ZoneID != "" && r.ZoneID != z.ID) || (r.AccountID != "" && r.AccountID != z.AccountID) {
+		return r
+	}
+	r.ZoneID, r.AccountID, r.Credential = z.ID, z.AccountID, z.Credential
+	return r
 }
 
 func (o *observer) resolveWinner(ctx context.Context, w claim) claim {
@@ -181,7 +219,7 @@ func (r *Reconciler) observeZones(ctx context.Context, winners []claim, tracked 
 		}
 	}
 	for _, t := range tracked {
-		if _, ok := zones[t.ZoneID]; !ok && t.Kind == model.KindDNS && t.CFID != "" && t.ZoneID != "" && needsLive(t, held) {
+		if _, ok := zones[t.ZoneID]; !ok && t.Kind == model.KindDNS && t.ZoneID != "" && needsLive(t, held) {
 			zones[t.ZoneID] = zoneOfRow(t)
 		}
 	}

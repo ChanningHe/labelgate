@@ -193,13 +193,16 @@ func planDNSDelete(row model.Resource, zl zoneLive, observed bool, instanceID st
 	k := keyOf(row)
 	op := dnsOp{Key: k, Zone: zoneOfRow(row)}
 	switch {
-	case row.CFID == "":
+	case row.CFID == "" && row.ZoneID == "":
 		op.Action = dnsDrop
 		return op
 	case !observed:
 		return failDNS(k, "zone "+row.ZoneID+" not observed")
 	case zl.Err != nil:
 		return failDNS(k, "list dns records: "+zl.Err.Error())
+	}
+	if row.CFID == "" {
+		return deleteByIdentity(op, row, zl.Records, instanceID)
 	}
 	rec, ok := findRecord(zl.Records, row.CFID)
 	switch {
@@ -210,6 +213,21 @@ func planDNSDelete(row model.Resource, zl zoneLive, observed bool, instanceID st
 	default:
 		op.Action, op.Msg = dnsDrop, "ownership marker removed from record "+rec.ID+"; left in place"
 	}
+	return op
+}
+
+// deleteByIdentity handles a row without a record ID (a create that never
+// persisted its ID, or a tunnel CNAME synthesized from v0.2): the record with
+// the same identity is deleted if it is ours, otherwise only the row goes.
+func deleteByIdentity(op dnsOp, row model.Resource, recs []cloudflare.DNSRecord, instanceID string) dnsOp {
+	want := desiredRecord(row, instanceID)
+	for _, rec := range recs {
+		if sameIdentity(rec, want) && (model.IsOwnedComment(instanceID, rec.Comment) || legacyCNAME(row, rec, want)) {
+			op.Action, op.Record = dnsDelete, rec
+			return op
+		}
+	}
+	op.Action = dnsDrop
 	return op
 }
 
