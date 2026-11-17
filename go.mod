@@ -2,6 +2,8 @@ module github.com/channinghe/labelgate
 
 go 1.26.0
 
+toolchain go1.26.11
+
 require (
 	github.com/cloudflare/cloudflare-go/v6 v6.10.0
 	github.com/docker/docker v28.5.2+incompatible
