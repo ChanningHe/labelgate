@@ -20,6 +20,7 @@ import (
 // alreadyExistsCodes are Cloudflare error codes meaning "an equivalent object exists".
 var alreadyExistsCodes = []int{
 	81053, // an A, AAAA or CNAME record with that host already exists
+	81054, // a CNAME cannot be created: an A, AAAA or CNAME record with that host exists
 	81057, // identical record already exists
 	81058, // a record with the same settings already exists
 }

@@ -71,6 +71,9 @@ func TestDNS_DefaultsErrors(t *testing.T) {
 		if len(got.DNS) != 1 || !hasErr(got, "labelgate.dns.default.hostname", "unknown property") {
 			t.Fatalf("got %+v", got)
 		}
+		if len(got.Errors) != 1 || !got.Errors[0].Unknown {
+			t.Fatalf("unknown property not marked: %+v", got.Errors)
+		}
 	})
 }
 

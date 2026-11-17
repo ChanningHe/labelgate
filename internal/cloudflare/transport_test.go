@@ -168,6 +168,7 @@ func TestErrorMapping(t *testing.T) {
 		{"unauthorized", 401, cfErrorBody(10000, "Authentication error"), ErrUnauthorized, []int{10000}},
 		{"forbidden", 403, cfErrorBody(9109, "Unauthorized to access requested resource"), ErrUnauthorized, []int{9109}},
 		{"cname clash", 400, cfErrorBody(81053, "exists"), ErrAlreadyExists, []int{81053}},
+		{"cname over existing record", 400, cfErrorBody(81054, "A CNAME record with that host already exists."), ErrAlreadyExists, []int{81054}},
 		{"identical", 400, cfErrorBody(81057, "identical"), ErrAlreadyExists, []int{81057}},
 		{"same settings", 400, cfErrorBody(81058, "same"), ErrAlreadyExists, []int{81058}},
 		{"other 400", 400, cfErrorBody(9005, "content invalid"), nil, []int{9005}},

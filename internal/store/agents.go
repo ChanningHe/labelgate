@@ -66,7 +66,8 @@ func canonicalSnapshot(containers []model.Container) (string, string, error) {
 
 // RecordAgentReport upserts the agent row. A non-nil snap replaces the stored
 // container list; nil keeps the previous one. changed is true when a snapshot
-// was stored whose content differs from the previous one (or none existed).
+// was stored whose content differs from the previous one (or none existed),
+// or when the agent's public IPv4/IPv6 address changed.
 func (s *SQLite) RecordAgentReport(ctx context.Context, rec model.AgentRecord, snap *model.Snapshot) (bool, error) {
 	if !model.ValidAgentID(rec.ID) {
 		return false, fmt.Errorf("%w: agent id %q", model.ErrInvalid, rec.ID)
@@ -83,14 +84,17 @@ func (s *SQLite) RecordAgentReport(ctx context.Context, rec model.AgentRecord, s
 	now := s.nowUnix()
 	var changed bool
 	err := s.inTx(ctx, func(tx *sql.Tx) error {
-		var prev sql.NullString
+		var prev, prevIP, prevIPv6 sql.NullString
 		err := tx.QueryRowContext(ctx,
-			`SELECT CASE WHEN snapshot_json IS NULL THEN NULL ELSE snapshot_hash END FROM agents WHERE id = ?`,
-			rec.ID).Scan(&prev)
+			`SELECT CASE WHEN snapshot_json IS NULL THEN NULL ELSE snapshot_hash END, public_ip, public_ipv6
+			FROM agents WHERE id = ?`, rec.ID).Scan(&prev, &prevIP, &prevIPv6)
+		found := err == nil
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		changed = snap != nil && (!prev.Valid || prev.String != hash)
+		// "auto" records follow the agent's public IPs: an IP change is a change.
+		ipChanged := found && (prevIP.String != rec.PublicIP || prevIPv6.String != rec.PublicIPv6)
+		changed = ipChanged || (snap != nil && (!prev.Valid || prev.String != hash))
 		_, err = tx.ExecContext(ctx, upsertAgentSQL, rec.ID, rec.Name, rec.DefaultTunnel,
 			rec.PublicIP, rec.PublicIPv6, unixOrNull(rec.LastSeen), snapJSON, hash, now, now)
 		return err

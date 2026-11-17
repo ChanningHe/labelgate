@@ -44,7 +44,7 @@ func (r *Reconciler) cycle(ctx context.Context, now time.Time) ([]string, time.T
 	}
 	tracked, prevRejected := splitRows(all)
 	held := newHoldSet(col.Sources, col.Holds, tracked, col.Claims)
-	res := resolve(col.Claims, tracked, held)
+	res := resolve(col.Claims, tracked, held, now, r.settings.RemoveDelay)
 	rejected := dedupeRejected(concatRows(col.Rejected, res.Rejected, heldRejected(prevRejected, held)))
 	issues = append(issues, rejectionIssues(rejected)...)
 	if !rejectedEqual(prevRejected, rejected) {
@@ -52,15 +52,15 @@ func (r *Reconciler) cycle(ctx context.Context, now time.Time) ([]string, time.T
 			return issues, col.Deadline, storeError{fmt.Errorf("replace rejected: %w", err)}
 		}
 	}
-	winners, live, err := r.observe(ctx, res.Winners, res.Tracked, held)
+	obs, err := r.observe(ctx, res.Winners, res.Tracked, held)
 	if err != nil {
 		return issues, col.Deadline, err
 	}
 	p := buildPlan(planInput{
 		Now: now, InstanceID: r.settings.InstanceID, RemoveDelay: r.settings.RemoveDelay,
-		OrphanTTL: r.settings.OrphanTTL, Winners: winners, Tracked: res.Tracked, Held: held, Live: live,
+		OrphanTTL: r.settings.OrphanTTL, Winners: obs.Winners, Tracked: obs.Tracked, Held: held, Live: obs.Live,
 	})
-	e := newExecutor(r, now, res.Tracked)
+	e := newExecutor(r, now, obs.Tracked)
 	err = e.run(ctx, res.Rekeyed, p)
 	return append(issues, e.issues...), earliest(p.NextDeadline, col.Deadline), err
 }

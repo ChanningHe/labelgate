@@ -3,6 +3,7 @@ package reconcile
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/channinghe/labelgate/internal/model"
 )
@@ -31,7 +32,12 @@ func TestExistingOwnerWinsAndNeverFlaps(t *testing.T) {
 	}
 	h.assertIdempotent()
 
-	h.src.set(newcomer) // incumbent leaves: newcomer takes over the same record
+	h.src.set(newcomer) // incumbent leaves: its row stays reserved for remove_delay
+	h.cycle()
+	if row := h.row(model.KindDNS, appKey); row.Owner.ContainerName != "zeta" || len(h.st.list(true)) != 1 {
+		t.Fatalf("takeover before remove_delay: %+v", row)
+	}
+	h.clk.advance(30 * time.Minute) // then the newcomer takes over the same record
 	h.cycle()
 	row := h.row(model.KindDNS, appKey)
 	if row.Owner.ContainerName != "alpha" || row.CFID != recID || row.Status != model.StatusActive {

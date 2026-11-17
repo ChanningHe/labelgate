@@ -9,8 +9,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/spf13/viper"
 )
 
 // env builds an injected environment lookup.
@@ -223,39 +221,66 @@ cloudflare:
   account_id: a1
 agent:
   enabled: true
-  accept_token: "ssssssssssssssssssssssssssssssss"
+  accept_token: "s0s1s2s3s4s5s6s7s8s9sasbscsdsesf"
   accept_hostnames: ["*.example.com"]
   agents:
     web-1:
-      token: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      token: "x0x1x2x3x4x5x6x7x8x9xaxbxcxdxexf"
       name: Web One
       default_tunnel: default
       tunnels: [default]
       hostnames: ["web.example.com"]
+      services: ["web", "10.0.0.0/8"]
       connect_to: wss://web-1:8081/ws
 `)
-	cfg := mustLoad(t, path, env("LABELGATE_AGENT_ACCEPT_TUNNELS", "default, t1 ,"))
+	cfg := mustLoad(t, path, env("LABELGATE_AGENT_ACCEPT_TUNNELS", "default, t1 ,", "LABELGATE_AGENT_ACCEPT_SERVICES", "web, 10.0.0.0/8"))
 	a := cfg.Agent
-	if !a.Enabled || a.AcceptToken != strings.Repeat("s", 32) || !reflect.DeepEqual(a.AcceptHostnames, []string{"*.example.com"}) {
+	if !a.Enabled || a.AcceptToken != "s0s1s2s3s4s5s6s7s8s9sasbscsdsesf" || !reflect.DeepEqual(a.AcceptHostnames, []string{"*.example.com"}) {
 		t.Errorf("agent: %+v", a)
 	}
 	if !reflect.DeepEqual(a.AcceptTunnels, []string{"default", "t1"}) {
 		t.Errorf("list env must be split and trimmed: %q", a.AcceptTunnels)
 	}
+	if !reflect.DeepEqual(a.AcceptServices, []string{"web", "10.0.0.0/8"}) {
+		t.Errorf("accept_services from env: %q", a.AcceptServices)
+	}
 	e := a.Agents["web-1"]
 	want := AgentEntry{
-		Token: strings.Repeat("x", 32), Name: "Web One", DefaultTunnel: "default", Tunnels: []string{"default"},
-		Hostnames: []string{"web.example.com"}, ConnectTo: "wss://web-1:8081/ws",
+		Token: "x0x1x2x3x4x5x6x7x8x9xaxbxcxdxexf", Name: "Web One", DefaultTunnel: "default", Tunnels: []string{"default"},
+		Hostnames: []string{"web.example.com"}, Services: []string{"web", "10.0.0.0/8"}, ConnectTo: "wss://web-1:8081/ws",
 	}
 	if !reflect.DeepEqual(e, want) {
 		t.Errorf("entry: %+v", e)
 	}
 }
 
+// Agent IDs may contain dots; as map keys they must not be split into paths.
+func TestLoad_DottedAgentIDs(t *testing.T) {
+	const tok = "x0x1x2x3x4x5x6x7x8x9xaxbxcxdxexf"
+	files := map[string]string{
+		"labelgate.yaml": "agent:\n  enabled: true\n  agents:\n    nas.lan:\n      token: \"" + tok + "\"\n      hostnames: [\"*.lan.example.com\"]\n    web-1:\n      token: \"" + tok + "\"\n",
+		"labelgate.toml": "[agent]\nenabled = true\n[agent.agents.\"nas.lan\"]\ntoken = \"" + tok + "\"\nhostnames = [\"*.lan.example.com\"]\n[agent.agents.web-1]\ntoken = \"" + tok + "\"\n",
+		"labelgate.json": `{"agent":{"enabled":true,"agents":{"nas.lan":{"token":"` + tok + `","hostnames":["*.lan.example.com"]},"web-1":{"token":"` + tok + `"}}}}`,
+	}
+	for name, content := range files {
+		t.Run(name, func(t *testing.T) {
+			path := writeFile(t, t.TempDir(), name, content)
+			cfg := mustLoad(t, path, env(tokenEnv, "tok", "LABELGATE_AGENT_LISTEN", ":9091", "LABELGATE_SYNC_REMOVE_DELAY", "1m"))
+			e, ok := cfg.Agent.Agents["nas.lan"]
+			if !ok || e.Token != tok || !reflect.DeepEqual(e.Hostnames, []string{"*.lan.example.com"}) || len(cfg.Agent.Agents) != 2 {
+				t.Fatalf("agents %+v", cfg.Agent.Agents)
+			}
+			if cfg.Agent.Listen != ":9091" || cfg.Sync.RemoveDelay != time.Minute {
+				t.Fatalf("env overlay lost: listen %q remove_delay %s", cfg.Agent.Listen, cfg.Sync.RemoveDelay)
+			}
+		})
+	}
+}
+
 func TestLoad_AgentModeFromEnv(t *testing.T) {
 	cfg := mustLoad(t, "", env(
 		"LABELGATE_MODE", "agent",
-		"LABELGATE_CONNECT_TOKEN", strings.Repeat("t", 32),
+		"LABELGATE_CONNECT_TOKEN", "t0t1t2t3t4t5t6t7t8t9tatbtctdtetf",
 		"LABELGATE_CONNECT_ENDPOINT", "wss://main/ws",
 		"LABELGATE_CONNECT_HEARTBEAT_INTERVAL", "45s",
 		"LABELGATE_CONNECT_TLS_CA", "/ca.pem",
@@ -315,7 +340,7 @@ func TestLoad_EveryKeyHasEnvBinding(t *testing.T) {
 		t.Run(key, func(t *testing.T) {
 			ft := fieldByKey(Defaults(), key).Type()
 			raw, want := sample(ft)
-			cfg, err := decode(viper.New(), env(name, raw))
+			cfg, err := decode(newViper(), env(name, raw))
 			if err != nil {
 				t.Fatalf("decode %s=%s: %v", name, raw, err)
 			}

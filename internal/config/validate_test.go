@@ -8,8 +8,8 @@ import (
 	"time"
 )
 
-// agentToken meets the 32-character minimum for agent tokens.
-var agentToken = strings.Repeat("k", MinAgentTokenLen)
+// agentToken meets the agent token rules (32 characters, 12 distinct).
+const agentToken = "3f9a1c7e5b2d8046af13ce97b5d20864"
 
 // validMain returns a valid main-mode config with a root credential and tunnel.
 func validMain() Config {
@@ -132,7 +132,10 @@ func TestValidate_SyncAndDB(t *testing.T) {
 		{"remove delay negative", m, func(c *Config) { c.Sync.RemoveDelay = -1 }, "sync.remove_delay", ">= 0"},
 		{"remove delay zero ok", m, func(c *Config) { c.Sync.RemoveDelay = 0 }, "", ""},
 		{"orphan ttl negative", m, func(c *Config) { c.Sync.OrphanTTL = -1 }, "sync.orphan_ttl", ">= 0"},
-		{"agent grace negative", m, func(c *Config) { c.Sync.AgentGrace = -1 }, "sync.agent_grace", ">= 0"},
+		{"agent grace negative", m, func(c *Config) { c.Sync.AgentGrace = -1 }, "sync.agent_grace", ">= 5m"},
+		{"agent grace zero", m, func(c *Config) { c.Sync.AgentGrace = 0 }, "sync.agent_grace", ">= 5m"},
+		{"agent grace below floor", m, func(c *Config) { c.Sync.AgentGrace = 4 * time.Minute }, "sync.agent_grace", ">= 5m"},
+		{"agent grace floor ok", m, func(c *Config) { c.Sync.AgentGrace = MinAgentGrace }, "", ""},
 		{"empty db path", m, func(c *Config) { c.DB.Path = "  " }, "db.path", "must not be empty"},
 	})
 }
@@ -253,7 +256,13 @@ func TestValidate_AgentServer(t *testing.T) {
 		{"agent invalid id", base, func(c *Config) { entry(c, "Bad ID", AgentEntry{Token: agentToken}) }, "agent.agents.Bad ID", "invalid agent ID"},
 		{"agent empty token", base, func(c *Config) { entry(c, "web", AgentEntry{}) }, "agent.agents.web.token", "must not be empty"},
 		{"agent short token", base, func(c *Config) { entry(c, "web", AgentEntry{Token: strings.Repeat("a", MinAgentTokenLen-1)}) }, "agent.agents.web.token", "openssl rand -hex 32"},
-		{"agent multibyte token counts characters", base, func(c *Config) { entry(c, "web", AgentEntry{Token: strings.Repeat("é", MinAgentTokenLen)}) }, "", ""},
+		{"agent multibyte token counts characters", base, func(c *Config) {
+			entry(c, "web", AgentEntry{Token: strings.Repeat("àáâãäåæçèéêëìíîï", 2)})
+		}, "", ""},
+		{"agent low-variety token", base, func(c *Config) { entry(c, "web", AgentEntry{Token: strings.Repeat("ab", 16)}) }, "agent.agents.web.token", "distinct"},
+		{"agent token 11 distinct", base, func(c *Config) { entry(c, "web", AgentEntry{Token: strings.Repeat("0123456789a", 3)}) }, "agent.agents.web.token", "at least 12 distinct"},
+		{"agent token 12 distinct ok", base, func(c *Config) { entry(c, "web", AgentEntry{Token: strings.Repeat("0123456789ab", 3)}) }, "", ""},
+		{"accept token low-variety", base, func(c *Config) { c.Agent.AcceptToken = strings.Repeat("k", 40) }, "agent.accept_token", "distinct"},
 		{"short accept token", base, func(c *Config) { c.Agent.AcceptToken = "shared" }, "agent.accept_token", "openssl rand -hex 32"},
 		{"accept token ok", base, func(c *Config) { c.Agent.AcceptToken = agentToken }, "", ""},
 		{"agent dotted id ok", base, func(c *Config) { entry(c, "nas.lan", AgentEntry{Token: agentToken}) }, "", ""},
@@ -262,6 +271,14 @@ func TestValidate_AgentServer(t *testing.T) {
 		{"agent connect_to without host", base, func(c *Config) { entry(c, "web", AgentEntry{Token: agentToken, ConnectTo: "ws://"}) }, "agent.agents.web.connect_to", "ws:// or wss://"},
 		{"agent unknown default tunnel", base, func(c *Config) { entry(c, "web", AgentEntry{Token: agentToken, DefaultTunnel: "nope"}) }, "agent.agents.web.default_tunnel", "unknown tunnel"},
 		{"agent unknown tunnel", base, func(c *Config) { entry(c, "web", AgentEntry{Token: agentToken, Tunnels: []string{"nope"}}) }, "agent.agents.web.tunnels", "unknown tunnel"},
+		{"accept services ok", base, func(c *Config) {
+			c.Agent.AcceptServices = []string{"web", "*.svc.internal", "10.0.0.0/8", "192.0.2.7", "fd00::/8", "::1"}
+		}, "", ""},
+		{"accept services bad cidr", base, func(c *Config) { c.Agent.AcceptServices = []string{"10.0.0.0/33"} }, "agent.accept_services", "invalid"},
+		{"accept services inet_aton form", base, func(c *Config) { c.Agent.AcceptServices = []string{"127.1"} }, "agent.accept_services", "canonical"},
+		{"accept services hex form", base, func(c *Config) { c.Agent.AcceptServices = []string{"0x7f000001"} }, "agent.accept_services", "canonical"},
+		{"accept services empty entry", base, func(c *Config) { c.Agent.AcceptServices = []string{""} }, "agent.accept_services", "invalid"},
+		{"agent bad services entry", base, func(c *Config) { entry(c, "web", AgentEntry{Token: agentToken, Services: []string{"a b"}}) }, "agent.agents.web.services", "invalid"},
 		{"agent bad hostname glob", base, func(c *Config) { entry(c, "web", AgentEntry{Token: agentToken, Hostnames: []string{"a b"}}) }, "agent.agents.web.hostnames", "invalid pattern"},
 		{"agent full ok", base, func(c *Config) {
 			entry(c, "web-1", AgentEntry{
@@ -280,8 +297,12 @@ func TestValidate_AgentMode(t *testing.T) {
 	runValidateCases(t, []validateCase{
 		{"empty token", a, func(c *Config) { c.Connect.Token = "" }, "connect.token", "must not be empty"},
 		{"short token", a, func(c *Config) { c.Connect.Token = "tok" }, "connect.token", "openssl rand -hex 32"},
+		{"low-variety token", a, func(c *Config) { c.Connect.Token = strings.Repeat("0123", 10) }, "connect.token", "openssl rand -hex 32"},
 		{"outbound missing endpoint", a, func(c *Config) { c.Connect.Endpoint = "" }, "connect.endpoint", "required"},
 		{"outbound http endpoint", a, func(c *Config) { c.Connect.Endpoint = "https://main/ws" }, "connect.endpoint", "ws:// or wss://"},
+		{"outbound endpoint without path", a, func(c *Config) { c.Connect.Endpoint = "wss://main.example.com:8081" }, "connect.endpoint", "did you mean wss://main.example.com:8081/ws?"},
+		{"outbound endpoint root path", a, func(c *Config) { c.Connect.Endpoint = "ws://main:8081/" }, "connect.endpoint", "did you mean ws://main:8081/ws?"},
+		{"outbound endpoint custom path ok", a, func(c *Config) { c.Connect.Endpoint = "wss://proxy.example.com/labelgate/ws" }, "", ""},
 		{"outbound ws ok", a, func(c *Config) { c.Connect.Endpoint = "ws://main:8081/ws" }, "", ""},
 		{"inbound missing listen", a, func(c *Config) { c.Connect.Mode = ConnectInbound }, "connect.listen", "required"},
 		{"inbound bad listen", a, func(c *Config) { c.Connect.Mode = ConnectInbound; c.Connect.Listen = "x" }, "connect.listen", "[host]:port"},

@@ -50,7 +50,7 @@ type Agent struct {
 	log     *slog.Logger
 	t       timings
 	seq     atomic.Uint64
-	pending semaphore
+	pending *pendingLimiter
 
 	mu  sync.Mutex
 	cur *agentSession // current authenticated main session
@@ -91,7 +91,7 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 		id:      id,
 		log:     opts.Log.With("component", "agent", "agent_id", id),
 		t:       defaultTimings(),
-		pending: make(semaphore, MaxPendingHandshakes),
+		pending: newPendingLimiter(MaxPendingHandshakes, MaxPendingPerIP),
 	}, nil
 }
 

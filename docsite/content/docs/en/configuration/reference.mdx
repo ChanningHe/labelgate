@@ -86,7 +86,7 @@ Labelgate only ever deletes Cloudflare resources **that it owns** (see [Ownershi
 | `LABELGATE_SYNC_INTERVAL` | `sync.interval` | `5m` | Periodic full reconciliation (in addition to Docker events and agent reports). Minimum `10s` |
 | `LABELGATE_SYNC_REMOVE_DELAY` | `sync.remove_delay` | `30m` | Delay before an orphaned resource with `cleanup=true` is deleted. `0s` deletes it in the cycle in which it becomes orphaned. Must be >= 0 |
 | `LABELGATE_SYNC_ORPHAN_TTL` | `sync.orphan_ttl` | `0` | Drop the database row (never the Cloudflare object) of orphaned resources with `cleanup=false` after this long. `0s` = never. Must be >= 0 |
-| `LABELGATE_SYNC_AGENT_GRACE` | `sync.agent_grace` | `24h` | How long an agent's last reported containers stay desired after the agent was last seen. Must be >= 0. See [Multi-Host](/docs/examples/multi-host#agent-grace) |
+| `LABELGATE_SYNC_AGENT_GRACE` | `sync.agent_grace` | `24h` | How long an agent's last reported containers stay desired after the agent was last seen. Must be >= `5m`; a connected agent is always present. See [Multi-Host](/docs/examples/multi-host#agent-grace) |
 
 <Callout type="warn">
 A `remove_delay` of `0` means "delete as soon as a resource is no longer desired". Do not copy `0s` from old example files; keep the `30m` default unless you have a reason.
@@ -157,9 +157,10 @@ See [Multi-Host](/docs/examples/multi-host) for how these fit together.
 |---------------------|------------------|---------|-------------|
 | `LABELGATE_AGENT_ENABLED` | `agent.enabled` | `false` | Start the agent WebSocket listener and dial inbound agents |
 | `LABELGATE_AGENT_LISTEN` | `agent.listen` | `:8081` | Listen address. Agents connect to `<scheme>://<host>:8081/ws`; `GET /health` answers `{"status":"ok"}` without authentication |
-| `LABELGATE_AGENT_ACCEPT_TOKEN` | `agent.accept_token` | - | Shared token accepted from agents that are **not** listed under `agent.agents`. At least 32 characters when set |
-| `LABELGATE_AGENT_ACCEPT_HOSTNAMES` | `agent.accept_hostnames` | - | Glob list limiting the hostnames `accept_token` agents may claim (see [Allow-lists](/docs/examples/multi-host#allow-lists)). Empty = unrestricted |
+| `LABELGATE_AGENT_ACCEPT_TOKEN` | `agent.accept_token` | - | Shared token accepted from agents that are **not** listed under `agent.agents`. When set, it must follow the [token rules](#agent-tokens) |
+| `LABELGATE_AGENT_ACCEPT_HOSTNAMES` | `agent.accept_hostnames` | - | Glob list limiting the hostnames `accept_token` agents may claim (see [Allow-lists](/docs/examples/multi-host#allow-lists)). Empty = unrestricted, except wildcard hostnames, which need an exact entry |
 | `LABELGATE_AGENT_ACCEPT_TUNNELS` | `agent.accept_tunnels` | - | Tunnels `accept_token` agents may target: `default`, a key of `cloudflare.tunnels` or a tunnel ID. Empty = only the default tunnel |
+| `LABELGATE_AGENT_ACCEPT_SERVICES` | `agent.accept_services` | - | Tunnel origins `accept_token` agents may use beyond IP literals: hostname globs, IP addresses or CIDRs (see [SSRF guard](/docs/examples/multi-host#ssrf-guard)). Empty = IP literals only |
 | `LABELGATE_AGENT_TLS_CERT` | `agent.tls.cert` | - | Server certificate of the agent listener (enables `wss://`) |
 | `LABELGATE_AGENT_TLS_KEY` | `agent.tls.key` | - | Server key (must be set together with `cert`) |
 | `LABELGATE_AGENT_TLS_CA` | `agent.tls.ca` | system roots | CA used to verify inbound agents when the main dials them |
@@ -170,21 +171,22 @@ See [Multi-Host](/docs/examples/multi-host) for how these fit together.
 The map key is the agent ID and must match `^[a-z0-9][a-z0-9._-]{0,62}$` (lower-case letters, digits, `.`, `_` and `-`).
 
 <Callout type="warn">
-In v0.3.0 the config loader treats `.` in a map key as a path separator, so an entry such as `agent.agents.nas.lan` is rejected with `unknown key`. Use IDs without dots for named agents (`nas-lan`). An ID with dots is valid for `connect.agent_id`, but such an agent can then only authenticate through `agent.accept_token`.
+Agent IDs with dots work as map keys: write them as one key (YAML `nas.lan:`, TOML `[agent.agents."nas.lan"]`, JSON `"nas.lan": {...}`).
 </Callout>
 
 | Key | Required | Description |
 |-----|----------|-------------|
-| `token` | Yes | Per-agent shared secret, at least 32 characters (see [Agent tokens](#agent-tokens)) |
+| `token` | Yes | Per-agent shared secret (see [Agent tokens](#agent-tokens)) |
 | `name` | No | Display name shown in the dashboard |
 | `default_tunnel` | No | Tunnel used when this agent's labels omit `tunnel`. Empty = global default |
 | `tunnels` | No | Tunnels this agent may target. Empty = only its default tunnel |
-| `hostnames` | No | Glob list of hostnames this agent may claim. Empty = unrestricted |
+| `hostnames` | No | Glob list of hostnames this agent may claim. Empty = unrestricted, except wildcard hostnames (`*.x`), which need an exact entry |
+| `services` | No | Tunnel origins this agent may use beyond IP literals: hostname globs (`web`, `*.svc.internal`), IP addresses or CIDRs. Empty = IP literals only (see [SSRF guard](/docs/examples/multi-host#ssrf-guard)) |
 | `connect_to` | No | `ws://` or `wss://` URL, including `/ws`. Enables [inbound mode](/docs/examples/multi-host#inbound-mode-example) for this agent |
 
 ### Agent tokens
 
-Every agent token (`agent.agents.<id>.token`, `agent.accept_token` and `connect.token`) must be **at least 32 characters**, and `api.token` at least 16. Labelgate refuses to start otherwise. The token is never sent on the wire, but anyone who captures a handshake can try guesses against it offline, so the token needs high entropy. Generate one with:
+Every agent token (`agent.agents.<id>.token`, `agent.accept_token` and `connect.token`) must be **at least 32 characters** with **at least 12 distinct characters**, and `api.token` at least 16 characters. Labelgate refuses to start otherwise. The token is never sent on the wire, but anyone who captures a handshake can try guesses against it offline, so the token needs high entropy. Generate one with:
 
 ```bash
 openssl rand -hex 32
@@ -195,9 +197,9 @@ openssl rand -hex 32
 | Environment Variable | Config File Path | Default | Description |
 |---------------------|------------------|---------|-------------|
 | `LABELGATE_CONNECT_MODE` | `connect.mode` | `outbound` | `outbound` (agent dials main) or `inbound` (main dials agent) |
-| `LABELGATE_CONNECT_ENDPOINT` | `connect.endpoint` | - | Main instance URL, e.g. `wss://main.example.com:8081/ws`. Required for outbound; must be a `ws://` or `wss://` URL. **The `/ws` path is required** (it is not checked at startup, but without it the main answers 404) |
+| `LABELGATE_CONNECT_ENDPOINT` | `connect.endpoint` | - | Main instance URL, e.g. `wss://main.example.com:8081/ws`. Required for outbound; must be a `ws://` or `wss://` URL. **A path is required**: an endpoint without one (e.g. `wss://main:8081`) fails validation with a hint to append `/ws` |
 | `LABELGATE_CONNECT_LISTEN` | `connect.listen` | - | Listen address (`[host]:port`). Required for inbound. Serves `/ws` and an unauthenticated `/health` |
-| `LABELGATE_CONNECT_TOKEN` | `connect.token` | - | Authentication token, at least 32 characters **(required)** |
+| `LABELGATE_CONNECT_TOKEN` | `connect.token` | - | Authentication token, see [Agent tokens](#agent-tokens) **(required)** |
 | `LABELGATE_CONNECT_AGENT_ID` | `connect.agent_id` | First 12 hex chars of `/etc/machine-id`, else the hostname lower-cased and sanitized | Agent identifier, `^[a-z0-9][a-z0-9._-]{0,62}$`. Dots are allowed; upper-case is not, and an explicit value is never rewritten. The derived default is the first 12 characters of `/etc/machine-id` when they are hex, else the hostname with invalid characters replaced by `-` and truncated to 63 characters |
 | `LABELGATE_CONNECT_HEARTBEAT_INTERVAL` | `connect.heartbeat_interval` | `30s` | Period of full state reports (>= 1s). A report is also sent on connect and shortly after container changes |
 | `LABELGATE_CONNECT_TLS_CA` | `connect.tls.ca` | system roots | CA used to verify the main instance when dialing it |

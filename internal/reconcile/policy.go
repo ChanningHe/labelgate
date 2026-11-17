@@ -6,10 +6,10 @@ import "github.com/channinghe/labelgate/internal/config"
 //
 // Behavior:
 //   - ID in cfg.Agent.Agents: Allowed; Hostnames = entry.Hostnames;
-//     DefaultTunnel = entry.DefaultTunnel; Tunnels = entry.Tunnels plus
+//     Services = entry.Services; DefaultTunnel = entry.DefaultTunnel; Tunnels = entry.Tunnels plus
 //     entry.DefaultTunnel; if both empty, Tunnels = [""] (global default only).
 //   - Otherwise, if cfg.Agent.AcceptToken != "": Allowed; Hostnames =
-//     AcceptHostnames; Tunnels = AcceptTunnels or [""].
+//     AcceptHostnames; Services = AcceptServices; Tunnels = AcceptTunnels or [""].
 //   - Otherwise: Allowed=false.
 //   - Agents disabled (cfg.Agent.Enabled=false): every agent Allowed=false.
 //   - The returned func is pure (closes over copies, no shared mutable state).
@@ -26,6 +26,7 @@ func PoliciesFromConfig(cfg config.Config) AgentPolicies {
 		p := AgentPolicy{
 			Allowed:   true,
 			Hostnames: cloneStrings(cfg.Agent.AcceptHostnames),
+			Services:  cloneStrings(cfg.Agent.AcceptServices),
 			Tunnels:   cloneStrings(cfg.Agent.AcceptTunnels),
 		}
 		if len(p.Tunnels) == 0 {
@@ -51,6 +52,7 @@ func namedPolicy(e config.AgentEntry) AgentPolicy {
 	return AgentPolicy{
 		Allowed:       true,
 		Hostnames:     cloneStrings(e.Hostnames),
+		Services:      cloneStrings(e.Services),
 		Tunnels:       tunnels,
 		DefaultTunnel: e.DefaultTunnel,
 	}
@@ -59,6 +61,7 @@ func namedPolicy(e config.AgentEntry) AgentPolicy {
 func copyPolicy(p AgentPolicy) AgentPolicy {
 	p.Hostnames = cloneStrings(p.Hostnames)
 	p.Tunnels = cloneStrings(p.Tunnels)
+	p.Services = cloneStrings(p.Services)
 	return p
 }
 

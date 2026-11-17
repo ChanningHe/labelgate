@@ -12,12 +12,10 @@ type Container struct {
 	ID     string            `json:"id"`
 	Name   string            `json:"name"` // without leading slash
 	Labels map[string]string `json:"labels"`
-	// Networks maps network name -> IPv4 address; for compatibility with
-	// consumers that predate Networks6 it falls back to the global IPv6
-	// address on networks without an IPv4.
+	// Networks maps network name -> IPv4 address (A "container" targets).
 	Networks map[string]string `json:"networks,omitempty"`
-	// Networks6 maps network name -> global IPv6 address (always recorded,
-	// also on dual-stack networks). AAAA "container" targets must use it.
+	// Networks6 maps network name -> global IPv6 address, also on dual-stack
+	// networks (AAAA "container" targets).
 	Networks6 map[string]string `json:"networks6,omitempty"`
 	State     string            `json:"state"`
 }

@@ -32,11 +32,15 @@ type AgentPolicy struct {
 	// via accept_token: their snapshots are ignored (resources orphan normally).
 	Allowed bool
 	// Hostnames is a glob allow-list (path.Match on normalized hostnames). Empty = unrestricted.
+	// Wildcard hostnames ("*.x") are allowed only by an entry equal to them.
 	Hostnames []string
 	// Tunnels lists allowed tunnel references (resolved via cloudflare.API.ResolveTunnel).
 	Tunnels []string
 	// DefaultTunnel is the reference used when a label omits `tunnel`; "" = global default.
 	DefaultTunnel string
+	// Services allow-lists tunnel origins beyond public/private IP literals:
+	// hostname globs, IP addresses and CIDRs. Empty = IP literals only.
+	Services []string
 }
 
 // AgentPolicies returns the policy for an agent ID.
@@ -56,6 +60,9 @@ type Settings struct {
 	Debounce    time.Duration
 	MaxDebounce time.Duration
 	Agents      AgentPolicies
+	// Connected reports live agent sessions (agent.Hub.Connected): a
+	// connected agent is present regardless of AgentGrace. nil = none.
+	Connected func(agentID string) bool
 }
 
 // Deps are the reconciler's collaborators.

@@ -185,8 +185,11 @@ func (a *app) buildMain(ctx context.Context, cfg config.Config, st store.Store, 
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("docker source: %w", err)
 	}
+	live := &presence{}
+	settings := settingsFromConfig(cfg, instanceID)
+	settings.Connected = live.connected
 	rec, err := a.b.newReconciler(reconcile.Deps{
-		Settings:   settingsFromConfig(cfg, instanceID),
+		Settings:   settings,
 		Cloudflare: cf,
 		Store:      st,
 		Local:      src,
@@ -204,6 +207,7 @@ func (a *app) buildMain(ctx context.Context, cfg config.Config, st store.Store, 
 		closeLogged(src.Close, "docker source", log)
 		return nil, nil, nil, err
 	}
+	live.set(h)
 	srv, err := a.buildAPI(cfg, st, rec, h, cf, log)
 	if err != nil {
 		closeLogged(src.Close, "docker source", log)

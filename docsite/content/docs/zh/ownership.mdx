@@ -64,11 +64,14 @@ conflict: existing record not owned by labelgate
 
 - 第一个声明主机名的服务，只要持续声明就一直保有它。声明会被持久化，因此结果不会在同步周期之间或重启之后来回摇摆。
 - 后来者去声明一个已被占用的资源会被**拒绝**，拒绝原因会被保存，例如 `conflict: app.example.com|A already claimed by agent host-b container webapp service web`（主机本地的写作 `local container ...`）。
+- **一个主机名只属于一个来源**：main 主机（本地容器）或某一个 agent。一旦某个来源在某主机名上有了资源，其他任何来源对该主机名的声明都会被拒绝（`conflict: hostname app.example.com is owned by agent host-b`），无论记录类型、路径或 tunnel 是什么。同一来源的多个容器可以用不同的记录类型或路径共享一个主机名。
 - 如果主机名还没有主人，则按拥有者排序决定（本地容器优先，然后是按 ID 排序的 agent，再然后是容器名、服务名），所以每次运行的结果都一样。
 - 一个主机名同一时间只能属于一种*类别*：普通 DNS 记录（`records`）、CNAME（`cname`）或某一个 tunnel（`tunnel:<tunnel-id>`）。因此同一主机名同时出现 DNS 服务和 tunnel 服务属于冲突（`conflict: hostname app.example.com is used by ... as tunnel:<tunnel-id>`），而不仅仅是一行日志。
 - 被拒绝的声明会在 dashboard 和 API 中以 `error` 状态的资源出现，它们不会在 Cloudflare 上创建或修改任何东西。
 
-要移交主机名，请先停止当前拥有者（或移除它的标签）。待它的资源变为孤立状态后，下一个周期中新的声明者就会胜出。如果同一个拥有者把主机名从 DNS 切换为 tunnel（或反过来），旧记录会被立即替换，无需等待 `remove_delay`。
+孤立的资源会在 `sync.remove_delay` 时长内继续保留它的主机名、类别和键，因此短暂消失的容器（例如 `docker compose up` 重建容器时）回来后会原样拿回一切，期间其他服务或来源都无法接管。`cleanup: true` 的资源在延迟结束时被删除；`cleanup: "false"` 的资源会留在 Cloudflare 上，并且不再保留该主机名。如果某个主机名上已经有多个来源的资源（只可能出现在旧版本写入的数据库中），由最早资源所属的来源保有它。
+
+要移交主机名，请先停止当前拥有者（或移除它的标签）。`sync.remove_delay` 过后下一个声明者胜出；如果记录身份相同，它会接管已有的记录。如果**同一个容器**把主机名从 DNS 切换为 tunnel（或反过来），旧记录会被立即替换，无需等待 `remove_delay`。其他拥有者永远不会触发这种替换：以 `cleanup: "false"` 留下的记录会阻止该主机名上的其他类别（新资源报告冲突），直到你在 Cloudflare 上删除这条记录。
 
 ## 与手工管理的 tunnel ingress 共存 [#coexisting-with-manually-managed-tunnel-ingress]
 
@@ -82,7 +85,7 @@ Cloudflare 把 tunnel 的 ingress 存成一份整体配置文档，所以 Labelg
 
 结果中的顺序：Labelgate 的精确主机名规则在最前（同一主机名下，更具体的 path 在前），然后是你的非托管规则，再然后是 Labelgate 的通配符规则，最后是 catch-all。如果 tunnel 没有 catch-all 规则，会补上一条 `http_status:404`。
 
-如果 Labelgate 想写入的规则与你的某条非托管规则主机名相同，该服务会报 `conflict: existing record not owned by labelgate`，而你的非托管规则保持不变。
+如果 Labelgate 想写入的规则与你的某条非托管规则主机名相同，该服务会报 `conflict: existing record not owned by labelgate`，而你的非托管规则保持不变。Labelgate 已经写入的规则会原样留在配置中（流量不会中断），所有受影响的资源都会报告该冲突，直到你删除两条规则之一。
 
 <Callout type="warn">
 Cloudflare 没有为 tunnel 配置提供 compare-and-swap。在 Labelgate 读取与写入之间的短暂时间内，手工所做的修改可能丢失。这个窗口只有一次 API 请求，且 Labelgate 仅在有差异时才写入。

@@ -57,15 +57,30 @@ func TestRecordAgentReport(t *testing.T) {
 			t.Errorf("changed = %v, err = %v; want true, nil", changed, err)
 		}
 	})
-	t.Run("nil snapshot keeps the stored one and reports no change", func(t *testing.T) {
+	t.Run("public IP change with the same containers changes", func(t *testing.T) {
+		rec6 := rec
+		rec6.PublicIPv6 = "2001:db8::9"
+		changed, err := s.RecordAgentReport(ctx, rec6, &model.Snapshot{Containers: containers("a")})
+		if err != nil || !changed {
+			t.Fatalf("v6 change: changed = %v, err = %v; want true", changed, err)
+		}
+		changed, err = s.RecordAgentReport(ctx, rec, &model.Snapshot{Containers: containers("a")})
+		if err != nil || !changed {
+			t.Fatalf("v6 back: changed = %v, err = %v; want true", changed, err)
+		}
+	})
+	t.Run("nil snapshot keeps the stored one; only an IP change is a change", func(t *testing.T) {
 		clock.Advance(time.Minute)
 		rec.LastSeen = clock.Now()
+		if changed, err := s.RecordAgentReport(ctx, rec, nil); err != nil || changed {
+			t.Fatalf("same IP: changed = %v, err = %v; want false, nil", changed, err)
+		}
 		rec.PublicIP = "2.2.2.2"
 
 		changed, err := s.RecordAgentReport(ctx, rec, nil)
 
-		if err != nil || changed {
-			t.Fatalf("changed = %v, err = %v; want false, nil", changed, err)
+		if err != nil || !changed {
+			t.Fatalf("new IP: changed = %v, err = %v; want true, nil", changed, err)
 		}
 		snaps, _ := s.AgentSnapshots(ctx)
 		if len(snaps) != 1 || !snaps[0].Complete || len(snaps[0].Containers) != 1 || snaps[0].Containers[0].ID != "a" {

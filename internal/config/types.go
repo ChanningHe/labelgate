@@ -155,9 +155,13 @@ type AgentServerConfig struct {
 	// syntax on lower-case hostnames). Empty = unrestricted.
 	AcceptHostnames []string `mapstructure:"accept_hostnames"`
 	// AcceptTunnels lists tunnel references accept_token agents may use. Empty = only the default tunnel.
-	AcceptTunnels []string              `mapstructure:"accept_tunnels"`
-	TLS           TLSConfig             `mapstructure:"tls"`
-	Agents        map[string]AgentEntry `mapstructure:"agents"`
+	AcceptTunnels []string `mapstructure:"accept_tunnels"`
+	// AcceptServices allow-lists tunnel origins of accept_token agents beyond
+	// IP literals: hostname globs, IP addresses or CIDRs. Empty = IP literals
+	// only (never loopback, link-local, metadata or other local addresses).
+	AcceptServices []string              `mapstructure:"accept_services"`
+	TLS            TLSConfig             `mapstructure:"tls"`
+	Agents         map[string]AgentEntry `mapstructure:"agents"`
 }
 
 // AgentEntry is one named agent. The map key is the agent ID.
@@ -170,6 +174,9 @@ type AgentEntry struct {
 	Tunnels []string `mapstructure:"tunnels"`
 	// Hostnames this agent may claim (globs). Empty = unrestricted.
 	Hostnames []string `mapstructure:"hostnames"`
+	// Services allow-lists tunnel origins beyond IP literals (hostname globs,
+	// IP addresses, CIDRs), like agent.accept_services.
+	Services []string `mapstructure:"services"`
 	// ConnectTo enables inbound mode: the main dials this ws:// or wss:// URL.
 	ConnectTo string `mapstructure:"connect_to"`
 }

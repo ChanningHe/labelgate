@@ -53,7 +53,7 @@ type Hub struct {
 	now      func() time.Time
 	t        timings
 	dummyKey string // challenge key for IDs without credentials
-	pending  semaphore
+	pending  *pendingLimiter
 
 	mu       sync.Mutex
 	sessions map[string]*hubSession
@@ -94,7 +94,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		now:      opts.Now,
 		t:        defaultTimings(),
 		dummyKey: hex.EncodeToString(newNonce()),
-		pending:  make(semaphore, MaxPendingHandshakes),
+		pending:  newPendingLimiter(MaxPendingHandshakes, MaxPendingPerIP),
 		sessions: make(map[string]*hubSession),
 	}, nil
 }

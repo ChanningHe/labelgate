@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"time"
 
 	"github.com/channinghe/labelgate/internal/model"
 )
@@ -17,15 +18,18 @@ type resolution struct {
 }
 
 // resolve applies "existing owner wins" deterministically. It is pure.
-func resolve(claims []claim, tracked []model.Resource, held holdSet) resolution {
+// now and removeDelay bound how long an orphaned row keeps its reservation.
+func resolve(claims []claim, tracked []model.Resource, held holdSet, now time.Time, removeDelay time.Duration) resolution {
 	tracked, rekeyed := rekeyLegacy(tracked, claims)
 	byKey := indexRows(tracked)
-	kept, rejClass := resolveClasses(claims, tracked, held)
-	winners, rejKey := pickWinners(kept, byKey, held)
+	rs := newReservations(claims, held, now, removeDelay)
+	sourced, rejSource := resolveSources(claims, tracked, rs)
+	kept, rejClass := resolveClasses(sourced, tracked, rs)
+	winners, rejKey := pickWinners(kept, byKey, rs)
 	winners = append(winners, deriveCNAMEs(winners, byKey, held)...)
-	access, rejAccess := accessClaims(winners, byKey, held)
+	access, rejAccess := accessClaims(winners, byKey, rs)
 	winners = append(winners, access...)
-	rejected := append(append(rejClass, rejKey...), rejAccess...)
+	rejected := concatRows(rejSource, rejClass, rejKey, rejAccess)
 	return resolution{
 		Winners:  sortClaimsByKey(winners),
 		Rejected: rejected,
@@ -43,11 +47,7 @@ func indexRows(rows []model.Resource) map[rowKey]model.Resource {
 }
 
 func describeOwner(o model.Owner) string {
-	src := "local"
-	if o.AgentID != model.LocalAgentID {
-		src = "agent " + o.AgentID
-	}
-	return fmt.Sprintf("%s container %s service %s", src, o.ContainerName, o.Service)
+	return fmt.Sprintf("%s container %s service %s", describeSource(o.AgentID), o.ContainerName, o.Service)
 }
 
 // rekeyLegacy rewrites the key of a legacy row whose identity fields and
@@ -106,14 +106,130 @@ func claimIndex(claims []claim) map[rowKey]map[string]string {
 	return out
 }
 
-// isClaiming reports whether a row's owner still claims it (same key, owner
+// reservations decides which tracked rows still hold their hostname, class
+// and key (§6.4): rows whose owner still claims them, held rows, and rows
+// orphaned less than remove_delay ago (a container being recreated keeps
+// everything it had) — except rows whose own container now uses the
+// hostname with another class (an intentional switch supersedes them).
+type reservations struct {
+	idx         map[rowKey]map[string]string
+	ctrClasses  map[string]map[string]bool // container|hostname -> claimed classes
+	held        holdSet
+	now         time.Time
+	removeDelay time.Duration
+}
+
+func newReservations(claims []claim, held holdSet, now time.Time, removeDelay time.Duration) reservations {
+	rs := reservations{
+		idx: claimIndex(claims), ctrClasses: map[string]map[string]bool{},
+		held: held, now: now, removeDelay: removeDelay,
+	}
+	for _, c := range claims {
+		k := ctrHostKey(c.Res.Owner, c.Res.Hostname)
+		if rs.ctrClasses[k] == nil {
+			rs.ctrClasses[k] = map[string]bool{}
+		}
+		rs.ctrClasses[k][c.Class] = true
+	}
+	return rs
+}
+
+func ctrHostKey(o model.Owner, host string) string {
+	return o.AgentID + "\x00" + o.ContainerName + "\x00" + host
+}
+
+// claiming reports whether a row's owner still claims it (same key, owner
 // and class) or the owner's source is held.
-func isClaiming(r model.Resource, idx map[rowKey]map[string]string, held holdSet) bool {
-	if held.has(r) {
+func (rs reservations) claiming(r model.Resource) bool {
+	if rs.held.has(r) {
 		return true
 	}
-	cls, ok := idx[keyOf(r)][r.Owner.Key()]
+	cls, ok := rs.idx[keyOf(r)][r.Owner.Key()]
 	return ok && cls == rowClass(r)
+}
+
+// switched reports whether the row's own container now claims its hostname
+// with a different class.
+func (rs reservations) switched(r model.Resource) bool {
+	for cls := range rs.ctrClasses[ctrHostKey(r.Owner, r.Hostname)] {
+		if cls != rowClass(r) {
+			return true
+		}
+	}
+	return false
+}
+
+// reserves reports whether r keeps its hostname, class and key this cycle.
+func (rs reservations) reserves(r model.Resource) bool {
+	switch {
+	case rs.claiming(r):
+		return true
+	case rs.switched(r):
+		return false
+	case r.OrphanedAt.IsZero(): // becomes orphaned in this cycle
+		return true
+	}
+	return rs.now.Before(r.OrphanedAt.Add(rs.removeDelay))
+}
+
+// sourceOf names the source of an owner: "" (local) or the agent ID.
+func sourceOf(o model.Owner) string { return o.AgentID }
+
+func describeSource(src string) string {
+	if src == model.LocalAgentID {
+		return "local"
+	}
+	return "agent " + src
+}
+
+// rowOlder orders rows by creation (oldest first), then ID, then owner.
+func rowOlder(a, b model.Resource) bool {
+	if !a.CreatedAt.Equal(b.CreatedAt) {
+		return a.CreatedAt.Before(b.CreatedAt)
+	}
+	if a.ID != b.ID {
+		return a.ID < b.ID
+	}
+	return a.Owner.Less(b.Owner)
+}
+
+// hostSources maps every hostname to the one source owning it: the source of
+// the oldest reserving row, else the source of the first claim (claimLess:
+// local first, then agents by ID).
+func hostSources(claims []claim, rows []model.Resource, reserves func(model.Resource) bool) map[string]string {
+	sorted := append([]model.Resource(nil), rows...)
+	sort.SliceStable(sorted, func(i, j int) bool { return rowOlder(sorted[i], sorted[j]) })
+	out := map[string]string{}
+	for _, r := range sorted {
+		if _, seen := out[r.Hostname]; !seen && reserves(r) {
+			out[r.Hostname] = sourceOf(r.Owner)
+		}
+	}
+	for _, c := range sortClaims(claims) {
+		if _, seen := out[c.Res.Hostname]; !seen {
+			out[c.Res.Hostname] = sourceOf(c.Res.Owner)
+		}
+	}
+	return out
+}
+
+// resolveSources enforces per-source hostname ownership (§6.4 step 1a): a
+// claim on a hostname owned by another source is rejected, whatever its
+// class, kind, path or record type.
+func resolveSources(claims []claim, tracked []model.Resource, rs reservations) ([]claim, []model.Resource) {
+	owners := hostSources(claims, tracked, rs.reserves)
+	var kept []claim
+	var rejected []model.Resource
+	for _, c := range sortClaims(claims) {
+		src := owners[c.Res.Hostname]
+		if src == sourceOf(c.Res.Owner) {
+			kept = append(kept, c)
+			continue
+		}
+		reason := fmt.Sprintf("conflict: hostname %s is owned by %s", c.Res.Hostname, describeSource(src))
+		rejected = append(rejected, rejectRow(c.Res, reason))
+	}
+	return kept, rejected
 }
 
 type hostClass struct {
@@ -122,8 +238,7 @@ type hostClass struct {
 }
 
 // resolveClasses enforces one hostname class per hostname (§6.4 step 1).
-func resolveClasses(claims []claim, tracked []model.Resource, held holdSet) ([]claim, []model.Resource) {
-	idx := claimIndex(claims)
+func resolveClasses(claims []claim, tracked []model.Resource, rs reservations) ([]claim, []model.Resource) {
 	rows := append([]model.Resource(nil), tracked...)
 	sort.SliceStable(rows, func(i, j int) bool {
 		if rows[i].Owner.Key() != rows[j].Owner.Key() {
@@ -134,7 +249,7 @@ func resolveClasses(claims []claim, tracked []model.Resource, held holdSet) ([]c
 	classes := map[string]hostClass{}
 	for _, r := range rows {
 		cls := rowClass(r)
-		if _, seen := classes[r.Hostname]; cls == "" || seen || !isClaiming(r, idx, held) {
+		if _, seen := classes[r.Hostname]; cls == "" || seen || !rs.reserves(r) {
 			continue
 		}
 		classes[r.Hostname] = hostClass{class: cls, owner: r.Owner}
@@ -173,18 +288,22 @@ func groupClaims(claims []claim) ([]rowKey, map[rowKey][]claim) {
 }
 
 // winnerIndex picks the winning claim of one key: the existing row's owner
-// if it still claims, else the first claimant. -1 = the key is held.
-func winnerIndex(cs []claim, row model.Resource, hasRow bool, held holdSet) int {
+// if it still claims, else the first claimant unless the row is still
+// reserved. -1 = no winner (held or reserved row).
+func winnerIndex(cs []claim, row model.Resource, hasRow bool, rs reservations) int {
 	if !hasRow {
 		return 0
 	}
-	if held.has(row) {
+	if rs.held.has(row) {
 		return -1
 	}
 	for i, c := range cs {
 		if c.Res.Owner.Key() == row.Owner.Key() && c.Class == rowClass(row) {
 			return i
 		}
+	}
+	if rs.reserves(row) {
+		return -1
 	}
 	return 0
 }
@@ -194,14 +313,14 @@ func conflictReason(k rowKey, o model.Owner) string {
 }
 
 // pickWinners resolves competing claims per (kind, key) (§6.4 step 2).
-func pickWinners(claims []claim, rows map[rowKey]model.Resource, held holdSet) ([]claim, []model.Resource) {
+func pickWinners(claims []claim, rows map[rowKey]model.Resource, rs reservations) ([]claim, []model.Resource) {
 	keys, groups := groupClaims(claims)
 	var winners []claim
 	var rejected []model.Resource
 	for _, k := range keys {
 		cs := groups[k]
 		row, hasRow := rows[k]
-		w := winnerIndex(cs, row, hasRow, held)
+		w := winnerIndex(cs, row, hasRow, rs)
 		owner := row.Owner
 		if w >= 0 {
 			winners = append(winners, cs[w])
@@ -313,7 +432,7 @@ func accessCandidate(w claim) (claim, *model.Resource) {
 
 // accessClaims binds access definitions of winning services and resolves
 // competing claims; identical definitions are co-owners (§6.4 step 2).
-func accessClaims(winners []claim, rows map[rowKey]model.Resource, held holdSet) ([]claim, []model.Resource) {
+func accessClaims(winners []claim, rows map[rowKey]model.Resource, rs reservations) ([]claim, []model.Resource) {
 	var cands []claim
 	var rejected []model.Resource
 	for _, w := range winners {
@@ -332,7 +451,7 @@ func accessClaims(winners []claim, rows map[rowKey]model.Resource, held holdSet)
 	for _, k := range keys {
 		cs := groups[k]
 		row, hasRow := rows[k]
-		w := winnerIndex(cs, row, hasRow, held)
+		w := winnerIndex(cs, row, hasRow, rs)
 		owner := row.Owner
 		if w >= 0 {
 			out = append(out, cs[w])

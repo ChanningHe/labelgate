@@ -19,6 +19,9 @@ const (
 	ConfigEnv = EnvPrefix + "_CONFIG"
 	// configBaseName is the base name searched in the default directories.
 	configBaseName = "labelgate"
+	// keyDelim separates viper key paths. It is not "." so map keys such as
+	// dotted agent IDs (agent.agents."nas.lan") are never split into paths.
+	keyDelim = "::"
 )
 
 // defaultSearchDirs are searched, in order, when no explicit file is given.
@@ -59,7 +62,7 @@ func Load(path string) (Config, error) {
 }
 
 func load(path string, env envLookup, dirs []string) (Config, error) {
-	v := viper.New()
+	v := newViper()
 	file, err := resolveFile(path, env, dirs)
 	if err != nil {
 		return Config{}, err
@@ -139,13 +142,13 @@ func readFile(v *viper.Viper, file string) error {
 func rejectRemoved(v *viper.Viper, env envLookup) error {
 	keys := sortedKeys(RemovedKeys)
 	for _, key := range keys {
-		if _, inEnv := env(envName(key)); inEnv || v.IsSet(key) {
+		if _, inEnv := env(envName(key)); inEnv || v.IsSet(viperKey(key)) {
 			return &ValidationError{Field: key, Message: RemovedKeys[key]}
 		}
 	}
 	// A bare removed section (e.g. an empty docker.ssh block) is reported too.
 	for _, key := range keys {
-		if parent := key[:strings.LastIndex(key, ".")]; v.IsSet(parent) && !knownSection(parent) {
+		if parent := key[:strings.LastIndex(key, ".")]; v.IsSet(viperKey(parent)) && !knownSection(parent) {
 			return &ValidationError{Field: key, Message: RemovedKeys[key]}
 		}
 	}
@@ -167,10 +170,16 @@ func knownSection(section string) bool {
 func applyEnv(v *viper.Viper, env envLookup) {
 	for _, key := range leafKeys(reflect.TypeFor[Config](), "") {
 		if val, ok := env(envName(key)); ok && val != "" {
-			v.Set(key, val)
+			v.Set(viperKey(key), val)
 		}
 	}
 }
+
+// newViper returns an isolated viper instance using keyDelim.
+func newViper() *viper.Viper { return viper.NewWithOptions(viper.KeyDelimiter(keyDelim)) }
+
+// viperKey converts a dotted config key into a viper key path.
+func viperKey(key string) string { return strings.ReplaceAll(key, ".", keyDelim) }
 
 // envName returns the environment variable bound to a config key.
 func envName(key string) string {

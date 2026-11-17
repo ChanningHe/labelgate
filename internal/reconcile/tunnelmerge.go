@@ -54,33 +54,51 @@ func mergeIngress(live cloudflare.TunnelConfig, owned map[ingressID]bool, keep [
 	for _, r := range unmanaged {
 		unmanagedHosts[r.Hostname()] = true
 	}
-	var placed []keepRule
-	var conflicts []rowKey
-	for _, k := range keep {
-		if unmanagedHosts[k.Host] {
-			conflicts = append(conflicts, k.Key)
-			continue
-		}
-		placed = append(placed, k)
-	}
-	sort.SliceStable(placed, func(i, j int) bool { return ruleLess(placed[i], placed[j]) })
-	sort.Slice(conflicts, func(i, j int) bool { return conflicts[i].less(conflicts[j]) })
+	placed, conflicts := placeRules(liveOwned, unmanagedHosts, keep)
 	if len(live.Ingress) == 0 && len(placed) == 0 {
 		return mergeResult{Config: live, Conflicts: conflicts}
 	}
 	var exact, wild []cloudflare.IngressRule
-	for _, k := range placed {
-		rule := buildRule(liveOwned[ingressID{Host: k.Host, Path: k.Path}], k)
-		if isWildcard(k.Host) {
-			wild = append(wild, rule)
+	for _, p := range placed {
+		if isWildcard(p.keep.Host) {
+			wild = append(wild, p.rule)
 		} else {
-			exact = append(exact, rule)
+			exact = append(exact, p.rule)
 		}
 	}
 	ingress := make([]cloudflare.IngressRule, 0, len(exact)+len(unmanaged)+len(wild)+1)
 	ingress = append(append(append(append(ingress, exact...), unmanaged...), wild...), catchAll)
 	cfg := cloudflare.TunnelConfig{Ingress: ingress, Extra: copyExtra(live.Extra)}
 	return mergeResult{Config: cfg, Conflicts: conflicts, Changed: canonicalJSON(cfg) != canonicalJSON(live)}
+}
+
+// placedRule is one owned rule of the merged configuration.
+type placedRule struct {
+	keep keepRule
+	rule cloudflare.IngressRule
+}
+
+// placeRules builds the owned rules in order. A keep rule whose hostname is
+// also used by an unmanaged rule is a conflict: it is reported, and its live
+// rule (if any) is kept verbatim so a conflict never drops traffic.
+func placeRules(liveOwned map[ingressID]cloudflare.IngressRule, unmanagedHosts map[string]bool, keep []keepRule) ([]placedRule, []rowKey) {
+	var placed []placedRule
+	var conflicts []rowKey
+	for _, k := range keep {
+		live, isLive := liveOwned[ingressID{Host: k.Host, Path: k.Path}]
+		switch {
+		case !unmanagedHosts[k.Host]:
+			placed = append(placed, placedRule{keep: k, rule: buildRule(live, k)})
+		case isLive:
+			conflicts = append(conflicts, k.Key)
+			placed = append(placed, placedRule{keep: k, rule: live})
+		default:
+			conflicts = append(conflicts, k.Key)
+		}
+	}
+	sort.SliceStable(placed, func(i, j int) bool { return ruleLess(placed[i].keep, placed[j].keep) })
+	sort.Slice(conflicts, func(i, j int) bool { return conflicts[i].less(conflicts[j]) })
+	return placed, conflicts
 }
 
 // splitIngress separates owned rules (first occurrence per identity; later
@@ -204,8 +222,34 @@ func copyExtra(m map[string]json.RawMessage) map[string]json.RawMessage {
 	return out
 }
 
-// canonicalJSON renders v with sorted keys at every level, so semantically
-// equal configurations compare equal regardless of key order or spacing.
+// pruneEmpty drops object members that are null or empty objects (after
+// pruning their own members): Cloudflare treats them as absent and echoes
+// e.g. "originRequest":{} for rules written without one.
+func pruneEmpty(v any) any {
+	switch x := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(x))
+		for k, val := range x {
+			val = pruneEmpty(val)
+			if m, isMap := val.(map[string]any); val == nil || (isMap && len(m) == 0) {
+				continue
+			}
+			out[k] = val
+		}
+		return out
+	case []any:
+		out := make([]any, len(x))
+		for i, val := range x {
+			out[i] = pruneEmpty(val)
+		}
+		return out
+	}
+	return v
+}
+
+// canonicalJSON renders v with sorted keys at every level and without empty
+// members, so semantically equal configurations compare equal regardless of
+// key order, spacing or echoed empty objects.
 func canonicalJSON(v any) string {
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -217,7 +261,7 @@ func canonicalJSON(v any) string {
 	if err := dec.Decode(&x); err != nil {
 		return "invalid:" + err.Error()
 	}
-	out, err := json.Marshal(x)
+	out, err := json.Marshal(pruneEmpty(x))
 	if err != nil {
 		return "invalid:" + err.Error()
 	}

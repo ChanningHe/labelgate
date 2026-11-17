@@ -412,12 +412,12 @@ func TestHubHealthBody(t *testing.T) {
 	}
 }
 
-func TestHubPendingHandshakeLimit(t *testing.T) {
+func TestHubPendingHandshakeLimitPerIP(t *testing.T) {
 	hh := startHub(t, namedServer(), nil, nil)
-	for range MaxPendingHandshakes {
+	for range MaxPendingPerIP {
 		rawDial(t, hh.url) // never sends hello
 	}
-	eventually(t, "slots taken", func() bool { return len(hh.hub.pending) == MaxPendingHandshakes })
+	eventually(t, "slots taken", func() bool { return hh.hub.pending.count() == MaxPendingPerIP })
 
 	d := &websocket.Dialer{HandshakeTimeout: waitFor}
 	_, resp, err := d.Dial(hh.url, nil)

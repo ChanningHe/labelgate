@@ -137,9 +137,8 @@ func TestSnapshotMapsAndFiltersContainers(t *testing.T) {
 	if alpha.ID != "id-a" || alpha.State != "running" || alpha.Labels["x"] != "y" {
 		t.Errorf("alpha = %+v", alpha)
 	}
-	wantNets := map[string]string{"v4": "10.0.0.2", "v6": "2001:db8::3"}
-	if len(alpha.Networks) != 2 || alpha.Networks["v4"] != wantNets["v4"] || alpha.Networks["v6"] != wantNets["v6"] {
-		t.Errorf("networks (IPv4 preferred, IPv6 fallback, empty omitted) = %v", alpha.Networks)
+	if len(alpha.Networks) != 1 || alpha.Networks["v4"] != "10.0.0.2" {
+		t.Errorf("networks (IPv4 only, others omitted) = %v", alpha.Networks)
 	}
 	// Every IPv6 address is recorded, also on networks that have an IPv4.
 	wantNets6 := map[string]string{"v4": "2001:db8::2", "v6": "2001:db8::3"}

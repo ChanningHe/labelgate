@@ -64,11 +64,14 @@ Two services can ask for the same hostname: two containers, a container and an a
 
 - The first service to claim a hostname keeps it for as long as it keeps claiming it. The claim is persisted, so the outcome does not flap between sync cycles or after restarts.
 - A newcomer claiming an already-claimed resource is **rejected**, and the rejection is stored with the reason, for example `conflict: app.example.com|A already claimed by agent host-b container webapp service web` (`local container ...` for the main host).
+- **A hostname belongs to one source**: the main host (local containers) or one agent. Once a source has a resource on a hostname, every claim from any other source on that hostname is rejected (`conflict: hostname app.example.com is owned by agent host-b`), whatever its record type, path or tunnel. Containers of the same source may share a hostname with different record types or paths.
 - If nobody holds the hostname yet, ordering is by owner (local containers first, then agents sorted by ID, then container name, then service name), so the result is identical on every run.
 - A hostname can only be used in one *class* at a time: plain DNS records (`records`), a CNAME (`cname`), or one tunnel (`tunnel:<tunnel-id>`). A DNS service and a tunnel service on the same hostname is therefore a conflict (`conflict: hostname app.example.com is used by ... as tunnel:<tunnel-id>`), not just a log line.
 - Rejected claims are shown in the dashboard and the API as resources with status `error`. They never create or change anything on Cloudflare.
 
-To hand a hostname over, stop (or remove the labels from) the current owner first. When its resources are orphaned, the next claimant wins on the following cycle. If you switch a hostname from DNS to tunnel (or back) within the same owner, the old record is replaced immediately without waiting for `remove_delay`.
+An orphaned resource keeps its hostname, class and key reserved for `sync.remove_delay`, so a container that is briefly gone (for example while `docker compose up` recreates it) gets everything back unchanged, and no other service or source can take over in the meantime. With `cleanup: true` the resource is deleted when the delay ends; with `cleanup: "false"` it is left on Cloudflare and no longer reserves the hostname. If several sources already have resources on one hostname (possible only with databases written by earlier versions), the source of the oldest resource keeps it.
+
+To hand a hostname over, stop (or remove the labels from) the current owner first. After `sync.remove_delay` the next claimant wins; for the same record identity it takes over the existing record. If the **same container** switches a hostname from DNS to tunnel (or back), the old record is replaced immediately without waiting for `remove_delay`. Another owner never causes such a replacement: a record left behind with `cleanup: "false"` blocks a different class on that hostname (the new resource reports a conflict) until you delete the record on Cloudflare.
 
 ## Coexisting with manually managed tunnel ingress
 
@@ -82,7 +85,7 @@ Cloudflare stores a tunnel's ingress as a single configuration document, so Labe
 
 Ordering in the result: Labelgate's exact-hostname rules first (more specific paths before less specific ones), then your unmanaged rules, then Labelgate's wildcard rules, then the catch-all. If the tunnel has no catch-all rule, a `http_status:404` one is added.
 
-If a rule Labelgate wants has the same hostname as one of your unmanaged rules, that service gets the `conflict: existing record not owned by labelgate` error and the unmanaged rule is left alone.
+If a rule Labelgate wants has the same hostname as one of your unmanaged rules, that service gets the `conflict: existing record not owned by labelgate` error and the unmanaged rule is left alone. A rule Labelgate already had in place stays unchanged in the configuration (so traffic keeps flowing), and every resource affected reports the conflict until you remove one of the two rules.
 
 <Callout type="warn">
 Cloudflare offers no compare-and-swap for tunnel configuration. A manual edit made in the few milliseconds between Labelgate's read and write can be lost. The window is one API request, and Labelgate only writes when there is a difference.

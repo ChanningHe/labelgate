@@ -208,7 +208,7 @@ func TestMainWiringPassesConfigToComponents(t *testing.T) {
 	}
 	s := h.recDeps.Settings
 	if s.InstanceID != "recov123" || s.LabelPrefix != "lg" || s.Interval != 7*time.Minute || s.RemoveDelay != 11*time.Minute ||
-		s.OrphanTTL != 13*time.Minute || s.AgentGrace != 17*time.Hour || s.Agents == nil {
+		s.OrphanTTL != 13*time.Minute || s.AgentGrace != 17*time.Hour || s.Agents == nil || s.Connected == nil {
 		t.Errorf("settings = %+v", s)
 	}
 	if h.recDeps.Cloudflare != h.cf || h.recDeps.Store != h.store || h.recDeps.Local == nil || h.recDeps.Now == nil || h.recDeps.Log == nil {

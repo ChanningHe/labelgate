@@ -171,6 +171,8 @@ type ParsedLabels struct {
 type LabelError struct {
 	Key     string
 	Message string
+	// Unknown marks an unknown property: reported, but nothing was dropped.
+	Unknown bool `json:",omitempty"`
 }
 
 func (e LabelError) Error() string {

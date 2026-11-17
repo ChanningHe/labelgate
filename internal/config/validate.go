@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"path"
 	"regexp"
@@ -22,10 +23,16 @@ const (
 	MinSyncInterval = 10 * time.Second
 	// MinHeartbeatInterval is the smallest allowed connect.heartbeat_interval.
 	MinHeartbeatInterval = time.Second
+	// MinAgentGrace is the smallest allowed sync.agent_grace: shorter windows
+	// would orphan agents between two heartbeats.
+	MinAgentGrace = 5 * time.Minute
 	// MinAgentTokenLen is the smallest allowed agent token (named agents,
 	// agent.accept_token, connect.token). Tokens are guessable offline from a
 	// captured handshake, so they must carry real entropy.
 	MinAgentTokenLen = 32
+	// MinAgentTokenDistinct is the smallest number of distinct characters in
+	// an agent token: rejects repeated or patterned placeholders.
+	MinAgentTokenDistinct = 12
 	// MinAPITokenLen is the smallest allowed api.token.
 	MinAPITokenLen = 16
 
@@ -53,14 +60,16 @@ func fail(field, format string, args ...any) error {
 //     retry.max_delay >= retry.delay.
 //   - docker.endpoint unix:// or tcp:// (ssh:// -> removal message);
 //     docker.poll_interval > 0; TLS cert and key set together.
-//   - main mode: sync.interval >= 10s, remove_delay/orphan_ttl/agent_grace >= 0,
+//   - main mode: sync.interval >= 10s, remove_delay/orphan_ttl >= 0, agent_grace >= 5m,
 //     db.path set, api.address and api.base_path shape, cloudflare credentials
 //     and tunnels (names, tokens, references), default_tunnel resolvable, at
 //     least one credential unless skip_credential_validation, agent listener
-//     and agent entries (IDs, tokens, connect_to, globs, tunnel references).
+//     and agent entries (IDs, tokens, connect_to, globs, tunnel references,
+//     services allow-lists: CIDR, IP or hostname glob, no inet_aton forms).
 //     Tokens: api.token >= MinAPITokenLen when set (enabled API); named agent
-//     tokens and agent.accept_token (when set) >= MinAgentTokenLen.
-//   - agent mode: connect.token >= MinAgentTokenLen, outbound needs a ws(s):// endpoint,
+//     tokens and agent.accept_token (when set) >= MinAgentTokenLen characters
+//     with >= MinAgentTokenDistinct distinct characters.
+//   - agent mode: connect.token like agent tokens, outbound needs a ws(s):// endpoint,
 //     inbound needs connect.listen, connect.agent_id valid when set,
 //     heartbeat_interval >= 1s.
 func Validate(cfg Config) error {
@@ -187,8 +196,8 @@ func checkSyncDB(cfg Config) error {
 		return fail("sync.remove_delay", "must be >= 0, got %s", s.RemoveDelay)
 	case s.OrphanTTL < 0:
 		return fail("sync.orphan_ttl", "must be >= 0, got %s", s.OrphanTTL)
-	case s.AgentGrace < 0:
-		return fail("sync.agent_grace", "must be >= 0, got %s", s.AgentGrace)
+	case s.AgentGrace < MinAgentGrace:
+		return fail("sync.agent_grace", "must be >= 5m, got %s", s.AgentGrace)
 	case strings.TrimSpace(cfg.DB.Path) == "":
 		return fail("db.path", "must not be empty")
 	}
@@ -375,6 +384,33 @@ func checkGlobs(field string, globs []string) error {
 	return nil
 }
 
+// checkServices validates a tunnel-origin allow-list: CIDRs and IP
+// addresses must parse strictly; anything else is a hostname glob whose last
+// label must not be numeric (inet_aton forms such as 127.1 are no IPs here).
+func checkServices(field string, entries []string) error {
+	for _, e := range entries {
+		e = strings.ToLower(strings.TrimSpace(e))
+		if strings.Contains(e, "/") {
+			if _, err := netip.ParsePrefix(e); err != nil {
+				return fail(field, "invalid CIDR %q", e)
+			}
+			continue
+		}
+		if _, err := netip.ParseAddr(e); err == nil {
+			continue
+		}
+		if !validGlob(e) {
+			return fail(field, "invalid entry %q (use a hostname glob, an IP address or a CIDR)", e)
+		}
+		labels := strings.Split(e, ".")
+		last := labels[len(labels)-1]
+		if strings.HasPrefix(last, "0x") || strings.Trim(last, "0123456789") == "" {
+			return fail(field, "%q is not a canonical IP address or hostname (write IPv4 as a.b.c.d)", e)
+		}
+	}
+	return nil
+}
+
 // checkTokenLen enforces a minimum token length (in characters). An empty
 // token passes when optional is true (the feature is disabled).
 func checkTokenLen(field, token string, minLen int, optional bool) error {
@@ -387,9 +423,26 @@ func checkTokenLen(field, token string, minLen int, optional bool) error {
 	return nil
 }
 
+// checkAgentToken enforces length and character variety of an agent token
+// (an HMAC key that a captured handshake lets attackers brute-force offline).
+func checkAgentToken(field, token string, optional bool) error {
+	if err := checkTokenLen(field, token, MinAgentTokenLen, optional); err != nil || token == "" {
+		return err
+	}
+	distinct := map[rune]bool{}
+	for _, r := range token {
+		distinct[r] = true
+	}
+	if len(distinct) < MinAgentTokenDistinct {
+		return fail(field, "must contain at least %d distinct characters, got %d (generate one with: openssl rand -hex 32)",
+			MinAgentTokenDistinct, len(distinct))
+	}
+	return nil
+}
+
 func checkAgentServer(cfg Config) error {
 	a := cfg.Agent
-	if err := checkTokenLen("agent.accept_token", a.AcceptToken, MinAgentTokenLen, true); err != nil {
+	if err := checkAgentToken("agent.accept_token", a.AcceptToken, true); err != nil {
 		return err
 	}
 	if err := checkTLSPair("agent.tls", a.TLS); err != nil {
@@ -404,6 +457,9 @@ func checkAgentServer(cfg Config) error {
 		return err
 	}
 	if err := checkTunnelRefs(cfg.Cloudflare, "agent.accept_tunnels", a.AcceptTunnels); err != nil {
+		return err
+	}
+	if err := checkServices("agent.accept_services", a.AcceptServices); err != nil {
 		return err
 	}
 	for _, id := range sortedKeys(a.Agents) {
@@ -422,7 +478,7 @@ func checkAgentEntry(cf CloudflareConfig, id string, e AgentEntry) error {
 	if strings.TrimSpace(e.Token) == "" {
 		return fail(field+".token", "must not be empty")
 	}
-	if err := checkTokenLen(field+".token", e.Token, MinAgentTokenLen, false); err != nil {
+	if err := checkAgentToken(field+".token", e.Token, false); err != nil {
 		return err
 	}
 	if e.ConnectTo != "" {
@@ -436,7 +492,10 @@ func checkAgentEntry(cf CloudflareConfig, id string, e AgentEntry) error {
 	if err := checkTunnelRefs(cf, field+".tunnels", e.Tunnels); err != nil {
 		return err
 	}
-	return checkGlobs(field+".hostnames", e.Hostnames)
+	if err := checkGlobs(field+".hostnames", e.Hostnames); err != nil {
+		return err
+	}
+	return checkServices(field+".services", e.Services)
 }
 
 func checkWebSocketURL(field, raw string) error {
@@ -457,7 +516,7 @@ func checkConnect(cfg Config) error {
 	case c.HeartbeatInterval < MinHeartbeatInterval:
 		return fail("connect.heartbeat_interval", "must be >= %s, got %s", MinHeartbeatInterval, c.HeartbeatInterval)
 	}
-	if err := checkTokenLen("connect.token", c.Token, MinAgentTokenLen, false); err != nil {
+	if err := checkAgentToken("connect.token", c.Token, false); err != nil {
 		return err
 	}
 	if err := checkTLSPair("connect.tls", c.TLS); err != nil {
@@ -472,7 +531,13 @@ func checkConnect(cfg Config) error {
 	if c.Endpoint == "" {
 		return fail("connect.endpoint", "required in outbound mode")
 	}
-	return checkWebSocketURL("connect.endpoint", c.Endpoint)
+	if err := checkWebSocketURL("connect.endpoint", c.Endpoint); err != nil {
+		return err
+	}
+	if u, _ := url.Parse(c.Endpoint); strings.Trim(u.Path, "/") == "" {
+		return fail("connect.endpoint", "%q has no path (did you mean %s/ws?)", c.Endpoint, strings.TrimRight(c.Endpoint, "/"))
+	}
+	return nil
 }
 
 func sortedKeys[V any](m map[string]V) []string {
