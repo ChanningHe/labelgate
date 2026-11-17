@@ -57,7 +57,9 @@ func (e *e2eEnv) agentMainConfig(token, connectTo string) config.Config {
 	cfg := e.mainConfig()
 	cfg.Agent.Enabled = true
 	cfg.Agent.Listen = freeAddr(e.t)
-	cfg.Agent.Agents = map[string]config.AgentEntry{e2eAgentID: {Token: token, Name: "Edge One", ConnectTo: connectTo}}
+	cfg.Agent.Agents = map[string]config.AgentEntry{e2eAgentID: {
+		Token: token, Name: "Edge One", ConnectTo: connectTo, Services: []string{"remote"},
+	}}
 	return cfg
 }
 
