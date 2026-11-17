@@ -7,6 +7,10 @@ description: Docker Compose examples for single-host deployments.
 All examples pass `LABELGATE_API_TOKEN`, which enables the dashboard and API. Without it they are disabled. No port is published here; add `ports: ["127.0.0.1:8080:8080"]` to reach the dashboard locally.
 </Callout>
 
+<Callout type="warn">
+For brevity the examples leave out two things the non-root image (UID 65532) needs: `group_add` with the group that owns the Docker socket, and a writable data directory. A Docker named volume such as `labelgate-data` is created root-owned and cannot be written by the container, so either use a bind mount that you `chown -R 65532:65532`, or set `user: root`. See [Getting Started](/docs/getting-started#create-compose) for the complete service definition.
+</Callout>
+
 ## DNS-Only Setup
 
 The simplest setup - Labelgate manages DNS records only, no tunnels needed.

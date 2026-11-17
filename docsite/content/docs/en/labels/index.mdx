@@ -24,7 +24,13 @@ The `service_name` is a unique identifier for each service within a container. I
 
 **Allowed characters:** lowercase letters, digits, and hyphens: `[a-z0-9]([a-z0-9-]*[a-z0-9])?`
 
-**Reserved words** (cannot be used as service names): `hostname`, `service`, `type`, `target`, `proxied`, `ttl`, `cleanup`, `credential`, `tunnel`, `path`, `origin`, `access`, `default`, `priority`, `weight`, `port`, `flags`, `tag`, `comment`
+**Reserved words** (cannot be used as service names; the error is `reserved service name <name>`): `hostname`, `service`, `type`, `target`, `proxied`, `ttl`, `cleanup`, `credential`, `tunnel`, `path`, `origin`, `access`, `priority`, `weight`, `port`, `flags`, `tag`, `comment`
+
+The name `default` is special rather than reserved: `labelgate.dns.default.*` and `labelgate.tunnel.default.*` set per-container defaults for the other services of that type (see [DNS](/docs/labels/dns#per-container-defaults) and [Tunnel](/docs/labels/tunnel#per-container-defaults)). It never defines a service of its own, and `labelgate.access.default.*` is ignored.
+
+<Callout type="warn">
+Only keys of the form `<prefix>.<type>.<service>.<property>` are read. Everything else is **ignored without any error**: other labels, keys with fewer than four segments (`labelgate.dns.hostname`, `labelgate.dns.web`) and unknown types (`labelgate.dnss.web.hostname`). If a service never shows up in the dashboard, check the key structure first.
+</Callout>
 
 ## Multiple Services
 
@@ -47,18 +53,21 @@ Labels are validated when they are parsed. Since v0.3 mistakes are reported inst
 - An **invalid value** (a boolean that is not `true`/`false`, a non-numeric `ttl`, an unknown record type, a CAA `tag` outside `issue`/`issuewild`/`iodef`, a port outside 0-65535, a malformed hostname...) **drops that service**.
 - An **unknown property** (for example `labelgate.dns.web.hostnme`) is reported as an error; the rest of the service is kept.
 - Service names that violate the rules above, or that are reserved, are skipped with an error.
+- A service with an invalid `<prefix>.dns.default.*` or `<prefix>.tunnel.default.*` block is skipped as a whole (`service skipped: invalid ... settings`).
+
+A label error never looks like a removed service. If a service is dropped because of an error, the resources Labelgate already created for it are **held**: they are not orphaned, no cleanup countdown starts and nothing is changed on Cloudflare. They show the status `error` with a `label error: ...` reason until you fix the label. An unknown property does not hold anything, because the service itself is kept.
 
 Every label error is logged with the container name and label key, and sets the sync status to `error`, which is shown in the dashboard and in `GET /api/overview`. Check them after changing labels.
 
 ## Hostnames
 
-Hostnames are normalised (trimmed, lower-cased, trailing dot removed) and validated. `App.Example.com.` and `app.example.com` are the same hostname.
+Hostnames are normalised (trimmed, lower-cased, trailing dot removed) and validated. `App.Example.com.` and `app.example.com` are the same hostname. A valid hostname has at least two labels and at most 253 characters; each label is 1-63 characters of letters, digits, `-` and `_` (no leading or trailing `-`). A leading `*.` wildcard label is allowed.
 
 ## Hostname Conflicts
 
 ### DNS and Tunnel on the Same Hostname
 
-The same hostname cannot be used both as a DNS record and as a Tunnel ingress rule: a tunnel hostname is served through its own CNAME record. This is a **conflict error** on the service that arrives second, whether the two services are in the same container, different containers, or on different hosts.
+The same hostname cannot be used both as a DNS record and as a Tunnel ingress rule: a tunnel hostname is served through its own CNAME record. This is a **conflict error** on the service that arrives second, whether the two services are in the same container, different containers, or on different hosts. The stored reason is `conflict: hostname app.example.com is used by local container webapp service web as tunnel:<tunnel-id>`; the last word is the kind of use that holds the hostname: `records` (A, AAAA, TXT, MX, SRV, CAA), `cname` or `tunnel:<tunnel-id>`.
 
 ```yaml
 # WRONG - hostname conflict
@@ -76,7 +85,7 @@ labels:
 
 ### Existing Owner Wins
 
-When several services claim the same hostname, the service that already owns it keeps it. A newcomer is **rejected** with a stored error such as `conflict: app.example.com|A already claimed by ...`, which is visible in the dashboard and the API. The decision is deterministic and does not flip between sync cycles. See [Ownership & Conflicts](/docs/ownership#conflicts-between-claims).
+When several services claim the same hostname, the service that already owns it keeps it. A newcomer is **rejected** with a stored error such as `conflict: app.example.com|A already claimed by local container webapp service web` (an owner on an agent reads `agent host-b container webapp service web`), which is visible in the dashboard and the API. The decision is deterministic and does not flip between sync cycles. The identity of a claim is the hostname plus the record type (`app.example.com|A`), so two services cannot both own the `A` record of one hostname; `MX`, `SRV`, `TXT` and `CAA` records also include their content, so several of those can coexist. See [Ownership & Conflicts](/docs/ownership#conflicts-between-claims).
 
 ### Existing Cloudflare Records
 

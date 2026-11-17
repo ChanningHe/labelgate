@@ -4,7 +4,7 @@
 #   1. Copy .env.example to .env and configure credentials
 #   2. Run: docker-compose up -d
 #
-# For multi-host deployment with agents, see docker-compose.agent.yaml
+# For multi-host deployment with agents, see the Multi-Host page of the documentation.
 
 services:
   # Main Labelgate instance
@@ -48,14 +48,15 @@ services:
       - LABELGATE_DB_PATH=/app/config/labelgate.db
     
     ports:
-      # HTTP API
-      - "8080:8080"
+      # HTTP API and dashboard (authenticated with LABELGATE_API_TOKEN).
+      # Bound to localhost on purpose: put TLS, a VPN or Cloudflare Access in front before exposing it.
+      - "127.0.0.1:8080:8080"
       
-      # Agent Server (enable if using agents)
+      # Agent server (needs agent.enabled; agents connect to wss://<host>:8081/ws)
       # - "8081:8081"
     
     healthcheck:
-      test: ["/app/labelgate", "healthcheck"]
+      test: ["CMD", "/app/labelgate", "healthcheck"]
       interval: 30s
       timeout: 3s
       retries: 3

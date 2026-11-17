@@ -25,8 +25,9 @@ The image is published as `ghcr.io/channinghe/labelgate`. There is no `latest` t
 |-----|---------|
 | `v0.3.0` | Exact version |
 | `v0.3` | Latest patch of 0.3.x (recommended) |
+| `v0.3.0-full`, `v0.3-full` | Same release on the debug distroless base, which adds a busybox shell (`docker exec -it ... sh`) |
 
-The floating tag `v0` is **not** moved to 0.3 and stays on 0.1.x. If you currently use `ghcr.io/channinghe/labelgate:v0`, you must switch to `v0.3` explicitly to upgrade.
+Pre-release tags such as `v0.3.0-rc1` publish only that exact tag (and its `-full` variant), never `v0.3`. The floating tag `v0` is **not** moved to 0.3: it stays on the 0.2.x line, where it was last published. If you currently use `ghcr.io/channinghe/labelgate:v0`, you must switch to `v0.3` explicitly to upgrade.
 
 ### API token required
 
@@ -41,7 +42,7 @@ The agent protocol changed (mutual HMAC authentication, verified TLS). **v0.2 ag
 - the WebSocket endpoint must include the **`/ws` path** (`wss://main.example.com:8081/ws`);
 - TLS certificates are **verified by default**. If your agents used self-signed certificates, configure `connect.tls.ca` / `agent.tls.ca`, or (not recommended) opt in to `insecure_skip_verify`;
 - `connect.tls.cert` / `key` no longer mean "client certificate"; they are the server certificate of an inbound agent's listener;
-- agent IDs must match `^[a-z0-9][a-z0-9._-]{0,62}$` (dots are allowed; legacy IDs are lower-cased during migration, so `NAS.lan` becomes `nas.lan`);
+- agent IDs must match `^[a-z0-9][a-z0-9._-]{0,62}$` (dots are allowed; legacy IDs are lower-cased during migration, so `NAS.lan` becomes `nas.lan`). In v0.3.0 a dotted ID cannot be used as a key under `agent.agents` (the config loader treats the dot as a path separator, see [Configuration Reference](/docs/configuration/reference#per-agent-entries)), so such an agent has to rename itself with `connect.agent_id` or connect through `agent.accept_token`;
 - every named agent needs its own `token`, and all agent tokens (`agent.agents.<id>.token`, `agent.accept_token`, `connect.token`) must be at least 32 characters. Generate them with `openssl rand -hex 32`; high entropy matters because a captured handshake can be attacked offline.
 
 While a v0.2 agent cannot connect, its resources are **not** removed immediately. After the migration, the main instance holds each agent's last known resources until the agent reports again, for at most `sync.agent_grace` (default **24h**). After that they become orphaned and, because `cleanup` defaults to `true`, are deleted after `sync.remove_delay` (default 30m). Upgrade agents within the grace period.
@@ -92,10 +93,10 @@ These now fail at startup with an explicit error. Unknown `mode`, `log_level` an
 
 The v0.2 database is migrated automatically on first start; there is nothing to run.
 
-1. Before touching a v0.2 database, Labelgate writes a consistent backup next to it using `VACUUM INTO`: `<db.path>.v0.2.bak` (by default `/app/config/labelgate.db.v0.2.bak`). **If the backup cannot be written, the migration does not run** and Labelgate stops with an error. Make sure the directory is writable and has free space.
+1. Before touching a v0.2 database, Labelgate writes a consistent backup next to it using `VACUUM INTO`: `<db.path>.v0.2.bak` (by default `/app/config/labelgate.db.v0.2.bak`). An existing backup is never overwritten: if `.v0.2.bak` is already there, the new one is `.v0.2.bak.<unix-timestamp>`. **If the backup cannot be written, the migration does not run** and Labelgate stops with an error. Make sure the directory is writable and has free space.
 2. The migration then runs in a single transaction. Deleted rows are dropped, duplicates are collapsed (the most recently updated wins), hostnames are normalised and timestamps converted.
-3. A random **instance ID** is generated and stored.
-4. Every resource v0.2 was tracking is treated as **owned by this instance**, because Labelgate created it. On the next update each DNS record is stamped with the comment marker and each Access application with the tag. Tunnel CNAME records that v0.2 created without tracking them get tracking rows too.
+3. A random **instance ID** (8 hex characters) is generated and stored; it is also logged at startup.
+4. Every resource v0.2 was tracking is treated as **owned by this instance**, because Labelgate created it. On the next update each DNS record is stamped with the comment marker and each Access application with the tag. Tunnel CNAME records that v0.2 created without tracking them get tracking rows too. Resources that v0.2 had already marked as orphaned keep their original orphan time, so those whose `remove_delay` has long passed are deleted in the first cycles after the upgrade. Agents are carried over with their last-seen time set to the migration time and no container snapshot, so their resources are held until they report again (or `sync.agent_grace` ends).
 5. Reusable Access policies created by v0.2 are not owned in the new model. They are never adopted and never deleted; Labelgate creates new per-hostname policies and you can delete the old ones in the Cloudflare dashboard.
 
 There is no downgrade path: v0.3 refuses a database written by a newer schema, and v0.2 cannot read the new one. To roll back, stop Labelgate, restore `labelgate.db.v0.2.bak` (or your own backup) as the database, and start the previous image.

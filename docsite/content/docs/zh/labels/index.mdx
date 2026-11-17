@@ -24,7 +24,13 @@ labelgate.<type>.<service_name>.<property>=<value>
 
 **允许的字符：** 小写字母、数字和连字符：`[a-z0-9]([a-z0-9-]*[a-z0-9])?`
 
-**保留字**（不能用作服务名）：`hostname`、`service`、`type`、`target`、`proxied`、`ttl`、`cleanup`、`credential`、`tunnel`、`path`、`origin`、`access`、`default`、`priority`、`weight`、`port`、`flags`、`tag`、`comment`
+**保留字**（不能用作服务名，错误信息为 `reserved service name <name>`）：`hostname`、`service`、`type`、`target`、`proxied`、`ttl`、`cleanup`、`credential`、`tunnel`、`path`、`origin`、`access`、`priority`、`weight`、`port`、`flags`、`tag`、`comment`
+
+`default` 是特殊名称而非保留字：`labelgate.dns.default.*` 和 `labelgate.tunnel.default.*` 用来为该容器中同类型的其他服务设置默认值（参见 [DNS](/zh/docs/labels/dns#per-container-defaults) 和 [Tunnel](/zh/docs/labels/tunnel#per-container-defaults)）。它本身不会定义服务，`labelgate.access.default.*` 会被忽略。
+
+<Callout type="warn">
+只有形如 `<prefix>.<type>.<service>.<property>` 的键才会被读取，其余的都会**被静默忽略，不报任何错误**：其他标签、少于四段的键（`labelgate.dns.hostname`、`labelgate.dns.web`）以及未知类型（`labelgate.dnss.web.hostname`）。如果某个服务始终没有出现在 dashboard 中，请先检查键的结构。
+</Callout>
 
 ## Multiple Services
 
@@ -47,18 +53,21 @@ labels:
 - **非法的值**（不是 `true`/`false` 的布尔值、非数字的 `ttl`、未知的记录类型、不在 `issue`/`issuewild`/`iodef` 范围内的 CAA `tag`、超出 0-65535 的端口、格式错误的主机名等）会**丢弃整个服务**。
 - **未知的属性**（例如 `labelgate.dns.web.hostnme`）会作为错误报告，服务的其余部分仍保留。
 - 违反上述规则或使用了保留字的服务名会被跳过并报错。
+- `<prefix>.dns.default.*` 或 `<prefix>.tunnel.default.*` 中含有非法值时，该类型的所有服务都会被整体跳过（`service skipped: invalid ... settings`）。
+
+标签错误绝不会被当作服务被移除。如果某个服务因错误被丢弃，Labelgate 之前为它创建的资源会被**保留（held）**：不会变成 orphaned，不会开始清理倒计时，Cloudflare 上也不会有任何改动。在你修好标签之前，这些资源的状态显示为 `error`，原因为 `label error: ...`。未知属性不会触发保留，因为服务本身仍然保留。
 
 每个标签错误都会连同容器名和标签键写入日志，并把同步状态置为 `error`，在 dashboard 和 `GET /api/overview` 中可见。修改标签之后请留意检查。
 
 ## 主机名 [#hostnames]
 
-主机名会被规范化（去除首尾空白、转为小写、去掉末尾的点）并校验。`App.Example.com.` 与 `app.example.com` 是同一个主机名。
+主机名会被规范化（去除首尾空白、转为小写、去掉末尾的点）并校验。`App.Example.com.` 与 `app.example.com` 是同一个主机名。合法的主机名至少有两段、总长不超过 253 个字符；每一段为 1-63 个字母、数字、`-` 或 `_`（不能以 `-` 开头或结尾）。允许以 `*.` 通配符段开头。
 
 ## 主机名冲突 [#hostname-conflicts]
 
 ### 同一主机名上的 DNS 与 Tunnel [#dns-and-tunnel-on-the-same-hostname]
 
-同一个主机名不能既是 DNS 记录又是 Tunnel ingress 规则：tunnel 主机名通过它自己的 CNAME 记录提供服务。无论这两个服务在同一个容器、不同容器还是不同主机上，后到的那个服务都会收到**冲突错误**。
+同一个主机名不能既是 DNS 记录又是 Tunnel ingress 规则：tunnel 主机名通过它自己的 CNAME 记录提供服务。无论这两个服务在同一个容器、不同容器还是不同主机上，后到的那个服务都会收到**冲突错误**。保存的原因形如 `conflict: hostname app.example.com is used by local container webapp service web as tunnel:<tunnel-id>`；最后一个词表示占用该主机名的方式：`records`（A、AAAA、TXT、MX、SRV、CAA）、`cname` 或 `tunnel:<tunnel-id>`。
 
 ```yaml
 # WRONG - hostname conflict
@@ -76,7 +85,7 @@ labels:
 
 ### 先到者胜出 [#existing-owner-wins]
 
-当多个服务声明同一个主机名时，已经拥有它的服务继续保有。后来者会被**拒绝**，并保存一条错误，例如 `conflict: app.example.com|A already claimed by ...`，在 dashboard 和 API 中可见。这个裁决是确定性的，不会在同步周期之间来回变化。参见[所有权与冲突](/zh/docs/ownership#conflicts-between-claims)。
+当多个服务声明同一个主机名时，已经拥有它的服务继续保有。后来者会被**拒绝**，并保存一条错误，例如 `conflict: app.example.com|A already claimed by local container webapp service web`（owner 在 agent 上时写作 `agent host-b container webapp service web`），在 dashboard 和 API 中可见。这个裁决是确定性的，不会在同步周期之间来回变化。声明的标识是主机名加记录类型（`app.example.com|A`），因此两个服务不能同时拥有同一主机名的 `A` 记录；`MX`、`SRV`、`TXT` 和 `CAA` 的标识还包含记录内容，所以这几种类型可以并存多条。参见[所有权与冲突](/zh/docs/ownership#conflicts-between-claims)。
 
 ### Cloudflare 上已有的记录
 

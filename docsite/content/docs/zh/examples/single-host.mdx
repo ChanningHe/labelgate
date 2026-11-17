@@ -7,6 +7,10 @@ description: 单主机部署的 Docker Compose 示例。
 所有示例都传入了 `LABELGATE_API_TOKEN`，它用于启用 dashboard 和 API，没有它这两者都会被禁用。这里没有发布任何端口；如需在本机访问 dashboard，请添加 `ports: ["127.0.0.1:8080:8080"]`。
 </Callout>
 
+<Callout type="warn">
+为了简洁，这些示例省略了非 root 镜像（UID 65532）所需的两样东西：用 `group_add` 加入拥有 Docker socket 的组，以及可写的数据目录。像 `labelgate-data` 这样的 Docker 命名卷创建时属于 root，容器无法写入，所以请改用执行过 `chown -R 65532:65532` 的 bind mount，或者设置 `user: root`。完整的服务定义见[快速开始](/zh/docs/getting-started#create-compose)。
+</Callout>
+
 ## 仅 DNS 配置
 
 最简单的配置 - Labelgate 仅管理 DNS 记录，无需隧道。

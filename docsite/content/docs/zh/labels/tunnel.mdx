@@ -16,16 +16,16 @@ labelgate.tunnel.<service_name>.<property>=<value>
 | 属性 | 必填 | 默认值 | 说明 |
 |------|------|--------|------|
 | `hostname` | 是 | - | 服务的公开主机名（会规范化为小写） |
-| `service` | 是 | - | 后端服务地址：`protocol://host:port` |
+| `service` | 是 | - | 后端服务地址：`protocol://host:port`（参见[服务协议](#service-protocols)） |
 | `tunnel` | 否 | 默认 tunnel | Tunnel 名称（`cloudflare.tunnels` 的键）或 Tunnel ID。为空表示 `default_tunnel` / 根 tunnel。未知的 tunnel 会报错 |
-| `path` | 否 | - | 要匹配的路径正则（例如 `\.(jpg\|png)$`） |
+| `path` | 否 | - | 要匹配的路径正则（例如 `\.(jpg\|png)$`）。必须能编译为 Go（RE2）正则表达式，否则该服务会被丢弃，错误为 `invalid path regex` |
 | `credential` | 否 | 自动 | 用于 tunnel 的 CNAME 记录和 Access 的凭据。为空表示先按 zone 匹配，再用根凭据 |
 | `cleanup` | 否 | `true` | 容器消失且超过 `sync.remove_delay` 后，移除 ingress 规则（及其 CNAME）。只会移除自己拥有的规则 |
-| `access` | 否 | - | 要应用的 Access 策略名称 |
+| `access` | 否 | - | 要应用的 [Access 策略定义](/zh/docs/labels/access)名称（小写字母、数字和连字符） |
 
 ## Service Protocols
 
-`service` 的协议必须是以下之一：
+`service` 的协议必须是以下之一（协议名不区分大小写）。`http`、`https`、`ssh`、`rdp`、`tcp`、`udp` 需要带主机（`scheme://host[:port]`），端口不会被 Labelgate 检查；`unix:` 和 `unix+tls:` 需要 socket 路径；`http_status:` 需要 100 到 599 的状态码。其他协议会以 `unsupported service scheme` 被拒绝。
 
 | 协议 | 格式 | 说明 |
 |------|------|------|
@@ -46,7 +46,7 @@ labelgate.tunnel.<service_name>.<property>=<value>
 </Callout>
 
 <Callout type="warn">
-由 [agent](/zh/docs/examples/multi-host) 上报的服务会经过 SSRF 防护检查：`localhost`、回环地址、链路本地地址、未指定地址、组播地址以及 `unix:` 服务都会被拒绝，并且 tunnel 必须在该 agent 的允许列表中。
+由 [agent](/zh/docs/examples/multi-host#ssrf-guard) 上报的服务会经过 SSRF 防护检查：`localhost` 与 `*.localhost`、回环 IP、链路本地 IP、未指定 IP、组播 IP、`unix:` / `unix+tls:` socket 以及 `bastion` 都会被拒绝，并且 tunnel 必须在该 agent 的允许列表中。
 </Callout>
 
 ## Ingress 规则的所有权
@@ -55,7 +55,7 @@ Labelgate 只管理自己创建的 ingress 规则，规则以（tunnel、hostnam
 
 ## Origin Request Configuration
 
-微调 cloudflared 和你的源服务之间的连接。时长类的值既可以写 `30s` 这样的形式，也可以直接写秒数（`30`）。未设置或为空的设置项会从规则中移除；Labelgate 没有建模的设置项则会被保留。
+微调 cloudflared 和你的源服务之间的连接。时长类的值既可以写 `30s` 这样的形式，也可以直接写秒数（`30`），并且必须是非负的整数秒（`1500ms` 会报错）。`keep_alive_connections` 是 0 到 1048576 的整数，布尔值的写法与 DNS 的 `proxied` 标签相同，未知的设置项（`origin.foo`）会被报告为未知属性。未设置或为空的设置项会从规则中移除；Labelgate 没有建模的设置项则会被保留。
 
 ### Connection Settings
 
@@ -92,6 +92,19 @@ labels:
 labels:
   # Empty string or "socks"
   labelgate.tunnel.web.origin.proxy_type: ""
+```
+
+## 容器级默认值 [#per-container-defaults]
+
+`labelgate.tunnel.default.<property>` 可以为该容器的所有 tunnel 服务设置 `tunnel`、`credential` 和 `cleanup` 的默认值（`default` 块中的其他属性会被报告为未知属性）：
+
+```yaml
+labels:
+  labelgate.tunnel.default.tunnel: "secondary"
+  labelgate.tunnel.web.hostname: "app.example.com"
+  labelgate.tunnel.web.service: "http://app:80"
+  labelgate.tunnel.api.hostname: "api.example.com"
+  labelgate.tunnel.api.service: "http://app:3000"
 ```
 
 ## Examples

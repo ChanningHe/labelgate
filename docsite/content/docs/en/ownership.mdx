@@ -9,7 +9,7 @@ Labelgate follows one rule: **it never modifies or deletes a Cloudflare resource
 
 Each Labelgate installation has a short random **instance ID** (for example `a1b2c3d4`). It is generated on first start and stored in the SQLite database. Every object Labelgate creates is marked with it, so two Labelgate installations sharing a Cloudflare account do not touch each other's resources.
 
-You normally never need to set it. If you lose the database, you can pin the previous ID with `instance_id` / `LABELGATE_INSTANCE_ID` (see [Recovering from database loss](#recovering-from-database-loss)).
+The ID is written to the log at startup (`Storage ready ... instance_id=a1b2c3d4`) and is visible in the comment of every DNS record Labelgate created. You normally never need to set it. If you lose the database, you can pin the previous ID with `instance_id` / `LABELGATE_INSTANCE_ID` (see [Recovering from database loss](#recovering-from-database-loss)).
 
 ## Ownership markers
 
@@ -32,7 +32,7 @@ labels:
 # Resulting Cloudflare comment: "labelgate:a1b2c3d4 main website"
 ```
 
-The user part is truncated so that the full comment fits in Cloudflare's 100-character limit. If someone removes the marker by hand, Labelgate treats the record as no longer owned: it reports an error for that resource and does not touch the record again.
+The user part is truncated so that the full comment fits in Cloudflare's 100-character limit. The marker only counts when the comment is exactly `labelgate:<instance_id>` or starts with `labelgate:<instance_id>` followed by a space; `labelgate:a1b2c3d45` does not match `a1b2c3d4`. If someone removes the marker by hand, Labelgate treats the record as no longer owned: it reports `conflict: existing record not owned by labelgate (ownership marker removed)` for that resource and does not touch the record again.
 
 ## Pre-existing resources are never adopted
 
@@ -42,6 +42,8 @@ If Labelgate wants to create a resource and finds an existing one with the same 
 conflict: existing record not owned by labelgate
 ```
 
+In some situations a suffix is appended: `(ownership marker removed)` for a record whose marker was deleted by hand, `(ownership tag removed)` for an Access application whose tag was removed, and `(unmanaged ingress rule uses this hostname)` for a tunnel hostname that has a manual rule.
+
 This applies to manually created DNS records, to Access applications without Labelgate's tag, and to tunnel hostnames that already have an unmanaged ingress rule. The conflict is visible in the dashboard and in `GET /api/resources/*` (`status: error`, reason in `last_error`), and it is retried every cycle, so it clears by itself once you fix it.
 
 ### Resolving a conflict
@@ -50,10 +52,10 @@ Pick one:
 
 1. **Let Labelgate manage it.** Delete the existing record, application or ingress rule in the Cloudflare dashboard. On the next sync Labelgate creates its own, marked copy.
 2. **Keep it yours.** Remove the label, or change the label's hostname to one that is free.
-3. **Intentional hand-over of a DNS record.** Add the marker comment yourself (`labelgate:<instance_id> ...`). The record is then recognised as owned and updated to match the labels. This is a deliberate manual act; Labelgate never does it for you.
+3. **Intentional hand-over of a DNS record.** Edit the record in the Cloudflare dashboard and set its comment to `labelgate:<instance_id>` (take the ID from the startup log). On the next cycle Labelgate finds a record with the same name and type that carries its marker, attaches it and updates it to match the labels. For `MX`, `SRV`, `TXT` and `CAA` records the content must match as well, because it is part of the record's identity. This is a deliberate manual act; Labelgate never does it for you.
 
 <Callout type="info">
-Objects that carry **your own** instance marker are recovered automatically. If Labelgate crashed between creating a record and saving it, the next cycle finds the marked record and re-attaches it instead of reporting a conflict.
+Objects that carry **your own** instance marker are recovered automatically. If Labelgate crashed between creating a record and saving it, the next cycle finds the marked record (or the Access application with your tag on that domain) and re-attaches it instead of reporting a conflict. This is the same mechanism that makes the hand-over above work. Tunnel ingress rules have no marker, so they cannot be handed over this way.
 </Callout>
 
 ## Conflicts between claims
@@ -61,9 +63,9 @@ Objects that carry **your own** instance marker are recovered automatically. If 
 Two services can ask for the same hostname: two containers, a container and an agent, or a DNS and a tunnel service. Labelgate resolves this deterministically with the rule **the existing owner wins**:
 
 - The first service to claim a hostname keeps it for as long as it keeps claiming it. The claim is persisted, so the outcome does not flap between sync cycles or after restarts.
-- A newcomer claiming an already-claimed resource is **rejected**, and the rejection is stored with the reason, for example `conflict: app.example.com|A already claimed by host-b/webapp/web`.
+- A newcomer claiming an already-claimed resource is **rejected**, and the rejection is stored with the reason, for example `conflict: app.example.com|A already claimed by agent host-b container webapp service web` (`local container ...` for the main host).
 - If nobody holds the hostname yet, ordering is by owner (local containers first, then agents sorted by ID, then container name, then service name), so the result is identical on every run.
-- A hostname can only be used in one *class* at a time: plain DNS records, a CNAME, or a tunnel. A DNS service and a tunnel service on the same hostname is therefore a conflict, not just a log line.
+- A hostname can only be used in one *class* at a time: plain DNS records (`records`), a CNAME (`cname`), or one tunnel (`tunnel:<tunnel-id>`). A DNS service and a tunnel service on the same hostname is therefore a conflict (`conflict: hostname app.example.com is used by ... as tunnel:<tunnel-id>`), not just a log line.
 - Rejected claims are shown in the dashboard and the API as resources with status `error`. They never create or change anything on Cloudflare.
 
 To hand a hostname over, stop (or remove the labels from) the current owner first. When its resources are orphaned, the next claimant wins on the following cycle. If you switch a hostname from DNS to tunnel (or back) within the same owner, the old record is replaced immediately without waiting for `remove_delay`.
@@ -109,7 +111,7 @@ Cleanup only ever deletes owned resources:
 
 The database holds the instance ID and the ownership records for tunnel rules and Access policies. If you lose it:
 
-- Labelgate generates a **new** instance ID, so its old DNS records (marked with the old ID) look foreign and trigger conflicts. Fix: read the old ID from the comment of one of your records (`labelgate:<old_id> ...`) and set `instance_id: <old_id>` (or `LABELGATE_INSTANCE_ID`) before starting.
+- Labelgate generates a **new** instance ID, so its old DNS records (marked with the old ID) look foreign and trigger conflicts. Fix: read the old ID from the comment of one of your records (`labelgate:<old_id> ...`) or from the tag name of an Access application (`labelgate-<old_id>`) and set `instance_id: <old_id>` (or `LABELGATE_INSTANCE_ID`) before starting. Labelgate then re-attaches the records and Access applications that carry that ID.
 - Tunnel rules and Access policies are not marked on Cloudflare, so they cannot be re-attached automatically. Remove the stale rules or policies in the Cloudflare dashboard, or let the conflict errors guide you to them. Labelgate never deletes them on its own.
 
 The upgrade from v0.2 is handled differently; see [Upgrading to v0.3](/docs/upgrading#database-migration).

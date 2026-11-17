@@ -23,6 +23,7 @@ poll_interval = "2m"
 # ca = "/path/to/ca.pem"
 # cert = "/path/to/cert.pem"
 # key = "/path/to/key.pem"
+# insecure_skip_verify = false  # NOT recommended
 
 # Cloudflare configuration
 [cloudflare]

@@ -16,16 +16,16 @@ Invalid values and unknown properties are errors; see [Strict Validation](/docs/
 | Property | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `hostname` | Yes | - | Public hostname for the service (normalised to lower-case) |
-| `service` | Yes | - | Backend service URL: `protocol://host:port` |
+| `service` | Yes | - | Backend service URL: `protocol://host:port` (see [Service Protocols](#service-protocols)) |
 | `tunnel` | No | default tunnel | Tunnel name (key of `cloudflare.tunnels`) or tunnel ID. Empty = `default_tunnel` / the root tunnel. An unknown tunnel is an error |
-| `path` | No | - | Path regex to match (e.g., `\.(jpg\|png)$`) |
+| `path` | No | - | Path regex to match (e.g., `\.(jpg\|png)$`). Must compile as a Go (RE2) regular expression, otherwise the service is dropped with `invalid path regex` |
 | `credential` | No | automatic | Credential used for the tunnel's CNAME record and Access. Empty = zone match, then root credential |
 | `cleanup` | No | `true` | Remove the ingress rule (and its CNAME) after the container is gone and `sync.remove_delay` has passed. Only owned rules are ever removed |
-| `access` | No | - | Access policy name to apply |
+| `access` | No | - | Name of an [Access policy definition](/docs/labels/access) to apply (lowercase letters, digits and hyphens) |
 
 ## Service Protocols
 
-The `service` scheme must be one of:
+The `service` scheme must be one of the following (schemes are case-insensitive). `http`, `https`, `ssh`, `rdp`, `tcp` and `udp` need a host (`scheme://host[:port]`); the port is not checked by Labelgate. `unix:` and `unix+tls:` need a socket path, and `http_status:` needs a code from 100 to 599. Anything else is rejected with `unsupported service scheme`.
 
 | Protocol | Format | Description |
 |----------|--------|-------------|
@@ -46,7 +46,7 @@ For each tunnel hostname Labelgate creates a CNAME record pointing to `<tunnel-i
 </Callout>
 
 <Callout type="warn">
-Services reported by [agents](/docs/examples/multi-host) are checked by an SSRF guard: `localhost`, loopback, link-local, unspecified and multicast addresses and `unix:` services are rejected, and the tunnel must be on the agent's allow-list.
+Services reported by [agents](/docs/examples/multi-host#ssrf-guard) are checked by an SSRF guard: `localhost` and `*.localhost`, loopback, link-local, unspecified and multicast IP addresses, `unix:` / `unix+tls:` sockets and `bastion` are rejected, and the tunnel must be on the agent's allow-list.
 </Callout>
 
 ## Ownership of Ingress Rules
@@ -55,7 +55,7 @@ Labelgate only manages the ingress rules it created, identified by (tunnel, host
 
 ## Origin Request Configuration
 
-Fine-tune the connection between cloudflared and your origin service. Duration values accept `30s`-style durations or plain seconds (`30`). An unset or empty setting is removed from the rule; settings Labelgate does not model are preserved.
+Fine-tune the connection between cloudflared and your origin service. Duration values accept `30s`-style durations or plain seconds (`30`) and must be whole, non-negative seconds (`1500ms` is an error). `keep_alive_connections` is an integer from 0 to 1048576, the booleans follow the same forms as the DNS `proxied` label, and an unknown setting (`origin.foo`) is reported as an unknown property. An unset or empty setting is removed from the rule; settings Labelgate does not model are preserved.
 
 ### Connection Settings
 
@@ -92,6 +92,19 @@ labels:
 labels:
   # Empty string or "socks"
   labelgate.tunnel.web.origin.proxy_type: ""
+```
+
+## Per-container defaults
+
+`labelgate.tunnel.default.<property>` sets defaults for `tunnel`, `credential` and `cleanup` for every tunnel service of the container (other properties in a `default` block are reported as unknown):
+
+```yaml
+labels:
+  labelgate.tunnel.default.tunnel: "secondary"
+  labelgate.tunnel.web.hostname: "app.example.com"
+  labelgate.tunnel.web.service: "http://app:80"
+  labelgate.tunnel.api.hostname: "api.example.com"
+  labelgate.tunnel.api.service: "http://app:3000"
 ```
 
 ## Examples

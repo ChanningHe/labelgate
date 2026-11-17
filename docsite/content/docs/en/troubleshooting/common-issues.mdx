@@ -42,9 +42,9 @@ labels:
 
 **Problem:** The sync status is `error` and the logs contain a label error with a container name and key.
 
-**Cause:** Labels are strictly validated: invalid values (`proxied: "maybe"`, `ttl: "abc"`) drop the service, and unknown properties (`hostnme`) are errors.
+**Cause:** Labels are strictly validated: invalid values (`proxied: "maybe"`, `ttl: "abc"`) drop the service, and unknown properties (`hostnme`) are errors. Resources that Labelgate already created for a dropped service are held, not deleted, and show `label error: ...` until you fix the label.
 
-**Solution:** Fix the label named in the log line; see [Strict Validation](/docs/labels#strict-validation).
+**Solution:** Fix the label named in the log line; see [Strict Validation](/docs/labels#strict-validation). If a service is missing without any error, check the key structure: keys that do not look like `labelgate.<type>.<service>.<property>` are ignored silently.
 
 ## Dashboard or API Not Available
 
@@ -56,9 +56,9 @@ labels:
 
 ## Zone Not Found
 
-**Problem:** `zone not found for hostname: app.example.com`
+**Problem:** The service shows `zone for app.example.com: app.example.com: no matching zone`.
 
-**Cause:** The API token doesn't have access to the zone containing your hostname.
+**Cause:** None of the credentials can see the zone containing your hostname, or a `credential` label points at a token that cannot. The zone list of each credential is cached; Labelgate refetches it when a lookup misses, at most once per minute, so a zone you just added can take a minute to appear.
 
 **Solution:**
 1. Check your API token permissions in [Cloudflare Dashboard > API Tokens](https://dash.cloudflare.com/profile/api-tokens)
@@ -85,9 +85,9 @@ labels:
 
 ## Public IP Detection Fails
 
-**Problem:** DNS records with `target=auto` are not being created.
+**Problem:** DNS records with `target=auto` are not being created and the service shows `public IPv4 address: publicip: ...` (or `IPv6`).
 
-**Cause:** Labelgate failed to detect the host's public IP address.
+**Cause:** Labelgate failed to detect the host's public IP address. It asks `api.ipify.org` and `ipv4.icanhazip.com` (`api6.ipify.org` and `ipv6.icanhazip.com` for `AAAA`). For containers on an agent, the agent's own report is used (`agent <id> reported no public IPv4 address`).
 
 **Solution:**
 - Check internet connectivity from the Labelgate container
@@ -103,12 +103,12 @@ labels:
 
 ## API Rate Limits
 
-**Problem:** `API rate limit reached` errors in logs.
+**Problem:** Cloudflare errors with HTTP status 429 in the logs or in a resource's `last_error`.
 
-**Cause:** Cloudflare API has a limit of 1200 requests per 5 minutes. Exceeded limits result in a 5-minute ban.
+**Cause:** Cloudflare limits the API to 1200 requests per 5 minutes. Exceeded limits result in a 5-minute ban.
 
 **Solution:**
-- Labelgate automatically retries with exponential backoff
+- Labelgate automatically retries 429 and 5xx responses with exponential backoff (`retry.*`), honouring `Retry-After`, and tries again on the next cycle
 - Reduce the number of managed resources if limits are frequently hit
 - Avoid rapidly restarting many containers at once
 - Increase the intervals to reduce reconciliation frequency (every cycle lists the DNS records of each referenced zone, each tunnel configuration, and the Access apps and policies of each account):
@@ -186,7 +186,7 @@ labels:
 
 **Problem:** An agent's service shows an error such as a hostname or tunnel not allowed, or a service URL rejected.
 
-**Cause:** The claim violated the agent's allow-lists (`hostnames`, `tunnels`, or `accept_hostnames` / `accept_tunnels`), or the tunnel `service` points at `localhost`, a loopback or link-local address, or a unix socket (SSRF guard).
+**Cause:** The claim violated the agent's allow-lists (`hostnames`, `tunnels`, or `accept_hostnames` / `accept_tunnels`), or the tunnel `service` points at `localhost`, a loopback or link-local address, a unix socket or `bastion` (SSRF guard). The stored reasons read `agent <id> may not claim hostname <host>`, `agent <id> may not use tunnel <ref>` or, for the guard, for example `service host "localhost" is not allowed for agents`.
 
 **Solution:** Adjust the agent's entry on the main instance, or use a service address the agent host exposes on a routable address.
 
@@ -229,6 +229,6 @@ services:
 
 ## Database Is Not Writable
 
-**Problem:** `unable to open database file` or a failed migration backup.
+**Problem:** Labelgate exits with `open store "/app/config/labelgate.db": ...` (for example `unable to open database file`), or a migration backup fails.
 
-**Solution:** The image runs as a non-root user (UID 65532). Make the data directory writable for it: `sudo chown -R 65532:65532 ./labelgate-data`. When upgrading from v0.2, the directory also needs free space for the `labelgate.db.v0.2.bak` backup.
+**Solution:** The image runs as a non-root user (UID 65532). Make the data directory writable for it: `sudo chown -R 65532:65532 ./labelgate-data`. A Docker named volume is created root-owned, so it needs the same treatment (or use `user: root`). When upgrading from v0.2, the directory also needs free space for the `labelgate.db.v0.2.bak` backup.

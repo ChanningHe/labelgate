@@ -48,7 +48,7 @@ description: How Labelgate is designed and how its components work together.
 Providers are the source of container data. The Docker provider connects to the Docker daemon and:
 
 - **Watches events** in real-time (container start, stop, die)
-- **Lists containers** on startup and periodically as a fallback
+- **Lists running containers** on startup and periodically (`docker.poll_interval`) as a fallback; stopped containers and, with `docker.filter_label`, containers without that label are ignored
 - Re-subscribes with backoff after errors and does a full resync after reconnecting; the event watch starts before the initial listing, so no event is lost
 - Supports two connection methods: Unix socket and TCP (with TLS). `ssh://` was removed in v0.3
 
@@ -71,7 +71,7 @@ The reconciler is the brain of Labelgate. A single goroutine runs one cycle at a
 4. **Plan** the actions (create, update, delete, skip) as a pure function of desired state and tracked state
 5. **Execute** them, persisting status and the last error for every resource
 
-Errors are recorded per resource and never swallowed; the overall sync status is `error` if anything failed in the cycle and `pending` before the first sync.
+Errors are recorded per resource and never swallowed; the overall sync status is `error` if anything failed in the cycle (including label errors, conflicts and rejected agent claims) and `pending` before the first sync. A service that disappears because of a label error is held, not orphaned.
 
 ### Operators
 
