@@ -91,6 +91,13 @@ func TestMergeIngress(t *testing.T) {
 			conflicts: 1,
 		},
 		{
+			name:  "empty originRequest echoed by Cloudflare is no change",
+			live:  `{"ingress":[{"hostname":"a.example.com","service":"http://a","originRequest":{}},{"service":"http_status:404","originRequest":null}],"originRequest":{}}`,
+			owned: ids("a.example.com", ""),
+			keep:  []keepRule{keep("a.example.com", "", "http://a")},
+			want:  []string{"a.example.com=>http://a", "=>http_status:404"},
+		},
+		{
 			name:      "conflicting owned rule already live is kept verbatim",
 			live:      `{"ingress":[{"hostname":"a.example.com","service":"http://old"},{"hostname":"a.example.com","path":"/m","service":"http://h"},{"service":"http_status:404"}]}`,
 			owned:     ids("a.example.com", ""),

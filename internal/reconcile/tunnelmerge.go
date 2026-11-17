@@ -222,8 +222,34 @@ func copyExtra(m map[string]json.RawMessage) map[string]json.RawMessage {
 	return out
 }
 
-// canonicalJSON renders v with sorted keys at every level, so semantically
-// equal configurations compare equal regardless of key order or spacing.
+// pruneEmpty drops object members that are null or empty objects (after
+// pruning their own members): Cloudflare treats them as absent and echoes
+// e.g. "originRequest":{} for rules written without one.
+func pruneEmpty(v any) any {
+	switch x := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(x))
+		for k, val := range x {
+			val = pruneEmpty(val)
+			if m, isMap := val.(map[string]any); val == nil || (isMap && len(m) == 0) {
+				continue
+			}
+			out[k] = val
+		}
+		return out
+	case []any:
+		out := make([]any, len(x))
+		for i, val := range x {
+			out[i] = pruneEmpty(val)
+		}
+		return out
+	}
+	return v
+}
+
+// canonicalJSON renders v with sorted keys at every level and without empty
+// members, so semantically equal configurations compare equal regardless of
+// key order, spacing or echoed empty objects.
 func canonicalJSON(v any) string {
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -235,7 +261,7 @@ func canonicalJSON(v any) string {
 	if err := dec.Decode(&x); err != nil {
 		return "invalid:" + err.Error()
 	}
-	out, err := json.Marshal(x)
+	out, err := json.Marshal(pruneEmpty(x))
 	if err != nil {
 		return "invalid:" + err.Error()
 	}

@@ -250,6 +250,20 @@ func TestDNSToTunnelSwitchAndBack(t *testing.T) {
 	h.assertIdempotent()
 }
 
+// Cloudflare echoes rules back with "originRequest":{}: no PUT every cycle.
+func TestEmptyOriginRequestEchoIsIdempotent(t *testing.T) {
+	h := newHarness(t)
+	h.src.set(ctr("web", tunOnly(tunSpec("web", appHost, "http://web:80"))))
+	h.cycle()
+	raw := strings.Replace(h.cf.TunnelConfigJSON(tunnelA), `"service":"http://web:80"`, `"service":"http://web:80","originRequest":{}`, 1)
+	h.cf.SetTunnelConfig(tunnelA, raw)
+	h.cf.ResetCalls()
+	h.cycle()
+	if n := h.cf.CountCalls(cffake.OpPutTunnelConfig); n != 0 {
+		t.Fatalf("PUT issued %d times for an empty originRequest echo", n)
+	}
+}
+
 func TestSupersededDeleteFailureWaits(t *testing.T) {
 	h := newHarness(t)
 	h.src.set(ctr("web", dnsOnly(dnsSpec("web", appHost))))
