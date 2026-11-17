@@ -170,6 +170,20 @@ func TestNormalizeDNSRecord(t *testing.T) {
 			DNSRecord{Name: "b.com", Type: model.DNSTypeCAA, Content: "CA.org", TTL: 1, Flags: 128, Tag: "issue"}},
 		{DNSRecord{Name: "b.com", Type: model.DNSTypeTXT, Content: "Hello", Proxied: true, TTL: 120},
 			DNSRecord{Name: "b.com", Type: model.DNSTypeTXT, Content: "Hello", TTL: 120}},
+		// Cloudflare returns TXT content as quoted character-strings.
+		{DNSRecord{Name: "b.com", Type: model.DNSTypeTXT, Content: `"hello world"`},
+			DNSRecord{Name: "b.com", Type: model.DNSTypeTXT, Content: "hello world", TTL: 1}},
+		{DNSRecord{Name: "b.com", Type: model.DNSTypeTXT, Content: `"v=DKIM1; p=abc" "def"`},
+			DNSRecord{Name: "b.com", Type: model.DNSTypeTXT, Content: "v=DKIM1; p=abcdef", TTL: 1}},
+		{DNSRecord{Name: "b.com", Type: model.DNSTypeTXT, Content: `"say \"hi\" \\o/"`},
+			DNSRecord{Name: "b.com", Type: model.DNSTypeTXT, Content: `say "hi" \o/`, TTL: 1}},
+		// Not a sequence of quoted strings: left as is.
+		{DNSRecord{Name: "b.com", Type: model.DNSTypeTXT, Content: `say "hi"`},
+			DNSRecord{Name: "b.com", Type: model.DNSTypeTXT, Content: `say "hi"`, TTL: 1}},
+		{DNSRecord{Name: "b.com", Type: model.DNSTypeTXT, Content: `"a" b "c"`},
+			DNSRecord{Name: "b.com", Type: model.DNSTypeTXT, Content: `"a" b "c"`, TTL: 1}},
+		{DNSRecord{Name: "b.com", Type: model.DNSTypeTXT, Content: `"unterminated`},
+			DNSRecord{Name: "b.com", Type: model.DNSTypeTXT, Content: `"unterminated`, TTL: 1}},
 	}
 	for i, tt := range tests {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {

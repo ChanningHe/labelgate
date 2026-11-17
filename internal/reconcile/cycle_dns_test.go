@@ -13,6 +13,27 @@ import (
 
 const appHost = "app.example.com"
 
+// Cloudflare returns TXT content quoted: no update every cycle, and crash
+// recovery (no CFID) still recognises the record as the same identity.
+func TestQuotedTXTEchoIsIdempotent(t *testing.T) {
+	h := newHarness(t)
+	s := dnsSpec("txt", "txt.example.com")
+	s.Type, s.Target, s.Proxied = model.DNSTypeTXT, "hello world", false
+	h.src.set(ctr("web", dnsOnly(s)))
+	h.cycle()
+	rec := h.recordsNamed("txt.example.com")[0]
+	rec.Content = `"hello world"`
+	h.cf.PutRecord(testZone, rec)
+	h.cf.ResetCalls()
+	h.cycle()
+	if n := h.cf.CountCalls(cffake.OpUpdateDNSRecord) + h.cf.CountCalls(cffake.OpCreateDNSRecord); n != 0 {
+		t.Fatalf("TXT rewritten %d times", n)
+	}
+	if got := h.recordsNamed("txt.example.com"); len(got) != 1 {
+		t.Fatalf("records %+v", got)
+	}
+}
+
 var appKey = model.DNSKey(appHost, model.DNSTypeA, "")
 
 func TestStatusPendingBeforeFirstCycle(t *testing.T) {

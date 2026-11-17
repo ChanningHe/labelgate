@@ -54,6 +54,9 @@ func dnsClaim(src *sourceInfo, c *model.Container, s model.DNSSpec) claim {
 	if s.Type == model.DNSTypeCNAME || s.Type == model.DNSTypeMX || s.Type == model.DNSTypeSRV {
 		target = model.NormalizeHostname(target)
 	}
+	if s.Type == model.DNSTypeTXT {
+		target = cloudflare.NormalizeTXT(target) // identity matches live records
+	}
 	res := model.Resource{
 		Kind: model.KindDNS, Hostname: host, Owner: ownerOf(src, c, s.Service),
 		Credential: normRef(s.Credential), RecordType: s.Type, Proxied: s.Proxied,

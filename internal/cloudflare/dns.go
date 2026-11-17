@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/channinghe/labelgate/internal/model"
 )
@@ -60,11 +61,58 @@ func NormalizeDNSRecord(rec DNSRecord) DNSRecord {
 		out.Priority, out.Weight, out.Port = rec.Priority, rec.Weight, rec.Port
 	case model.DNSTypeCAA:
 		out.Flags, out.Tag = rec.Flags, rec.Tag
+	case model.DNSTypeTXT:
+		out.Content = NormalizeTXT(rec.Content)
 	}
 	if out.TTL <= 0 || out.Proxied {
 		out.TTL = 1
 	}
 	return out
+}
+
+// NormalizeTXT joins TXT content written as quoted character-strings
+// (`"a" "b"`, as Cloudflare returns it) into its plain value (`ab`),
+// unescaping \" and \\. Content that is not entirely a sequence of quoted
+// strings is returned unchanged.
+func NormalizeTXT(content string) string {
+	s := strings.TrimSpace(content)
+	if !strings.HasPrefix(s, `"`) {
+		return content
+	}
+	var b strings.Builder
+	for s != "" {
+		if s[0] != '"' {
+			return content
+		}
+		part, rest, ok := cutQuoted(s[1:])
+		if !ok {
+			return content
+		}
+		b.WriteString(part)
+		s = strings.TrimLeft(rest, " \t")
+		if s != "" && len(rest) == len(s) { // strings must be separated by blanks
+			return content
+		}
+	}
+	return b.String()
+}
+
+// cutQuoted reads up to the closing quote of a character-string, returning
+// its unescaped value and the remainder after the quote.
+func cutQuoted(s string) (string, string, bool) {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c == '"':
+			return b.String(), s[i+1:], true
+		case c == '\\' && i+1 < len(s):
+			i++
+			b.WriteByte(s[i])
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return "", "", false
 }
 
 func toDNSWire(rec DNSRecord) dnsWire {
