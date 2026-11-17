@@ -1,47 +1,169 @@
 // Package labels parses labelgate container labels into model specs.
 //
 // The label grammar is backward compatible with v0.2 (see
-// docsite/content/docs/en/labels and `git show main:pkg/labels/parser_test.go`):
+// docsite/content/docs/en/labels):
 //
 //	<prefix>.dns.<service>.<property>=<value>
 //	<prefix>.tunnel.<service>.<property>=<value>
 //	<prefix>.tunnel.<service>.origin.<setting>=<value>
 //	<prefix>.access.<policy>.<property>=<value>
 //	<prefix>.dns.default.<property> / <prefix>.tunnel.default.<property>  (per-container defaults)
+//
+// Parsing is pure and deterministic: output slices are sorted and identical
+// input always yields identical output.
 package labels
 
-import "github.com/channinghe/labelgate/internal/model"
+import (
+	"fmt"
+	"regexp"
+	"strings"
+
+	"github.com/channinghe/labelgate/internal/model"
+)
 
 // DefaultPrefix is the default label prefix.
 const DefaultPrefix = "labelgate"
 
-// Parse parses one container's labels. It is pure and deterministic.
+// Label types (second key segment).
+const (
+	typeDNS    = "dns"
+	typeTunnel = "tunnel"
+	typeAccess = "access"
+)
+
+// defaultsName is the pseudo service holding per-container defaults.
+const defaultsName = "default"
+
+// reservedNames cannot be used as service names because they collide with properties.
+var reservedNames = map[string]bool{
+	"hostname": true, "service": true, "type": true, "target": true,
+	"proxied": true, "ttl": true, "cleanup": true, "credential": true,
+	"tunnel": true, "path": true, "origin": true, "access": true,
+	"priority": true, "weight": true, "port": true, "flags": true,
+	"tag": true, "comment": true,
+}
+
+var serviceNamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
+
+// props maps a property name (possibly dotted) to its raw value.
+type props map[string]string
+
+// parser carries the per-call state.
+type parser struct {
+	prefix string
+	errs   collector
+}
+
+// Parse parses one container's labels into specs.
 //
-// Required behavior (WP1), beyond the v0.2 grammar:
-//   - Keys without the "<prefix>." prefix, with fewer than 3 dot-separated
-//     parts after it, or with an unknown type segment are ignored.
-//   - Service names: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ and not reserved (v0.2
-//     reserved list); "default" is the per-type defaults block for dns/tunnel and
-//     is skipped for access. Violations -> LabelError, service skipped.
-//   - Hostnames: model.NormalizeHostname then model.ValidHostname, else error.
-//   - Defaults: DNS type A, target "auto", proxied true, ttl 0 (auto), cleanup
-//     true, credential "" (automatic); tunnel tunnel "" (default tunnel),
-//     credential "", cleanup true. NO hardcoded "default" credential/tunnel.
-//   - dns.default / tunnel.default supply defaults for type, target, proxied,
-//     ttl, credential, cleanup (dns) and tunnel, credential, cleanup (tunnel).
-//   - Invalid bool/int values, unknown properties, unknown origin settings,
-//     invalid record types, CAA tag not in {issue, issuewild, iodef}, CAA flags
-//     outside 0-255, ports outside 0-65535 -> LabelError. Unknown property
-//     errors do not drop the service; value errors do.
-//   - DNS: proxied forced false for TXT/MX/SRV/CAA. Target for A/AAAA must be
-//     auto, container or an IP of the right family; CNAME/MX/SRV targets are
-//     normalized hostnames.
-//   - Tunnel: service URL required; scheme one of http, https, tcp, ssh, rdp,
-//     udp, unix, unix+tls, hello_world, http_status:<code>, bastion.
-//     origin.* durations accept Go durations ("30s") or plain seconds ("30").
-//   - Access: v0.2 semantics (decision default allow; allow/block need >=1
-//     include; valueless selectors everyone/certificate; values comma-split).
-//   - Output slices sorted (see model.ParsedLabels).
+//   - Keys without the "<prefix>." prefix, with fewer than 3 dot-separated parts
+//     after it, or with an unknown type segment are ignored.
+//   - Invalid or reserved service names produce a LabelError and skip the service.
+//   - Hostnames are normalized (lower-case, trimmed, no trailing dot) and validated.
+//   - Invalid values drop the service; unknown properties are reported but keep it.
+//
+// See the per-type files for the property rules.
 func Parse(prefix string, labels map[string]string) model.ParsedLabels {
-	return model.ParsedLabels{Errors: []model.LabelError{{Key: prefix, Message: "labels.Parse: not implemented"}}}
+	if prefix == "" {
+		prefix = DefaultPrefix
+	}
+	p := &parser{prefix: prefix}
+	groups := p.group(labels)
+
+	out := model.ParsedLabels{
+		DNS:     p.parseDNS(groups[typeDNS]),
+		Tunnels: p.parseTunnels(groups[typeTunnel]),
+		Access:  p.parseAccess(groups[typeAccess]),
+	}
+	out.Errors = p.errs.sorted()
+	return out
+}
+
+// group splits labels into type -> service -> property -> value, dropping
+// services whose name is not acceptable.
+func (p *parser) group(labels map[string]string) map[string]map[string]props {
+	groups := map[string]map[string]props{}
+	for _, key := range sortedKeys(labels) {
+		rest, ok := strings.CutPrefix(key, p.prefix+".")
+		if !ok {
+			continue
+		}
+		parts := strings.SplitN(rest, ".", 3)
+		if len(parts) < 3 || !knownType(parts[0]) {
+			continue
+		}
+		typ, service, prop := parts[0], parts[1], parts[2]
+		if groups[typ] == nil {
+			groups[typ] = map[string]props{}
+		}
+		if groups[typ][service] == nil {
+			groups[typ][service] = props{}
+		}
+		groups[typ][service][prop] = labels[key]
+	}
+	for typ, services := range groups {
+		for name := range services {
+			if msg := serviceNameProblem(name); msg != "" {
+				p.errs.add(p.stem(typ, name), "%s", msg)
+				delete(services, name)
+			}
+		}
+	}
+	return groups
+}
+
+func knownType(t string) bool {
+	return t == typeDNS || t == typeTunnel || t == typeAccess
+}
+
+// serviceNameProblem returns why name is unusable, or "".
+func serviceNameProblem(name string) string {
+	if name == defaultsName {
+		return ""
+	}
+	if reservedNames[name] {
+		return "reserved service name " + name
+	}
+	if !serviceNamePattern.MatchString(name) {
+		return "invalid service name " + name + " (must be lowercase alphanumeric with hyphens)"
+	}
+	return ""
+}
+
+// stem returns the "<prefix>.<type>.<service>" key stem.
+func (p *parser) stem(typ, service string) string {
+	return p.prefix + "." + typ + "." + service
+}
+
+// applyProps feeds each property to apply in sorted order. Properties for
+// which apply reports known=false (or that allowed rejects) are reported as
+// unknown but do not fail; the return value reports whether any value was invalid.
+func (p *parser) applyProps(stem string, in props, allowed func(string) bool, apply func(name, value string) (known bool, err error)) (valueErr bool) {
+	for _, name := range sortedKeys(in) {
+		known := allowed == nil || allowed(name)
+		var err error
+		if known {
+			known, err = apply(name, in[name])
+		}
+		switch {
+		case !known:
+			p.errs.add(stem+"."+name, "unknown property %q", name)
+		case err != nil:
+			p.errs.add(stem+"."+name, "%v", err)
+			valueErr = true
+		}
+	}
+	return valueErr
+}
+
+// accessRef validates an "access" property value (a policy definition name).
+func accessRef(v string) (string, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "", nil
+	}
+	if !serviceNamePattern.MatchString(v) {
+		return "", fmt.Errorf("invalid access policy name %q (must be lowercase alphanumeric with hyphens)", v)
+	}
+	return v, nil
 }
