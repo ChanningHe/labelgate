@@ -29,7 +29,7 @@ The `service_name` is a unique identifier for each service within a container. I
 The name `default` is special rather than reserved: `labelgate.dns.default.*` and `labelgate.tunnel.default.*` set per-container defaults for the other services of that type (see [DNS](/docs/labels/dns#per-container-defaults) and [Tunnel](/docs/labels/tunnel#per-container-defaults)). It never defines a service of its own, and `labelgate.access.default.*` is ignored.
 
 <Callout type="warn">
-Only keys of the form `<prefix>.<type>.<service>.<property>` are read. Everything else is **ignored without any error**: other labels, keys with fewer than four segments (`labelgate.dns.hostname`, `labelgate.dns.web`) and unknown types (`labelgate.dnss.web.hostname`). If a service never shows up in the dashboard, check the key structure first.
+Only keys of the form `<prefix>.<type>.<service>.<property>` are read. Labels that do not start with the prefix are ignored. Keys that do start with the prefix but are malformed are **reported as label errors**: keys with fewer than four segments (`labelgate.dns.hostname`, `labelgate.dns.web`) and unknown types (`labelgate.dnss.web.hostname`).
 </Callout>
 
 ## Multiple Services

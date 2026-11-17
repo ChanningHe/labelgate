@@ -29,7 +29,7 @@ labelgate.<type>.<service_name>.<property>=<value>
 `default` 是特殊名称而非保留字：`labelgate.dns.default.*` 和 `labelgate.tunnel.default.*` 用来为该容器中同类型的其他服务设置默认值（参见 [DNS](/zh/docs/labels/dns#per-container-defaults) 和 [Tunnel](/zh/docs/labels/tunnel#per-container-defaults)）。它本身不会定义服务，`labelgate.access.default.*` 会被忽略。
 
 <Callout type="warn">
-只有形如 `<prefix>.<type>.<service>.<property>` 的键才会被读取，其余的都会**被静默忽略，不报任何错误**：其他标签、少于四段的键（`labelgate.dns.hostname`、`labelgate.dns.web`）以及未知类型（`labelgate.dnss.web.hostname`）。如果某个服务始终没有出现在 dashboard 中，请先检查键的结构。
+只有形如 `<prefix>.<type>.<service>.<property>` 的键才会被读取。不以该前缀开头的标签会被忽略；以该前缀开头但格式错误的键会**作为标签错误上报**：少于四段的键（`labelgate.dns.hostname`、`labelgate.dns.web`）以及未知类型（`labelgate.dnss.web.hostname`）。
 </Callout>
 
 ## Multiple Services
