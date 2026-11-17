@@ -82,11 +82,9 @@ func TestParse_Counts(t *testing.T) {
 		{"missing service URL", L{
 			"labelgate.tunnel.web.hostname": "app.example.com",
 		}, 0, 0, 0, true},
-		{"unrelated keys are ignored", L{
+		{"keys outside the prefix are ignored", L{
 			"com.docker.compose.project": "x",
-			"labelgate.enable":           "true",
-			"labelgate.foo.bar.baz":      "x",
-			"labelgate.dns.web":          "x",
+			"labelgateway.dns.web":       "x",
 			"other.dns.web.hostname":     "web.example.com",
 		}, 0, 0, 0, false},
 	}
@@ -99,6 +97,36 @@ func TestParse_Counts(t *testing.T) {
 			if len(got.DNS) != tt.wantDNS || len(got.Tunnels) != tt.wantTunnel || len(got.Access) != tt.wantAccess {
 				t.Errorf("counts dns/tunnel/access = %d/%d/%d, want %d/%d/%d",
 					len(got.DNS), len(got.Tunnels), len(got.Access), tt.wantDNS, tt.wantTunnel, tt.wantAccess)
+			}
+		})
+	}
+}
+
+func TestParse_MalformedKeysAreReported(t *testing.T) {
+	tests := []struct {
+		key  string
+		want string
+	}{
+		{"labelgate.dns.hostname", "malformed"},
+		{"labelgate.dns.web", "malformed"},
+		{"labelgate.dns", "malformed"},
+		{"labelgate.enable", "unknown label type"},
+		{"labelgate.dsn.web.hostname", "unknown label type"},
+		{"labelgate.foo.bar.baz", "unknown label type"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.key, func(t *testing.T) {
+			got := Parse("labelgate", L{
+				tt.key:                      "x",
+				"labelgate.dns.ok.hostname": "ok.example.com",
+				"labelgate.dns.ok.type":     "A",
+				"labelgate.dns.ok.target":   "192.0.2.1",
+			})
+			if !hasErr(got, tt.key, tt.want) {
+				t.Errorf("errors = %v, want key %q containing %q", got.Errors, tt.key, tt.want)
+			}
+			if len(got.DNS) != 1 || got.DNS[0].Service != "ok" {
+				t.Errorf("valid service must survive a malformed sibling: %+v", got.DNS)
 			}
 		})
 	}

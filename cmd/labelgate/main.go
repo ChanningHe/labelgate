@@ -77,6 +77,9 @@ func (a *app) serve(cfg config.Config, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "labelgate: %v\n", err)
 		return exitFatal
 	}
+	// Packages that log through slog's default (store migrations) must honour
+	// log_format/log_level too.
+	slog.SetDefault(log)
 	log.Info("Starting labelgate", "version", version.Version, "mode", string(cfg.Mode))
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
