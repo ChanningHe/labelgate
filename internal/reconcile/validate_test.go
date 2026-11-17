@@ -79,6 +79,31 @@ func TestAgentWildcardClaimNeedsLiteralEntry(t *testing.T) {
 	}
 }
 
+// A CNAME to <tunnel>.cfargotunnel.com would route an agent hostname into
+// any tunnel, bypassing the tunnel allow-list.
+func TestAgentCannotCNAMEToTunnel(t *testing.T) {
+	for _, target := range []string{model.TunnelTarget(tunnelB), "X." + model.TunnelTarget(tunnelA) + ".", "CFArgoTunnel.com"} {
+		h := newHarness(t, func(s *Settings) {
+			s.Agents = func(string) AgentPolicy { return AgentPolicy{Allowed: true, Tunnels: []string{""}} }
+		})
+		spec := model.DNSSpec{Service: "c", Hostname: appHost, Type: model.DNSTypeCNAME, Target: target, Proxied: true, Cleanup: true}
+		h.st.setAgents(agentSnap("edge", h.clk.now(), ctr("web", dnsOnly(spec))))
+		h.cycle()
+		if rej := h.st.list(true); len(rej) != 1 || !strings.Contains(rej[0].LastError, "cfargotunnel.com") {
+			t.Fatalf("%s: rejected %+v", target, rej)
+		}
+		if len(h.records()) != 0 {
+			t.Fatalf("%s: record created", target)
+		}
+	}
+	// Local containers may still point CNAMEs at tunnels.
+	h := newHarness(t)
+	h.src.set(ctr("web", dnsOnly(model.DNSSpec{Service: "c", Hostname: appHost, Type: model.DNSTypeCNAME, Target: model.TunnelTarget(tunnelB), Proxied: true})))
+	if st := h.cycle(); st.State != SyncSuccess {
+		t.Fatalf("local status %+v", st)
+	}
+}
+
 func TestAgentServicesPolicyEndToEnd(t *testing.T) {
 	h := newHarness(t, func(s *Settings) {
 		s.Agents = func(string) AgentPolicy {

@@ -28,12 +28,28 @@ func hostnameAllowed(globs []string, host string) bool {
 	return false
 }
 
+// tunnelDomain is the zone of tunnel CNAME targets (<tunnel-id>.cfargotunnel.com).
+const tunnelDomain = "cfargotunnel.com"
+
+// agentDNSReject refuses agent CNAMEs into Cloudflare tunnels: tunnels are
+// only reachable through tunnel claims, which the tunnel allow-list governs.
+func agentDNSReject(c claim) string {
+	t := model.NormalizeHostname(c.Res.Content)
+	if c.Res.RecordType == model.DNSTypeCNAME && (t == tunnelDomain || strings.HasSuffix(t, "."+tunnelDomain)) {
+		return fmt.Sprintf("agent %s may not point a CNAME at %s (use a tunnel label)", c.Src.AgentID, tunnelDomain)
+	}
+	return ""
+}
+
 // agentReject returns the rejection reason for an agent-sourced DNS or tunnel
 // claim, or "" when the claim satisfies the agent's policy.
 func agentReject(c claim, allowedTunnels map[string]bool) string {
 	id := c.Src.AgentID
 	if !hostnameAllowed(c.Src.Policy.Hostnames, c.Res.Hostname) {
 		return fmt.Sprintf("agent %s may not claim hostname %s", id, c.Res.Hostname)
+	}
+	if c.Res.Kind == model.KindDNS {
+		return agentDNSReject(c)
 	}
 	if c.Res.Kind != model.KindTunnel {
 		return ""
