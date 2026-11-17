@@ -6,7 +6,7 @@ import './global.css';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { MantineProvider } from '@mantine/core';
-import { LazyMotion, MotionConfig, domAnimation } from 'framer-motion';
+import { LazyMotion, MotionConfig, domAnimation } from 'motion/react';
 import App from './App';
 import { theme, cssVariablesResolver } from './theme';
 

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { ApiError, UnauthorizedError, fetchAPI, verifyToken } from './client';
+import { ApiError, UnauthorizedError, fetchAPI, resolveApiBase, verifyToken } from './client';
 import { tokenStore } from './token';
 
 function respond(status: number, body: unknown = {}) {
@@ -83,5 +83,27 @@ describe('verifyToken', () => {
     fetchMock.mockReturnValue(respond(503));
 
     await expect(verifyToken('any')).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
+describe('resolveApiBase', () => {
+  function docWith(content: string | null) {
+    return {
+      querySelector: () => (content === null ? null : { getAttribute: () => content }),
+    } as unknown as Pick<Document, 'querySelector'>;
+  }
+
+  test.each([
+    ['no document', undefined, '/api'],
+    ['no meta tag', docWith(null), '/api'],
+    ['custom base path', docWith('/lg/api'), '/lg/api'],
+    ['trailing slash trimmed', docWith('/lg/api/'), '/lg/api'],
+    ['surrounding whitespace trimmed', docWith(' /v1 '), '/v1'],
+    ['relative value ignored', docWith('api'), '/api'],
+    ['protocol-relative value ignored', docWith('//evil.example/api'), '/api'],
+    ['empty value ignored', docWith(''), '/api'],
+    ['bare slash falls back', docWith('/'), '/api'],
+  ])('%s', (_name, doc, expected) => {
+    expect(resolveApiBase(doc)).toBe(expected);
   });
 });

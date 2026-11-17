@@ -1,11 +1,25 @@
 // API client for Labelgate dashboard.
 // In dev mode, Vite proxy forwards /api to the Go backend.
-// In production, the Go binary serves both /api and /dashboard.
+// In production, the Go binary serves both the API and /dashboard and tells the
+// page where the API lives via <meta name="labelgate-api-base" content="/api">
+// (it follows the server's api.base_path).
 
 import { liveStatus } from './liveStatus';
 import { tokenStore } from './token';
 
-const API_BASE = '/api';
+const DEFAULT_API_BASE = '/api';
+const API_BASE_META = 'meta[name="labelgate-api-base"]';
+
+// resolveApiBase returns the API base path advertised by the server in the
+// page's <meta> tag, normalized to an absolute path without a trailing slash.
+// Anything missing or malformed (e.g. the Vite dev server) falls back to /api.
+export function resolveApiBase(doc?: Pick<Document, 'querySelector'>): string {
+  const raw = doc?.querySelector(API_BASE_META)?.getAttribute('content')?.trim() ?? '';
+  if (!raw.startsWith('/') || raw.startsWith('//')) return DEFAULT_API_BASE;
+  return raw.replace(/\/+$/, '') || DEFAULT_API_BASE;
+}
+
+const API_BASE = resolveApiBase(typeof document === 'undefined' ? undefined : document);
 
 export class ApiError extends Error {
   readonly status: number;
@@ -91,7 +105,7 @@ export interface OverviewData {
   };
   sync: {
     last_sync: string;
-    status: 'success' | 'error';
+    status: 'pending' | 'success' | 'error';
     error: string;
   };
   cloudflare: {
@@ -104,9 +118,10 @@ export interface OverviewData {
   label_prefix: string;
 }
 
-// Mirrors storage.ResourceStatus. pending_cleanup is defined server-side but
-// not currently assigned; orphaned covers both cleanup on and off.
-export type ResourceStatus = 'active' | 'orphaned' | 'pending_cleanup' | 'deleted' | 'error';
+// Mirrors model.Status. pending: claimed but not yet applied; pending_cleanup:
+// no longer desired and waiting out remove_delay; orphaned: left in place
+// (cleanup disabled). 'deleted' is kept for old data and is never sent.
+export type ResourceStatus = 'pending' | 'active' | 'orphaned' | 'pending_cleanup' | 'deleted' | 'error';
 
 // Mirrors storage.ResourceType.
 export type StorageResourceType = 'dns' | 'tunnel_ingress' | 'access_app';
@@ -148,7 +163,7 @@ export interface ResourceListResponse {
   total: number;
 }
 
-// Mirrors agentResponse in internal/api/agents.go.
+// Mirrors api.AgentDTO in internal/api/dto.go.
 export interface AgentInfo {
   id: string;
   name?: string;

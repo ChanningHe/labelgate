@@ -1,4 +1,4 @@
-import { m } from 'framer-motion';
+import { m } from 'motion/react';
 import type { ReactNode } from 'react';
 
 // Enter-only transition: a short fade and lift when the route changes.
