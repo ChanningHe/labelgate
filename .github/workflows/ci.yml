@@ -9,32 +9,31 @@ on:
       - "dev/**"
 
 permissions:
-  packages: write
+  contents: read
 
 env:
   REGISTRY: ghcr.io
   IMAGE_BASE: ghcr.io/channinghe/labelgate
   # Pinned base images for reproducible builds
-  BASE_NONROOT: gcr.io/distroless/static-debian13:nonroot@sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329
-  BASE_DEBUG: gcr.io/distroless/static-debian13:debug-nonroot@sha256:12c2026b21e05857a4c730b4dbf812becf02b396cb7916166c8305f45f140ab0
+  BASE_NONROOT: gcr.io/distroless/static-debian13:nonroot@sha256:aafe993665bf6200db38a02c11a9351e782a84b6a45e7f33b6695638c88e3931
+  BASE_DEBUG: gcr.io/distroless/static-debian13:debug-nonroot@sha256:7df9fac2f5d3927260696af33fc2391da26366825838a47337088ed78f854a0c
 
 jobs:
   # Lint and tests run in parallel with the dashboard build; binaries wait for both.
   test:
     name: Test
     uses: ./.github/workflows/test.yml
-    # Top-level permissions grant only packages: write; the reusable workflow needs to read the repo.
-    permissions:
-      contents: read
 
   # Phase 1: Build dashboard frontend once (output is platform-independent)
   dashboard:
     name: Build Dashboard
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: yarn
@@ -46,7 +45,7 @@ jobs:
           yarn install --frozen-lockfile
           yarn build
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dashboard-static
           path: dashboard/static
@@ -65,16 +64,19 @@ jobs:
           - goos: linux
             goarch: arm64
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: dashboard-static
           path: dashboard/static
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
+          check-latest: false
 
       - name: Build binary
         env:
@@ -82,19 +84,19 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: |
-          BRANCH="${GITHUB_REF_NAME}"
-          BRANCH_SAFE=$(echo "$BRANCH" | tr '/' '-')
+          BRANCH_SAFE=$(printf '%s' "$GITHUB_REF_NAME" | tr -c 'A-Za-z0-9_.-' '-')
           SHORT_SHA=$(echo "$GITHUB_SHA" | cut -c1-7)
           VERSION="${BRANCH_SAFE}-${SHORT_SHA}"
-          go build \
+          BUILD_DATE=$(date -u -d "@$(git log -1 --format=%ct)" +%Y-%m-%dT%H:%M:%SZ)
+          go build -trimpath \
             -ldflags "-s -w \
               -X github.com/channinghe/labelgate/internal/version.Version=${VERSION} \
-              -X github.com/channinghe/labelgate/internal/version.Commit=${{ github.sha }} \
-              -X github.com/channinghe/labelgate/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            -o labelgate-${{ matrix.goos }}-${{ matrix.goarch }} \
+              -X github.com/channinghe/labelgate/internal/version.Commit=${GITHUB_SHA} \
+              -X github.com/channinghe/labelgate/internal/version.Date=${BUILD_DATE}" \
+            -o "labelgate-${GOOS}-${GOARCH}" \
             ./cmd/labelgate
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: labelgate-${{ matrix.goos }}-${{ matrix.goarch }}
           path: labelgate-${{ matrix.goos }}-${{ matrix.goarch }}
@@ -105,6 +107,10 @@ jobs:
     name: Docker${{ matrix.suffix }}
     runs-on: ubuntu-latest
     needs: binaries
+    # Only this job pushes images; everything that runs package-manager code stays read-only.
+    permissions:
+      contents: read
+      packages: write
     strategy:
       matrix:
         include:
@@ -113,20 +119,22 @@ jobs:
           - suffix: "-full"
             base_image_env: BASE_DEBUG
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: labelgate-linux-*
           path: docker-context
           merge-multiple: true
 
-      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
 
-      - uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Log in to GHCR
-        uses: docker/login-action@v4
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -134,13 +142,12 @@ jobs:
 
       - name: Generate tags
         id: tag
+        env:
+          SUFFIX: ${{ matrix.suffix }}
         run: |
-          BRANCH="${GITHUB_REF_NAME}"
-          BRANCH_SAFE=$(echo "$BRANCH" | tr '/' '-')
+          BRANCH_SAFE=$(printf '%s' "$GITHUB_REF_NAME" | tr -c 'A-Za-z0-9_.-' '-')
           SHORT_SHA=$(echo "$GITHUB_SHA" | cut -c1-7)
-          SHA_TAG="${BRANCH_SAFE}-${SHORT_SHA}${{ matrix.suffix }}"
-          BRANCH_TAG="${BRANCH_SAFE}${{ matrix.suffix }}"
-          echo "tags=${IMAGE_BASE}:${SHA_TAG},${IMAGE_BASE}:${BRANCH_TAG}" >> "$GITHUB_OUTPUT"
+          echo "tags=${IMAGE_BASE}:${BRANCH_SAFE}-${SHORT_SHA}${SUFFIX},${IMAGE_BASE}:${BRANCH_SAFE}${SUFFIX}" >> "$GITHUB_OUTPUT"
 
       - name: Set base image
         id: base
@@ -152,7 +159,7 @@ jobs:
           fi
 
       - name: Build and push
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: docker-context
           file: docker/ci.Dockerfile

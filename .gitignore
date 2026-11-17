@@ -1,6 +1,16 @@
 bin/
 dev/
 
+# local secrets (the example file stays tracked)
+.env
+*.env
+!.env.example
+
+# coverage
+coverage.out
+coverage.html
+*.coverprofile
+
 
 # docsite
 docsite/node_modules/
