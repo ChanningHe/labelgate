@@ -223,11 +223,11 @@ cloudflare:
   account_id: a1
 agent:
   enabled: true
-  accept_token: "ssssssssssssssssssssssssssssssss"
+  accept_token: "s0s1s2s3s4s5s6s7s8s9sasbscsdsesf"
   accept_hostnames: ["*.example.com"]
   agents:
     web-1:
-      token: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      token: "x0x1x2x3x4x5x6x7x8x9xaxbxcxdxexf"
       name: Web One
       default_tunnel: default
       tunnels: [default]
@@ -237,7 +237,7 @@ agent:
 `)
 	cfg := mustLoad(t, path, env("LABELGATE_AGENT_ACCEPT_TUNNELS", "default, t1 ,", "LABELGATE_AGENT_ACCEPT_SERVICES", "web, 10.0.0.0/8"))
 	a := cfg.Agent
-	if !a.Enabled || a.AcceptToken != strings.Repeat("s", 32) || !reflect.DeepEqual(a.AcceptHostnames, []string{"*.example.com"}) {
+	if !a.Enabled || a.AcceptToken != "s0s1s2s3s4s5s6s7s8s9sasbscsdsesf" || !reflect.DeepEqual(a.AcceptHostnames, []string{"*.example.com"}) {
 		t.Errorf("agent: %+v", a)
 	}
 	if !reflect.DeepEqual(a.AcceptTunnels, []string{"default", "t1"}) {
@@ -248,7 +248,7 @@ agent:
 	}
 	e := a.Agents["web-1"]
 	want := AgentEntry{
-		Token: strings.Repeat("x", 32), Name: "Web One", DefaultTunnel: "default", Tunnels: []string{"default"},
+		Token: "x0x1x2x3x4x5x6x7x8x9xaxbxcxdxexf", Name: "Web One", DefaultTunnel: "default", Tunnels: []string{"default"},
 		Hostnames: []string{"web.example.com"}, Services: []string{"web", "10.0.0.0/8"}, ConnectTo: "wss://web-1:8081/ws",
 	}
 	if !reflect.DeepEqual(e, want) {
@@ -259,7 +259,7 @@ agent:
 func TestLoad_AgentModeFromEnv(t *testing.T) {
 	cfg := mustLoad(t, "", env(
 		"LABELGATE_MODE", "agent",
-		"LABELGATE_CONNECT_TOKEN", strings.Repeat("t", 32),
+		"LABELGATE_CONNECT_TOKEN", "t0t1t2t3t4t5t6t7t8t9tatbtctdtetf",
 		"LABELGATE_CONNECT_ENDPOINT", "wss://main/ws",
 		"LABELGATE_CONNECT_HEARTBEAT_INTERVAL", "45s",
 		"LABELGATE_CONNECT_TLS_CA", "/ca.pem",

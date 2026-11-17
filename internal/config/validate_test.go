@@ -8,8 +8,8 @@ import (
 	"time"
 )
 
-// agentToken meets the 32-character minimum for agent tokens.
-var agentToken = strings.Repeat("k", MinAgentTokenLen)
+// agentToken meets the agent token rules (32 characters, 12 distinct).
+const agentToken = "3f9a1c7e5b2d8046af13ce97b5d20864"
 
 // validMain returns a valid main-mode config with a root credential and tunnel.
 func validMain() Config {
@@ -253,7 +253,13 @@ func TestValidate_AgentServer(t *testing.T) {
 		{"agent invalid id", base, func(c *Config) { entry(c, "Bad ID", AgentEntry{Token: agentToken}) }, "agent.agents.Bad ID", "invalid agent ID"},
 		{"agent empty token", base, func(c *Config) { entry(c, "web", AgentEntry{}) }, "agent.agents.web.token", "must not be empty"},
 		{"agent short token", base, func(c *Config) { entry(c, "web", AgentEntry{Token: strings.Repeat("a", MinAgentTokenLen-1)}) }, "agent.agents.web.token", "openssl rand -hex 32"},
-		{"agent multibyte token counts characters", base, func(c *Config) { entry(c, "web", AgentEntry{Token: strings.Repeat("é", MinAgentTokenLen)}) }, "", ""},
+		{"agent multibyte token counts characters", base, func(c *Config) {
+			entry(c, "web", AgentEntry{Token: strings.Repeat("àáâãäåæçèéêëìíîï", 2)})
+		}, "", ""},
+		{"agent low-variety token", base, func(c *Config) { entry(c, "web", AgentEntry{Token: strings.Repeat("ab", 16)}) }, "agent.agents.web.token", "distinct"},
+		{"agent token 11 distinct", base, func(c *Config) { entry(c, "web", AgentEntry{Token: strings.Repeat("0123456789a", 3)}) }, "agent.agents.web.token", "at least 12 distinct"},
+		{"agent token 12 distinct ok", base, func(c *Config) { entry(c, "web", AgentEntry{Token: strings.Repeat("0123456789ab", 3)}) }, "", ""},
+		{"accept token low-variety", base, func(c *Config) { c.Agent.AcceptToken = strings.Repeat("k", 40) }, "agent.accept_token", "distinct"},
 		{"short accept token", base, func(c *Config) { c.Agent.AcceptToken = "shared" }, "agent.accept_token", "openssl rand -hex 32"},
 		{"accept token ok", base, func(c *Config) { c.Agent.AcceptToken = agentToken }, "", ""},
 		{"agent dotted id ok", base, func(c *Config) { entry(c, "nas.lan", AgentEntry{Token: agentToken}) }, "", ""},
@@ -288,6 +294,7 @@ func TestValidate_AgentMode(t *testing.T) {
 	runValidateCases(t, []validateCase{
 		{"empty token", a, func(c *Config) { c.Connect.Token = "" }, "connect.token", "must not be empty"},
 		{"short token", a, func(c *Config) { c.Connect.Token = "tok" }, "connect.token", "openssl rand -hex 32"},
+		{"low-variety token", a, func(c *Config) { c.Connect.Token = strings.Repeat("0123", 10) }, "connect.token", "openssl rand -hex 32"},
 		{"outbound missing endpoint", a, func(c *Config) { c.Connect.Endpoint = "" }, "connect.endpoint", "required"},
 		{"outbound http endpoint", a, func(c *Config) { c.Connect.Endpoint = "https://main/ws" }, "connect.endpoint", "ws:// or wss://"},
 		{"outbound ws ok", a, func(c *Config) { c.Connect.Endpoint = "ws://main:8081/ws" }, "", ""},

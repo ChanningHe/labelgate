@@ -27,6 +27,9 @@ const (
 	// agent.accept_token, connect.token). Tokens are guessable offline from a
 	// captured handshake, so they must carry real entropy.
 	MinAgentTokenLen = 32
+	// MinAgentTokenDistinct is the smallest number of distinct characters in
+	// an agent token: rejects repeated or patterned placeholders.
+	MinAgentTokenDistinct = 12
 	// MinAPITokenLen is the smallest allowed api.token.
 	MinAPITokenLen = 16
 
@@ -61,8 +64,9 @@ func fail(field, format string, args ...any) error {
 //     and agent entries (IDs, tokens, connect_to, globs, tunnel references,
 //     services allow-lists: CIDR, IP or hostname glob, no inet_aton forms).
 //     Tokens: api.token >= MinAPITokenLen when set (enabled API); named agent
-//     tokens and agent.accept_token (when set) >= MinAgentTokenLen.
-//   - agent mode: connect.token >= MinAgentTokenLen, outbound needs a ws(s):// endpoint,
+//     tokens and agent.accept_token (when set) >= MinAgentTokenLen characters
+//     with >= MinAgentTokenDistinct distinct characters.
+//   - agent mode: connect.token like agent tokens, outbound needs a ws(s):// endpoint,
 //     inbound needs connect.listen, connect.agent_id valid when set,
 //     heartbeat_interval >= 1s.
 func Validate(cfg Config) error {
@@ -416,9 +420,26 @@ func checkTokenLen(field, token string, minLen int, optional bool) error {
 	return nil
 }
 
+// checkAgentToken enforces length and character variety of an agent token
+// (an HMAC key that a captured handshake lets attackers brute-force offline).
+func checkAgentToken(field, token string, optional bool) error {
+	if err := checkTokenLen(field, token, MinAgentTokenLen, optional); err != nil || token == "" {
+		return err
+	}
+	distinct := map[rune]bool{}
+	for _, r := range token {
+		distinct[r] = true
+	}
+	if len(distinct) < MinAgentTokenDistinct {
+		return fail(field, "must contain at least %d distinct characters, got %d (generate one with: openssl rand -hex 32)",
+			MinAgentTokenDistinct, len(distinct))
+	}
+	return nil
+}
+
 func checkAgentServer(cfg Config) error {
 	a := cfg.Agent
-	if err := checkTokenLen("agent.accept_token", a.AcceptToken, MinAgentTokenLen, true); err != nil {
+	if err := checkAgentToken("agent.accept_token", a.AcceptToken, true); err != nil {
 		return err
 	}
 	if err := checkTLSPair("agent.tls", a.TLS); err != nil {
@@ -454,7 +475,7 @@ func checkAgentEntry(cf CloudflareConfig, id string, e AgentEntry) error {
 	if strings.TrimSpace(e.Token) == "" {
 		return fail(field+".token", "must not be empty")
 	}
-	if err := checkTokenLen(field+".token", e.Token, MinAgentTokenLen, false); err != nil {
+	if err := checkAgentToken(field+".token", e.Token, false); err != nil {
 		return err
 	}
 	if e.ConnectTo != "" {
@@ -492,7 +513,7 @@ func checkConnect(cfg Config) error {
 	case c.HeartbeatInterval < MinHeartbeatInterval:
 		return fail("connect.heartbeat_interval", "must be >= %s, got %s", MinHeartbeatInterval, c.HeartbeatInterval)
 	}
-	if err := checkTokenLen("connect.token", c.Token, MinAgentTokenLen, false); err != nil {
+	if err := checkAgentToken("connect.token", c.Token, false); err != nil {
 		return err
 	}
 	if err := checkTLSPair("connect.tls", c.TLS); err != nil {
