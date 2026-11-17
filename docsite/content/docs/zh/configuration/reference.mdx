@@ -165,7 +165,7 @@ Labelgate 只会删除**它自己拥有**的 Cloudflare 资源（参见[所有�
 | `LABELGATE_AGENT_TLS_CA` | `agent.tls.ca` | 系统根证书 | main 拨号 inbound agent 时用来校验对端的 CA |
 | `LABELGATE_AGENT_TLS_INSECURE_SKIP_VERIFY` | `agent.tls.insecure_skip_verify` | `false` | 拨号 inbound agent 时跳过证书校验。**不推荐**，启动时会输出警告 |
 
-### 单个 agent 条目（`agent.agents.<id>`，仅配置文件）
+### 单个 agent 条目（`agent.agents.<id>`，仅配置文件） [#per-agent-entries]
 
 map 的键就是 agent ID，必须匹配 `^[a-z0-9][a-z0-9._-]{0,62}$`（小写字母、数字、`.`、`_` 和 `-`）。
 

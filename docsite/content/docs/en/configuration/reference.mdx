@@ -165,7 +165,7 @@ See [Multi-Host](/docs/examples/multi-host) for how these fit together.
 | `LABELGATE_AGENT_TLS_CA` | `agent.tls.ca` | system roots | CA used to verify inbound agents when the main dials them |
 | `LABELGATE_AGENT_TLS_INSECURE_SKIP_VERIFY` | `agent.tls.insecure_skip_verify` | `false` | Skip certificate verification when dialing inbound agents. **Not recommended**; logs a warning at startup |
 
-### Per-agent entries (`agent.agents.<id>`, config file only)
+### Per-agent entries (`agent.agents.<id>`, config file only) [#per-agent-entries]
 
 The map key is the agent ID and must match `^[a-z0-9][a-z0-9._-]{0,62}$` (lower-case letters, digits, `.`, `_` and `-`).
 

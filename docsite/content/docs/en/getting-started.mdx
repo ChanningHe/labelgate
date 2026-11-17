@@ -58,7 +58,7 @@ TUNNEL_TOKEN=your-tunnel-token
 If you don't have a Tunnel yet, you can create one in the [Cloudflare Dashboard > Zero Trust > Networks > Tunnels](https://one.dash.cloudflare.com/).
 </Callout>
 
-### 2. Create docker-compose.yaml
+### 2. Create docker-compose.yaml [#create-compose]
 
 ```yaml
 services:
@@ -108,7 +108,8 @@ services:
 # This allows your Cloudflare tunnel to connect to services via their container_name within the "cloudflared-network" bridge, eliminating the need for port mapping.
 # Consolidating all public services into a single network ensures they remain isolated from private services.
 networks:
-  default:
+  cloudflared-network:
+    # Fixed name, so that other Compose projects can join it as an external network
     name: cloudflared-network
 ```
 
@@ -171,9 +172,12 @@ If you only need DNS record management (no tunnels), it's even simpler:
 services:
   labelgate:
     image: ghcr.io/channinghe/labelgate:v0.3
+    restart: unless-stopped
+    group_add:
+      - "REPLACE_WITH_GROUP_ID"   # stat -c '%g' /var/run/docker.sock
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./labelgate-data:/app/config
+      - ./labelgate-data:/app/config   # sudo chown -R 65532:65532 ./labelgate-data
     environment:
       - LABELGATE_CLOUDFLARE_API_TOKEN
       - LABELGATE_API_TOKEN
