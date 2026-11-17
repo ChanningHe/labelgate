@@ -42,9 +42,9 @@ labels:
 
 **问题：** 同步状态为 `error`，日志中带有容器名和键的标签错误。
 
-**原因：** 标签会被严格校验：非法的值（`proxied: "maybe"`、`ttl: "abc"`）会丢弃服务，未知的属性（`hostnme`）会报错。
+**原因：** 标签会被严格校验：非法的值（`proxied: "maybe"`、`ttl: "abc"`）会丢弃服务，未知的属性（`hostnme`）会报错。Labelgate 之前为被丢弃的服务创建的资源会被保留而不是删除，并显示 `label error: ...`，直到你修好标签。
 
-**解决方案：** 修正日志中指出的标签；参见[严格校验](/zh/docs/labels#strict-validation)。
+**解决方案：** 修正日志中指出的标签；参见[严格校验](/zh/docs/labels#strict-validation)。如果某个服务消失了却没有任何报错，请检查键的结构：不是 `labelgate.<type>.<service>.<property>` 形式的键会被静默忽略。
 
 ## Dashboard 或 API 无法访问
 
@@ -56,9 +56,9 @@ labels:
 
 ## Zone 未找到
 
-**问题：** `zone not found for hostname: app.example.com`
+**问题：** 服务显示 `zone for app.example.com: app.example.com: no matching zone`。
 
-**原因：** API token 无权访问包含您的主机名的 zone。
+**原因：** 没有任何凭据能看到包含您的主机名的 zone，或者 `credential` 标签指向的 token 看不到它。每个凭据的 zone 列表会被缓存；查找未命中时 Labelgate 会重新拉取，但每分钟最多一次，所以刚添加的 zone 可能需要一分钟才会出现。
 
 **解决方案：**
 1. 在 [Cloudflare Dashboard > API Tokens](https://dash.cloudflare.com/profile/api-tokens) 中检查您的 API token 权限
@@ -85,9 +85,9 @@ labels:
 
 ## 公共 IP 检测失败
 
-**问题：** 带有 `target=auto` 的 DNS 记录未被创建。
+**问题：** 带有 `target=auto` 的 DNS 记录未被创建，服务显示 `public IPv4 address: publicip: ...`（或 `IPv6`）。
 
-**原因：** Labelgate 未能检测到主机的公共 IP 地址。
+**原因：** Labelgate 未能检测到主机的公共 IP 地址。它会请求 `api.ipify.org` 和 `ipv4.icanhazip.com`（`AAAA` 则是 `api6.ipify.org` 和 `ipv6.icanhazip.com`）。对于 agent 上的容器，使用 agent 自己上报的地址（`agent <id> reported no public IPv4 address`）。
 
 **解决方案：**
 - 检查 Labelgate 容器的互联网连接
@@ -103,12 +103,12 @@ labels:
 
 ## API 速率限制
 
-**问题：** 日志中出现 `API rate limit reached` 错误。
+**问题：** 日志或资源的 `last_error` 中出现 HTTP 状态码 429 的 Cloudflare 错误。
 
-**原因：** Cloudflare API 的限制为每 5 分钟 1200 个请求。超过限制会导致 5 分钟封禁。
+**原因：** Cloudflare 将 API 限制为每 5 分钟 1200 个请求。超过限制会导致 5 分钟封禁。
 
 **解决方案：**
-- Labelgate 会自动使用指数退避重试
+- Labelgate 会对 429 和 5xx 响应自动使用指数退避重试（`retry.*`），并遵循 `Retry-After`，下一个周期还会再试
 - 如果经常达到限制，减少托管资源的数量
 - 避免同时快速重启多个容器
 - 增大间隔以减少协调频率（每个周期都会列出每个被引用 zone 的 DNS 记录、每个 tunnel 的配置，以及每个账户的 Access 应用和策略）：
@@ -186,7 +186,7 @@ labels:
 
 **问题：** Agent 的某个服务显示错误，例如主机名或 tunnel 不被允许，或服务地址被拒绝。
 
-**原因：** 声明违反了该 agent 的允许列表（`hostnames`、`tunnels`，或 `accept_hostnames` / `accept_tunnels`），或者 tunnel 的 `service` 指向了 `localhost`、回环地址、链路本地地址或 unix socket（SSRF 防护）。
+**原因：** 声明违反了该 agent 的允许列表（`hostnames`、`tunnels`，或 `accept_hostnames` / `accept_tunnels`），或者 tunnel 的 `service` 指向了 `localhost`、回环地址、链路本地地址、unix socket 或 `bastion`（SSRF 防护）。保存的原因形如 `agent <id> may not claim hostname <host>`、`agent <id> may not use tunnel <ref>`，对于 SSRF 防护则形如 `service host "localhost" is not allowed for agents`。
 
 **解决方案：** 在 main 实例上调整该 agent 的条目，或者使用 agent 主机上可路由地址对外暴露的服务地址。
 
@@ -229,6 +229,6 @@ services:
 
 ## 数据库不可写
 
-**问题：** `unable to open database file`，或迁移备份失败。
+**问题：** Labelgate 以 `open store "/app/config/labelgate.db": ...`（例如 `unable to open database file`）退出，或迁移备份失败。
 
-**解决方案：** 镜像以非 root 用户（UID 65532）运行。请让数据目录对它可写：`sudo chown -R 65532:65532 ./labelgate-data`。从 v0.2 升级时，目录还需要有足够空间存放 `labelgate.db.v0.2.bak` 备份。
+**解决方案：** 镜像以非 root 用户（UID 65532）运行。请让数据目录对它可写：`sudo chown -R 65532:65532 ./labelgate-data`。Docker 命名卷创建时属于 root，需要同样处理（或者使用 `user: root`）。从 v0.2 升级时，目录还需要有足够空间存放 `labelgate.db.v0.2.bak` 备份。
