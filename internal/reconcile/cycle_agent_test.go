@@ -250,6 +250,22 @@ func TestLabelErrorHoldsResources(t *testing.T) {
 	}
 }
 
+// An unknown property in a defaults block drops nothing: it must not hold
+// (or flag) the rows of that type.
+func TestUnknownDefaultsPropertyDoesNotHold(t *testing.T) {
+	h := newHarness(t, func(s *Settings) { s.RemoveDelay = 0 })
+	keep, gone := dnsSpec("web", appHost), dnsSpec("api", "api.example.com")
+	h.src.set(ctr("web", dnsOnly(keep, gone)))
+	h.cycle()
+	h.src.set(ctr("web", model.ParsedLabels{
+		DNS:    []model.DNSSpec{keep},
+		Errors: []model.LabelError{{Key: "labelgate.dns.default.bogus", Message: `unknown property "bogus"`, Unknown: true}},
+	}))
+	h.cycle()
+	wantStatus(t, h.row(model.KindDNS, appKey), model.StatusActive)
+	h.noRow(model.KindDNS, model.DNSKey("api.example.com", model.DNSTypeA, "")) // removed service cleaned up
+}
+
 func TestLabelErrorScope(t *testing.T) {
 	h := newHarness(t, func(s *Settings) { s.RemoveDelay = 0 })
 	other := dnsSpec("api", "api.example.com")

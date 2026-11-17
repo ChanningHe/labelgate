@@ -19,6 +19,11 @@ func (c *collector) add(key, format string, args ...any) {
 	c.errs = append(c.errs, model.LabelError{Key: key, Message: fmt.Sprintf(format, args...)})
 }
 
+// addUnknown reports an unknown property (nothing was dropped because of it).
+func (c *collector) addUnknown(key, name string) {
+	c.errs = append(c.errs, model.LabelError{Key: key, Message: fmt.Sprintf("unknown property %q", name), Unknown: true})
+}
+
 // sorted returns the errors ordered by key, then message, without duplicates.
 func (c *collector) sorted() []model.LabelError {
 	if len(c.errs) == 0 {

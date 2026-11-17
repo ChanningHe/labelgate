@@ -141,7 +141,7 @@ type labelHold struct {
 // service, a defaults block or an access definition.
 func holdFor(prefix, agentID, ctr string, pl model.ParsedLabels, e model.LabelError) (labelHold, bool) {
 	rest, ok := strings.CutPrefix(e.Key, prefix+".")
-	if !ok {
+	if !ok || e.Unknown { // an unknown property drops nothing
 		return labelHold{}, false
 	}
 	parts := strings.SplitN(rest, ".", 3)

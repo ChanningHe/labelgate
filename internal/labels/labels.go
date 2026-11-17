@@ -153,7 +153,7 @@ func (p *parser) applyProps(stem string, in props, allowed func(string) bool, ap
 		}
 		switch {
 		case !known:
-			p.errs.add(stem+"."+name, "unknown property %q", name)
+			p.errs.addUnknown(stem+"."+name, name)
 		case err != nil:
 			p.errs.add(stem+"."+name, "%v", err)
 			valueErr = true
