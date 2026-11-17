@@ -32,6 +32,7 @@ type AgentPolicy struct {
 	// via accept_token: their snapshots are ignored (resources orphan normally).
 	Allowed bool
 	// Hostnames is a glob allow-list (path.Match on normalized hostnames). Empty = unrestricted.
+	// Wildcard hostnames ("*.x") are allowed only by an entry equal to them.
 	Hostnames []string
 	// Tunnels lists allowed tunnel references (resolved via cloudflare.API.ResolveTunnel).
 	Tunnels []string

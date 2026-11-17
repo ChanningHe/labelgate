@@ -63,6 +63,22 @@ func TestAgentServiceAllowList(t *testing.T) {
 	}
 }
 
+func TestAgentWildcardClaimNeedsLiteralEntry(t *testing.T) {
+	for _, globs := range [][]string{nil, {"*"}, {"*.com"}} {
+		h := newHarness(t, func(s *Settings) {
+			s.Agents = func(string) AgentPolicy { return AgentPolicy{Allowed: true, Tunnels: []string{""}, Hostnames: globs} }
+		})
+		h.st.setAgents(agentSnap("edge", h.clk.now(), ctr("web", dnsOnly(dnsSpec("web", "*.example.com")))))
+		h.cycle()
+		if rej := h.st.list(true); len(rej) != 1 || !strings.Contains(rej[0].LastError, "may not claim hostname") {
+			t.Fatalf("%v: rejected %+v", globs, rej)
+		}
+		if len(h.records()) != 0 {
+			t.Fatalf("%v: wildcard record created", globs)
+		}
+	}
+}
+
 func TestAgentServicesPolicyEndToEnd(t *testing.T) {
 	h := newHarness(t, func(s *Settings) {
 		s.Agents = func(string) AgentPolicy {

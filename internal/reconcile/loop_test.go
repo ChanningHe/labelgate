@@ -233,6 +233,14 @@ func TestHostnameAllowed(t *testing.T) {
 		{[]string{"*.Example.com"}, "a.b.example.com", true},
 		{[]string{"app.example.com"}, "api.example.com", false},
 		{[]string{"[bad"}, "x", false},
+		// Wildcard hostnames need an exact literal entry, never a glob match.
+		{nil, "*.example.com", false},
+		{[]string{"*"}, "*.example.com", false},
+		{[]string{"*.com"}, "*.example.com", false},
+		{[]string{"?.example.com"}, "*.example.com", false},
+		{[]string{"*.*.com"}, "*.example.com", false},
+		{[]string{"x.example.com", " *.Example.com "}, "*.example.com", true},
+		{[]string{"*.example.com"}, "*.a.example.com", false},
 	}
 	for _, tc := range tests {
 		if got := hostnameAllowed(tc.globs, tc.host); got != tc.want {

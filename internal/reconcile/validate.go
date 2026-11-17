@@ -3,14 +3,20 @@ package reconcile
 import (
 	"fmt"
 	"path"
+	"slices"
 	"strings"
 
 	"github.com/channinghe/labelgate/internal/model"
 )
 
 // hostnameAllowed reports whether host matches one of the globs (path.Match
-// on lower-case names). An empty list allows every hostname.
+// on lower-case names). An empty list allows every hostname except
+// wildcards: a wildcard hostname ("*.x") is allowed only by an entry equal
+// to it, never by a glob match or an unrestricted list.
 func hostnameAllowed(globs []string, host string) bool {
+	if strings.HasPrefix(host, "*") {
+		return slices.ContainsFunc(globs, func(g string) bool { return strings.ToLower(strings.TrimSpace(g)) == host })
+	}
 	if len(globs) == 0 {
 		return true
 	}
