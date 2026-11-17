@@ -1,27 +1,32 @@
 ---
-title: 配置概述
-description: 了解配置 Labelgate 的不同方式。
+title: 配置概览
+description: 了解配置 Labelgate 的几种方式。
 ---
 
-Labelgate 支持三种配置模式。所有选项遵循统一的命名规范 — 完整列表请查看[配置参考](/zh/docs/configuration/reference)。
+Labelgate 支持三种配置方式。所有选项都遵循相同的命名规则，完整列表请参阅[配置参考](/zh/docs/configuration/reference)。
 
-## 配置模式
+<Callout type="warn">
+配置解析是严格的：未知的键和非法的值会让 Labelgate 在启动时失败，并指出有问题的键。v0.3 中已移除的配置项同样会被拒绝，参见[已移除的配置项](/zh/docs/configuration/reference#removed-keys)。
+</Callout>
 
-### 1. 仅环境变量（推荐用于简单设置）
+## 配置方式
 
-无需配置文件。使用 `LABELGATE_` 前缀设置环境变量：
+### 1. 仅使用环境变量（适合简单场景，推荐） [#1-environment-variables]
+
+无需配置文件，直接设置带有 `LABELGATE_` 前缀的环境变量：
 
 ```bash
 LABELGATE_CLOUDFLARE_API_TOKEN=your-token
 LABELGATE_CLOUDFLARE_ACCOUNT_ID=your-account-id
 LABELGATE_CLOUDFLARE_TUNNEL_ID=your-tunnel-id
+LABELGATE_API_TOKEN=a-long-random-string
 ```
 
-这是最简单的方法，在[快速开始](/zh/docs/getting-started)指南中使用。
+这是最简单的方式，[快速开始](/zh/docs/getting-started)中使用的就是这种方式。
 
-### 2. 配置文件
+### 2. 配置文件 [#2-config-file]
 
-使用 YAML 配置文件进行更复杂的设置（例如，多凭证、多隧道）。
+对于更复杂的场景（多凭据、多 tunnel、命名 agent 等），请使用配置文件。支持 YAML、JSON 和 TOML，仓库的 `configs/` 目录中有现成的示例。
 
 ```yaml
 # labelgate.yaml
@@ -31,32 +36,36 @@ cloudflare:
   tunnel_id: your-tunnel-id
 ```
 
-通过 `LABELGATE_CONFIG` 环境变量指定配置文件路径：
+配置文件按以下顺序查找：
 
-```bash
-LABELGATE_CONFIG=/path/to/labelgate.yaml
-```
+1. 命令行参数 `-c` / `--config`（`labelgate -c /path/to/labelgate.yaml`）
+2. 环境变量 `LABELGATE_CONFIG`
+3. `./labelgate.{yaml,yml,json,toml}`
+4. `/etc/labelgate/labelgate.{yaml,yml,json,toml}`
 
-如果未设置 `LABELGATE_CONFIG`，Labelgate 也会自动查找 `./labelgate.yaml` 和 `/etc/labelgate/labelgate.yaml`。
+默认搜索路径中找不到文件是正常的；但如果你显式指定了文件（参数或 `LABELGATE_CONFIG`）而它不存在，就会报错。
 
-### 3. 混合模式
+### 3. 混合模式 [#3-hybrid-mode]
 
-结合两者：使用配置文件存放非敏感设置，通过环境变量传入密钥。
+两者结合：用配置文件保存非敏感设置，用环境变量传入敏感信息。
 
 **优先级：环境变量 > 配置文件 > 默认值**
 
 ```yaml
-# labelgate.yaml - 非敏感配置
+# labelgate.yaml - 保存非敏感设置
 cloudflare:
   account_id: your-account-id
   tunnel_id: your-tunnel-id
 ```
 
 ```bash
-# 密钥通过环境变量传入（会覆盖配置文件中的对应值）
+# 敏感信息通过环境变量传入（会覆盖配置文件中的值）
 LABELGATE_CLOUDFLARE_API_TOKEN=your-token
+LABELGATE_API_TOKEN=a-long-random-string
 ```
 
 ## 下一步
 
-- [配置参考](/zh/docs/configuration/reference) - 完整的配置项列表、命名规范及多凭证设置
+- [配置参考](/zh/docs/configuration/reference) - 所有选项、默认值、已移除配置项和多凭据配置的完整列表
+- [所有权与冲突](/zh/docs/ownership) - Labelgate 会动和不会动 Cloudflare 上的哪些资源
+- [升级到 v0.3](/zh/docs/upgrading) - 自 v0.2 以来的不兼容变更
