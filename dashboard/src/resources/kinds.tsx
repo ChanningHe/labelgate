@@ -144,7 +144,7 @@ const tunnel: ResourceKind = {
           extra={
             <>
               {r.path && <Chip>{r.path}</Chip>}
-              <OpenAction hostname={r.hostname} />
+              <OpenAction hostname={r.hostname} path={r.path} />
             </>
           }
         />

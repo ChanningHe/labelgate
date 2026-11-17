@@ -54,7 +54,9 @@ Agent 不持有任何 Cloudflare 凭据。它们只发送容器和公网 IP 的�
 
 token 本身**永远不会在网络上传输**，所以即使有人连上 inbound agent 的端口，也得不到任何信息，agent 也不会向对方发送任何数据。连接方向（outbound 或 inbound）被绑定进 HMAC，因此会话无法从一个方向被中继到另一个方向。token 使用常量时间比较，并且不会写入日志。未知的 agent ID 与错误的 token 返回完全相同的 `unauthorized` 错误。
 
-如果已经有相同 ID 的 agent 在线，新的连接会在认证之后被拒绝（`duplicate_agent`），已有的会话不受影响。Agent ID 必须匹配 `^[a-z0-9][a-z0-9_-]{0,62}$`。如果没有设置 `connect.agent_id`，则取 `/etc/machine-id` 的前 12 位十六进制字符，再退而取清洗后的主机名。
+如果已经有相同 ID 的 agent 在线，新的连接会在认证之后被拒绝（`duplicate_agent`），已有的会话不受影响。Agent ID 必须匹配 `^[a-z0-9][a-z0-9._-]{0,62}$`（小写，允许包含点）。如果没有设置 `connect.agent_id`，则取 `/etc/machine-id` 的前 12 位十六进制字符，再退而取转为小写并清洗后的主机名。
+
+token 必须至少 32 个字符（`openssl rand -hex 32`）。token 不会在网络上传输，但截获的握手可以被离线攻击，弱 token 是可以被猜出来的；高熵才是它的保护。
 
 ## 命名 agent 与共享 token agent
 

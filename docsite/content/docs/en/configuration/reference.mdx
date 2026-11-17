@@ -97,14 +97,14 @@ The database stores the instance ID, ownership records and agent state. Back it 
 |---------------------|------------------|---------|-------------|
 | `LABELGATE_API_ENABLED` | `api.enabled` | `true` | Enable the HTTP API and dashboard |
 | `LABELGATE_API_ADDRESS` | `api.address` | `:8080` | Listen address |
-| `LABELGATE_API_BASE_PATH` | `api.base_path` | `/api` | API base path. Must start with `/`, no trailing `/`, and must not be `/dashboard` |
-| `LABELGATE_API_TOKEN` | `api.token` | - | Bearer token. **Required**: if empty, the API **and** the dashboard are disabled |
+| `LABELGATE_API_BASE_PATH` | `api.base_path` | `/api` | API base path. Must start with `/`, no trailing `/`, and must not be `/dashboard`. The dashboard follows it automatically |
+| `LABELGATE_API_TOKEN` | `api.token` | - | Bearer token, at least 16 characters. **Required**: if empty, the API **and** the dashboard are disabled |
 
 <Callout type="warn">
-**`api.token` is mandatory.** Without it Labelgate logs a loud error, keeps reconciling, and serves **neither** the API **nor** the dashboard. There is no unauthenticated mode. Use a long random value (`openssl rand -hex 32`) and prefer passing it through `LABELGATE_API_TOKEN`.
+**`api.token` is mandatory.** Without it Labelgate logs a loud error, keeps reconciling, and serves **neither** the API **nor** the dashboard. There is no unauthenticated mode. It must be at least 16 characters; use a long random value (`openssl rand -hex 32`) and prefer passing it through `LABELGATE_API_TOKEN`.
 </Callout>
 
-All endpoints except `GET {base_path}/health` require `Authorization: Bearer <token>`. The dashboard is served at `/dashboard/` and reads the API base path from the server, so a custom `api.base_path` works. Even with a token, do not expose the port to the public internet; put it behind a VPN, a reverse proxy with TLS, or a Cloudflare Access application.
+All endpoints except `GET {base_path}/health` require `Authorization: Bearer <token>`. The dashboard is served at `/dashboard/`. The server injects a `<meta name="labelgate-api-base">` tag into the dashboard's `index.html` carrying the configured `api.base_path`, so the dashboard picks up a custom base path automatically and needs no build-time or client-side setting. Even with a token, do not expose the port to the public internet; put it behind a VPN, a reverse proxy with TLS, or a Cloudflare Access application.
 
 ### Endpoints
 
@@ -148,7 +148,7 @@ See [Multi-Host](/docs/examples/multi-host) for how these fit together.
 |---------------------|------------------|---------|-------------|
 | `LABELGATE_AGENT_ENABLED` | `agent.enabled` | `false` | Start the agent WebSocket listener and dial inbound agents |
 | `LABELGATE_AGENT_LISTEN` | `agent.listen` | `:8081` | Listen address. Agents connect to `<scheme>://<host>:8081/ws` |
-| `LABELGATE_AGENT_ACCEPT_TOKEN` | `agent.accept_token` | - | Shared token accepted from agents that are **not** listed under `agent.agents` |
+| `LABELGATE_AGENT_ACCEPT_TOKEN` | `agent.accept_token` | - | Shared token accepted from agents that are **not** listed under `agent.agents`. At least 32 characters when set |
 | `LABELGATE_AGENT_ACCEPT_HOSTNAMES` | `agent.accept_hostnames` | - | Glob list limiting the hostnames `accept_token` agents may claim. Empty = unrestricted |
 | `LABELGATE_AGENT_ACCEPT_TUNNELS` | `agent.accept_tunnels` | - | Tunnels `accept_token` agents may target. Empty = only the default tunnel |
 | `LABELGATE_AGENT_TLS_CERT` | `agent.tls.cert` | - | Server certificate of the agent listener (enables `wss://`) |
@@ -158,16 +158,24 @@ See [Multi-Host](/docs/examples/multi-host) for how these fit together.
 
 ### Per-agent entries (`agent.agents.<id>`, config file only)
 
-The map key is the agent ID and must match `^[a-z0-9][a-z0-9_-]{0,62}$`.
+The map key is the agent ID and must match `^[a-z0-9][a-z0-9._-]{0,62}$` (lower-case letters, digits, `.`, `_` and `-`; dots are allowed, e.g. `nas.lan`).
 
 | Key | Required | Description |
 |-----|----------|-------------|
-| `token` | Yes | Per-agent shared secret (non-empty) |
+| `token` | Yes | Per-agent shared secret, at least 32 characters (see [Agent tokens](#agent-tokens)) |
 | `name` | No | Display name shown in the dashboard |
 | `default_tunnel` | No | Tunnel used when this agent's labels omit `tunnel`. Empty = global default |
 | `tunnels` | No | Tunnels this agent may target. Empty = only its default tunnel |
 | `hostnames` | No | Glob list of hostnames this agent may claim. Empty = unrestricted |
 | `connect_to` | No | `ws://` or `wss://` URL, including `/ws`. Enables [inbound mode](/docs/examples/multi-host#inbound-mode-example) for this agent |
+
+### Agent tokens
+
+Every agent token (`agent.agents.<id>.token`, `agent.accept_token` and `connect.token`) must be **at least 32 characters**, and `api.token` at least 16. Labelgate refuses to start otherwise. The token is never sent on the wire, but anyone who captures a handshake can try guesses against it offline, so the token needs high entropy. Generate one with:
+
+```bash
+openssl rand -hex 32
+```
 
 ## Agent Connection (Agent Instance)
 
@@ -176,8 +184,8 @@ The map key is the agent ID and must match `^[a-z0-9][a-z0-9_-]{0,62}$`.
 | `LABELGATE_CONNECT_MODE` | `connect.mode` | `outbound` | `outbound` (agent dials main) or `inbound` (main dials agent) |
 | `LABELGATE_CONNECT_ENDPOINT` | `connect.endpoint` | - | Main instance URL, e.g. `wss://main.example.com:8081/ws`. Required for outbound. **The `/ws` path is required** |
 | `LABELGATE_CONNECT_LISTEN` | `connect.listen` | - | Listen address. Required for inbound |
-| `LABELGATE_CONNECT_TOKEN` | `connect.token` | - | Authentication token **(required)** |
-| `LABELGATE_CONNECT_AGENT_ID` | `connect.agent_id` | First 12 hex chars of `/etc/machine-id`, else sanitized hostname | Agent identifier, `^[a-z0-9][a-z0-9_-]{0,62}$` |
+| `LABELGATE_CONNECT_TOKEN` | `connect.token` | - | Authentication token, at least 32 characters **(required)** |
+| `LABELGATE_CONNECT_AGENT_ID` | `connect.agent_id` | First 12 hex chars of `/etc/machine-id`, else the hostname lower-cased and sanitized | Agent identifier, `^[a-z0-9][a-z0-9._-]{0,62}$`. Dots are allowed; upper-case is not |
 | `LABELGATE_CONNECT_HEARTBEAT_INTERVAL` | `connect.heartbeat_interval` | `30s` | Period of full state reports (>= 1s) |
 | `LABELGATE_CONNECT_TLS_CA` | `connect.tls.ca` | system roots | CA used to verify the main instance when dialing it |
 | `LABELGATE_CONNECT_TLS_CERT` | `connect.tls.cert` | - | Server certificate of the agent's inbound listener |

@@ -124,3 +124,23 @@ func TestMapLegacyStatus(t *testing.T) {
 		}
 	}
 }
+
+func TestLegacyRowToResourceLowercasesAgentID(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"NAS.lan", "nas.lan"},
+		{"edge1", "edge1"},
+		{"", ""},
+		{"Bad Name", "Bad Name"}, // still invalid after lower-casing: left untouched
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			row := legacyRow{resourceType: "dns", hostname: "a.example.com", recordType: "A", agentID: tt.in}
+
+			r, ok := row.toResource()
+
+			if !ok || r.Owner.AgentID != tt.want {
+				t.Errorf("agent id = %q (ok=%v), want %q", r.Owner.AgentID, ok, tt.want)
+			}
+		})
+	}
+}

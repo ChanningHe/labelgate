@@ -30,9 +30,9 @@ v0.3 重写了整个后端。标签语法和 HTTP API 保持兼容，但有若�
 
 ### 必须设置 API token [#api-token-required]
 
-`api.token`（`LABELGATE_API_TOKEN`）现在是**必填项**。在 v0.2 中，token 为空表示“不认证”；在 v0.3 中，token 为空表示 **API 和 dashboard 被禁用**（会输出醒目的错误日志，同步逻辑继续运行）。请设置一个足够长的随机 token（`openssl rand -hex 32`），并用它登录 dashboard。没有 TLS 保护时，不要把端口发布到公网。
+`api.token`（`LABELGATE_API_TOKEN`）现在是**必填项**。在 v0.2 中，token 为空表示“不认证”；在 v0.3 中，token 为空表示 **API 和 dashboard 被禁用**（会输出醒目的错误日志，同步逻辑继续运行）。请设置一个至少 16 个字符的随机 token（`openssl rand -hex 32`），并用它登录 dashboard。没有 TLS 保护时，不要把端口发布到公网。
 
-`api.base_path` 现在对 dashboard 同样生效。
+`api.base_path` 现在对 dashboard 同样生效：服务端会向 dashboard 页面注入 `<meta name="labelgate-api-base">` 标签，因此无需额外的 dashboard 配置。
 
 ### Agent [#agents]
 
@@ -41,7 +41,8 @@ Agent 协议已变更（双向 HMAC 认证、校验 TLS）。**v0.2 的 agent �
 - WebSocket 地址必须包含 **`/ws` 路径**（`wss://main.example.com:8081/ws`）；
 - TLS 证书**默认会被校验**。如果你的 agent 使用自签名证书，请配置 `connect.tls.ca` / `agent.tls.ca`，或者（不推荐）显式开启 `insecure_skip_verify`；
 - `connect.tls.cert` / `key` 不再表示“客户端证书”，而是 inbound agent 监听端的服务端证书；
-- Agent ID 必须匹配 `^[a-z0-9][a-z0-9_-]{0,62}$`；每个命名 agent 需要有自己的、非空的 `token`。
+- Agent ID 必须匹配 `^[a-z0-9][a-z0-9._-]{0,62}$`（允许包含点；迁移时旧的 ID 会被转为小写，因此 `NAS.lan` 变为 `nas.lan`）；
+- 每个命名 agent 需要有自己的 `token`，且所有 agent token（`agent.agents.<id>.token`、`agent.accept_token`、`connect.token`）都必须至少 32 个字符。请用 `openssl rand -hex 32` 生成；高熵很重要，因为截获的握手可以被离线攻击。
 
 在 v0.2 的 agent 无法连接期间，它的资源**不会**立刻被移除。迁移完成后，main 实例会保留每个 agent 最后已知的资源，直到该 agent 再次上报，最长保留 `sync.agent_grace`（默认 **24h**）。超过之后，这些资源变为孤立状态，由于 `cleanup` 默认为 `true`，会在 `sync.remove_delay`（默认 30m）之后被删除。请在宽限期内完成 agent 升级。
 

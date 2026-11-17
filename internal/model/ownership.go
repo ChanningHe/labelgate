@@ -24,7 +24,7 @@ const (
 )
 
 var (
-	agentIDPattern    = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
+	agentIDPattern    = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,62}$`)
 	instanceIDPattern = regexp.MustCompile(`^[a-z0-9]{4,32}$`)
 	hostLabelPattern  = regexp.MustCompile(`^[a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?$`)
 )

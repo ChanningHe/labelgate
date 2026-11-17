@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/channinghe/labelgate/internal/model"
 )
@@ -21,6 +22,12 @@ const (
 	MinSyncInterval = 10 * time.Second
 	// MinHeartbeatInterval is the smallest allowed connect.heartbeat_interval.
 	MinHeartbeatInterval = time.Second
+	// MinAgentTokenLen is the smallest allowed agent token (named agents,
+	// agent.accept_token, connect.token). Tokens are guessable offline from a
+	// captured handshake, so they must carry real entropy.
+	MinAgentTokenLen = 32
+	// MinAPITokenLen is the smallest allowed api.token.
+	MinAPITokenLen = 16
 
 	dashboardPath = "/dashboard"
 	maxPort       = 65535
@@ -51,7 +58,9 @@ func fail(field, format string, args ...any) error {
 //     and tunnels (names, tokens, references), default_tunnel resolvable, at
 //     least one credential unless skip_credential_validation, agent listener
 //     and agent entries (IDs, tokens, connect_to, globs, tunnel references).
-//   - agent mode: connect.token set, outbound needs a ws(s):// endpoint,
+//     Tokens: api.token >= MinAPITokenLen when set (enabled API); named agent
+//     tokens and agent.accept_token (when set) >= MinAgentTokenLen.
+//   - agent mode: connect.token >= MinAgentTokenLen, outbound needs a ws(s):// endpoint,
 //     inbound needs connect.listen, connect.agent_id valid when set,
 //     heartbeat_interval >= 1s.
 func Validate(cfg Config) error {
@@ -192,6 +201,9 @@ func checkAPI(cfg Config) error {
 		return nil
 	}
 	if err := checkListen("api.address", a.Address); err != nil {
+		return err
+	}
+	if err := checkTokenLen("api.token", a.Token, MinAPITokenLen, true); err != nil {
 		return err
 	}
 	return checkBasePath(a.BasePath)
@@ -363,8 +375,23 @@ func checkGlobs(field string, globs []string) error {
 	return nil
 }
 
+// checkTokenLen enforces a minimum token length (in characters). An empty
+// token passes when optional is true (the feature is disabled).
+func checkTokenLen(field, token string, minLen int, optional bool) error {
+	if token == "" && optional {
+		return nil
+	}
+	if n := utf8.RuneCountInString(token); n < minLen {
+		return fail(field, "must be at least %d characters, got %d (generate one with: openssl rand -hex 32)", minLen, n)
+	}
+	return nil
+}
+
 func checkAgentServer(cfg Config) error {
 	a := cfg.Agent
+	if err := checkTokenLen("agent.accept_token", a.AcceptToken, MinAgentTokenLen, true); err != nil {
+		return err
+	}
 	if err := checkTLSPair("agent.tls", a.TLS); err != nil {
 		return err
 	}
@@ -390,10 +417,13 @@ func checkAgentServer(cfg Config) error {
 func checkAgentEntry(cf CloudflareConfig, id string, e AgentEntry) error {
 	field := "agent.agents." + id
 	if !model.ValidAgentID(id) {
-		return fail(field, "invalid agent ID %q (must match ^[a-z0-9][a-z0-9_-]{0,62}$)", id)
+		return fail(field, "invalid agent ID %q (must match ^[a-z0-9][a-z0-9._-]{0,62}$)", id)
 	}
 	if strings.TrimSpace(e.Token) == "" {
 		return fail(field+".token", "must not be empty")
+	}
+	if err := checkTokenLen(field+".token", e.Token, MinAgentTokenLen, false); err != nil {
+		return err
 	}
 	if e.ConnectTo != "" {
 		if err := checkWebSocketURL(field+".connect_to", e.ConnectTo); err != nil {
@@ -423,9 +453,12 @@ func checkConnect(cfg Config) error {
 	case strings.TrimSpace(c.Token) == "":
 		return fail("connect.token", "must not be empty in agent mode")
 	case c.AgentID != "" && !model.ValidAgentID(c.AgentID):
-		return fail("connect.agent_id", "%q must match ^[a-z0-9][a-z0-9_-]{0,62}$", c.AgentID)
+		return fail("connect.agent_id", "%q must match ^[a-z0-9][a-z0-9._-]{0,62}$", c.AgentID)
 	case c.HeartbeatInterval < MinHeartbeatInterval:
 		return fail("connect.heartbeat_interval", "must be >= %s, got %s", MinHeartbeatInterval, c.HeartbeatInterval)
+	}
+	if err := checkTokenLen("connect.token", c.Token, MinAgentTokenLen, false); err != nil {
+		return err
 	}
 	if err := checkTLSPair("connect.tls", c.TLS); err != nil {
 		return err

@@ -178,7 +178,7 @@ func TestHubDuplicateIDRejectedOriginalIntact(t *testing.T) {
 
 func TestHubRejectsInvalidAgentIDs(t *testing.T) {
 	hh := startHub(t, namedServer(), nil, nil)
-	for _, id := range []string{"", "UPPER", "-lead", "_lead", "a/b", "a b", "a.b", strings.Repeat("a", 64), "ä"} {
+	for _, id := range []string{"", "UPPER", "-lead", "_lead", "a/b", "a b", ".lead", "a!b", strings.Repeat("a", 64), "ä"} {
 		t.Run(id, func(t *testing.T) {
 			ws := rawDial(t, hh.url)
 

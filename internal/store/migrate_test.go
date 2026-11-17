@@ -354,6 +354,40 @@ func TestMigrateFailureRollsBackToLegacy(t *testing.T) {
 	}
 }
 
+func TestMigrateLowercasesLegacyAgentIDs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.db")
+	db := buildLegacyDB(t, path, 6)
+	mustExec(t, db, `INSERT INTO managed_resources (id, resource_type, hostname, record_type, content, service_name, agent_id)
+		VALUES ('r1', 'dns', 'a.example.com', 'A', '1.2.3.4', 'svc', 'NAS.lan')`)
+	mustExec(t, db, `INSERT INTO agents (id, name) VALUES ('NAS.lan', 'nas')`)
+	mustExec(t, db, `INSERT INTO agents (id, name) VALUES ('Bad Name', 'bad')`)
+
+	if err := Migrate(context.Background(), db, migrationTime); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	var owner string
+	if err := db.QueryRow(`SELECT agent_id FROM resources`).Scan(&owner); err != nil || owner != "nas.lan" {
+		t.Errorf("resource owner = %q (%v), want nas.lan", owner, err)
+	}
+	rows, err := db.Query(`SELECT id FROM agents ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	if len(ids) != 2 || ids[0] != "Bad Name" || ids[1] != "nas.lan" {
+		t.Errorf("agent ids = %v, want [Bad Name nas.lan]", ids)
+	}
+}
+
 func unix(t time.Time) int64 { return t.Unix() }
 
 func findResource(t *testing.T, all []model.Resource, kind model.Kind, key string) model.Resource {

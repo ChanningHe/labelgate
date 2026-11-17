@@ -22,13 +22,23 @@ import (
 // API is everything the reconciler needs from Cloudflare.
 //
 // Contract for every method:
-//   - Bounded by a per-call timeout (30s) layered on ctx; retried with backoff
-//     on 429/5xx/transport errors per config.RetryConfig; ctx cancellation is
-//     returned as ctx.Err() (errors.Is works).
+//   - Bounded by a per-attempt timeout (30s) layered on ctx; retried with
+//     backoff per config.RetryConfig (honouring Retry-After); ctx cancellation
+//     is returned as ctx.Err() (errors.Is works). Retry semantics depend on
+//     idempotency: reads, PUT/PATCH and DELETE are retried on 429, 5xx and
+//     transport errors (including timeouts). Create calls (POST) are retried
+//     only when the request certainly was not processed: on 429 or on a dial
+//     error (e.g. connection refused). A 5xx or timeout on a create is NOT
+//     retried, because a lost response could have created the object; the
+//     reconciler re-lists on its next cycle instead.
 //   - Errors wrap one of the sentinels below where applicable, plus *APIError
 //     carrying Cloudflare's codes/messages.
 //   - List methods return ALL items (auto-paging).
-//   - Hostnames/names are compared case-insensitively; returned names are lower-case.
+//   - Hostnames are compared case-insensitively and returned lower-case. This
+//     applies only to hostnames: zone names, DNS record names (and hostname
+//     targets of CNAME/MX/SRV), tunnel ingress hostnames and Access
+//     application domains. Display names (AccessApp.Name, AccessPolicy.Name),
+//     DNS TXT/CAA content, tags and comments are passed through verbatim.
 //   - Safe for concurrent use (the reconciler is single-threaded, the API
 //     server reads Health concurrently).
 type API interface {
@@ -133,7 +143,7 @@ type Health struct {
 // Zone is a Cloudflare zone together with the credential that manages it.
 type Zone struct {
 	ID         string
-	Name       string // lower-case
+	Name       string // zone name, lower-case
 	AccountID  string // account owning the zone; used for Access
 	Credential string // credential name ("default" = root)
 }
@@ -159,7 +169,7 @@ type Account struct {
 // Content holds: A/AAAA address, CNAME/MX/SRV target hostname, TXT text, CAA value.
 type DNSRecord struct {
 	ID       string
-	Name     string // FQDN, lower-case
+	Name     string // record name (FQDN), lower-case
 	Type     model.DNSType
 	Content  string
 	Proxied  bool
@@ -316,7 +326,7 @@ func (r *IngressRule) UnmarshalJSON(data []byte) error {
 // AccessApp is a self-hosted Access application.
 type AccessApp struct {
 	ID              string
-	Name            string
+	Name            string // display name, kept verbatim (not lower-cased)
 	Domain          string // hostname, lower-case
 	SessionDuration string
 	Tags            []string
@@ -339,7 +349,7 @@ func (a AccessApp) HasTag(tag string) bool {
 // recorded on an owned Access resource row.
 type AccessPolicy struct {
 	ID       string
-	Name     string
+	Name     string // display name, kept verbatim (not lower-cased)
 	Decision string // API value: allow, deny, bypass, non_identity
 	Include  []model.AccessRule
 	Require  []model.AccessRule

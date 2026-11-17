@@ -97,14 +97,14 @@ Labelgate 只会删除**它自己拥有**的 Cloudflare 资源（参见[所有�
 |----------|--------------|--------|------|
 | `LABELGATE_API_ENABLED` | `api.enabled` | `true` | 启用 HTTP API 和 dashboard |
 | `LABELGATE_API_ADDRESS` | `api.address` | `:8080` | 监听地址 |
-| `LABELGATE_API_BASE_PATH` | `api.base_path` | `/api` | API 基础路径。必须以 `/` 开头、不能以 `/` 结尾，且不能是 `/dashboard` |
-| `LABELGATE_API_TOKEN` | `api.token` | - | Bearer Token。**必填**：为空时 API **和** dashboard 都会被禁用 |
+| `LABELGATE_API_BASE_PATH` | `api.base_path` | `/api` | API 基础路径。必须以 `/` 开头、不能以 `/` 结尾，且不能是 `/dashboard`。Dashboard 会自动跟随该值 |
+| `LABELGATE_API_TOKEN` | `api.token` | - | Bearer Token，至少 16 个字符。**必填**：为空时 API **和** dashboard 都会被禁用 |
 
 <Callout type="warn">
-**`api.token` 是必填项。** 没有它时，Labelgate 会输出醒目的错误日志、继续执行同步，但**既不提供 API 也不提供 dashboard**。不存在“无认证模式”。请使用足够长的随机值（`openssl rand -hex 32`），并优先通过 `LABELGATE_API_TOKEN` 传入。
+**`api.token` 是必填项。** 没有它时，Labelgate 会输出醒目的错误日志、继续执行同步，但**既不提供 API 也不提供 dashboard**。不存在“无认证模式”。长度至少 16 个字符；请使用足够长的随机值（`openssl rand -hex 32`），并优先通过 `LABELGATE_API_TOKEN` 传入。
 </Callout>
 
-除 `GET {base_path}/health` 外，所有接口都需要 `Authorization: Bearer <token>`。Dashboard 位于 `/dashboard/`，并会从服务端读取 API 基础路径，因此自定义 `api.base_path` 也能正常工作。即使设置了 token，也不要把端口直接暴露到公网；请放在 VPN、带 TLS 的反向代理或 Cloudflare Access 之后。
+除 `GET {base_path}/health` 外，所有接口都需要 `Authorization: Bearer <token>`。Dashboard 位于 `/dashboard/`。服务端会在 dashboard 的 `index.html` 中注入一个携带当前 `api.base_path` 的 `<meta name="labelgate-api-base">` 标签，因此 dashboard 会自动采用自定义的基础路径，无需任何构建期或客户端配置。即使设置了 token，也不要把端口直接暴露到公网；请放在 VPN、带 TLS 的反向代理或 Cloudflare Access 之后。
 
 ### 接口列表
 
@@ -148,7 +148,7 @@ Labelgate 只会删除**它自己拥有**的 Cloudflare 资源（参见[所有�
 |----------|--------------|--------|------|
 | `LABELGATE_AGENT_ENABLED` | `agent.enabled` | `false` | 启动 agent WebSocket 监听，并拨号 inbound agent |
 | `LABELGATE_AGENT_LISTEN` | `agent.listen` | `:8081` | 监听地址。Agent 连接到 `<scheme>://<host>:8081/ws` |
-| `LABELGATE_AGENT_ACCEPT_TOKEN` | `agent.accept_token` | - | 接受**未**在 `agent.agents` 中列出的 agent 所用的共享 token |
+| `LABELGATE_AGENT_ACCEPT_TOKEN` | `agent.accept_token` | - | 接受**未**在 `agent.agents` 中列出的 agent 所用的共享 token。设置后至少 32 个字符 |
 | `LABELGATE_AGENT_ACCEPT_HOSTNAMES` | `agent.accept_hostnames` | - | 限制 `accept_token` agent 可声明的主机名（glob 列表）。为空表示不限制 |
 | `LABELGATE_AGENT_ACCEPT_TUNNELS` | `agent.accept_tunnels` | - | `accept_token` agent 可使用的 tunnel。为空表示只能用默认 tunnel |
 | `LABELGATE_AGENT_TLS_CERT` | `agent.tls.cert` | - | agent 监听端的服务端证书（启用 `wss://`） |
@@ -158,16 +158,24 @@ Labelgate 只会删除**它自己拥有**的 Cloudflare 资源（参见[所有�
 
 ### 单个 agent 条目（`agent.agents.<id>`，仅配置文件）
 
-map 的键就是 agent ID，必须匹配 `^[a-z0-9][a-z0-9_-]{0,62}$`。
+map 的键就是 agent ID，必须匹配 `^[a-z0-9][a-z0-9._-]{0,62}$`（小写字母、数字、`.`、`_` 和 `-`；允许包含点，例如 `nas.lan`）。
 
 | 键 | 必填 | 说明 |
 |----|------|------|
-| `token` | 是 | 该 agent 专属的共享密钥（非空） |
+| `token` | 是 | 该 agent 专属的共享密钥，至少 32 个字符（见 [Agent token](#agent-tokens)） |
 | `name` | 否 | 在 dashboard 中显示的名称 |
 | `default_tunnel` | 否 | 该 agent 的标签省略 `tunnel` 时使用的 tunnel。为空表示全局默认 |
 | `tunnels` | 否 | 该 agent 可使用的 tunnel。为空表示只能用它的默认 tunnel |
 | `hostnames` | 否 | 该 agent 可声明的主机名 glob 列表。为空表示不限制 |
 | `connect_to` | 否 | `ws://` 或 `wss://` 地址，需包含 `/ws`。为该 agent 启用 [inbound 模式](/zh/docs/examples/multi-host#inbound-mode-example) |
+
+### Agent token [#agent-tokens]
+
+所有 agent token（`agent.agents.<id>.token`、`agent.accept_token` 和 `connect.token`）都必须**至少 32 个字符**，`api.token` 至少 16 个字符，否则 Labelgate 会拒绝启动。token 本身不会在网络上传输，但任何截获握手的人都可以离线地对它进行猜测，因此 token 必须具有足够高的熵。可以这样生成：
+
+```bash
+openssl rand -hex 32
+```
 
 ## Agent 连接（Agent 实例）
 
@@ -176,8 +184,8 @@ map 的键就是 agent ID，必须匹配 `^[a-z0-9][a-z0-9_-]{0,62}$`。
 | `LABELGATE_CONNECT_MODE` | `connect.mode` | `outbound` | `outbound`（agent 连接 main）或 `inbound`（main 连接 agent） |
 | `LABELGATE_CONNECT_ENDPOINT` | `connect.endpoint` | - | Main 实例地址，例如 `wss://main.example.com:8081/ws`。outbound 必填，**必须包含 `/ws` 路径** |
 | `LABELGATE_CONNECT_LISTEN` | `connect.listen` | - | 监听地址。inbound 必填 |
-| `LABELGATE_CONNECT_TOKEN` | `connect.token` | - | 认证 token **（必填）** |
-| `LABELGATE_CONNECT_AGENT_ID` | `connect.agent_id` | `/etc/machine-id` 的前 12 位十六进制字符，否则取清洗后的 hostname | Agent 标识，`^[a-z0-9][a-z0-9_-]{0,62}$` |
+| `LABELGATE_CONNECT_TOKEN` | `connect.token` | - | 认证 token，至少 32 个字符 **（必填）** |
+| `LABELGATE_CONNECT_AGENT_ID` | `connect.agent_id` | `/etc/machine-id` 的前 12 位十六进制字符，否则取转为小写并清洗后的 hostname | Agent 标识，`^[a-z0-9][a-z0-9._-]{0,62}$`。允许包含点，不允许大写 |
 | `LABELGATE_CONNECT_HEARTBEAT_INTERVAL` | `connect.heartbeat_interval` | `30s` | 完整状态上报周期（>= 1s） |
 | `LABELGATE_CONNECT_TLS_CA` | `connect.tls.ca` | 系统根证书 | 拨号 main 时用来校验 main 的 CA |
 | `LABELGATE_CONNECT_TLS_CERT` | `connect.tls.cert` | - | agent inbound 监听端的服务端证书 |

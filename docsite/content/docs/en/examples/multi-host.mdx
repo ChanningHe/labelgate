@@ -54,7 +54,9 @@ Authentication is a mutual challenge-response over the shared token, identical i
 
 The token itself **never travels on the wire**, so someone who connects to an inbound agent's port learns nothing and receives no data. The connection direction (outbound or inbound) is bound into the HMAC, so a session cannot be relayed from one direction to the other. Tokens are compared in constant time and never logged. An unknown agent ID and a wrong token produce the same `unauthorized` error.
 
-If an agent with the same ID is already connected, the new connection is rejected (`duplicate_agent`) after authenticating, and the existing session stays untouched. Agent IDs must match `^[a-z0-9][a-z0-9_-]{0,62}$`. If you do not set `connect.agent_id`, it is derived from `/etc/machine-id` (first 12 hex characters), falling back to the sanitized hostname.
+If an agent with the same ID is already connected, the new connection is rejected (`duplicate_agent`) after authenticating, and the existing session stays untouched. Agent IDs must match `^[a-z0-9][a-z0-9._-]{0,62}$` (lower-case; dots are allowed). If you do not set `connect.agent_id`, it is derived from `/etc/machine-id` (first 12 hex characters), falling back to the hostname, lower-cased and sanitized.
+
+Tokens must be at least 32 characters (`openssl rand -hex 32`). The token never travels on the wire, but a captured handshake can be attacked offline, so a weak token is guessable; high entropy is what protects it.
 
 ## Named agents and shared-token agents
 

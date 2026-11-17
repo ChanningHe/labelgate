@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { CopyButton, Tooltip } from '@mantine/core';
 import { IconCheck, IconCloud, IconCloudFilled, IconCopy, IconExternalLink, IconShieldLock } from '@tabler/icons-react';
 import { Chip } from '../components/Badges';
+import { openUrl } from './openUrl';
 import { agentLabel } from './query';
 import type { ManagedResource } from '../api/client';
 import classes from './cells.module.css';
@@ -34,12 +35,14 @@ export function CopyAction({ value, label, isVisible }: { value: string; label: 
   );
 }
 
-export function OpenAction({ hostname }: { hostname: string }) {
+export function OpenAction({ hostname, path }: { hostname: string; path?: string }) {
+  const url = openUrl(hostname, path);
+  if (!url) return null;
   return (
     <Tooltip label="Open in a new tab" withArrow openDelay={300}>
       <a
         className={classes.rowAction}
-        href={`https://${hostname}`}
+        href={url}
         target="_blank"
         rel="noopener noreferrer"
         aria-label={`Open ${hostname}`}
