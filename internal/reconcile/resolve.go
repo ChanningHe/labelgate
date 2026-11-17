@@ -20,12 +20,13 @@ type resolution struct {
 func resolve(claims []claim, tracked []model.Resource, held holdSet) resolution {
 	tracked, rekeyed := rekeyLegacy(tracked, claims)
 	byKey := indexRows(tracked)
-	kept, rejClass := resolveClasses(claims, tracked, held)
+	sourced, rejSource := resolveSources(claims, tracked, held)
+	kept, rejClass := resolveClasses(sourced, tracked, held)
 	winners, rejKey := pickWinners(kept, byKey, held)
 	winners = append(winners, deriveCNAMEs(winners, byKey, held)...)
 	access, rejAccess := accessClaims(winners, byKey, held)
 	winners = append(winners, access...)
-	rejected := append(append(rejClass, rejKey...), rejAccess...)
+	rejected := concatRows(rejSource, rejClass, rejKey, rejAccess)
 	return resolution{
 		Winners:  sortClaimsByKey(winners),
 		Rejected: rejected,
@@ -43,11 +44,7 @@ func indexRows(rows []model.Resource) map[rowKey]model.Resource {
 }
 
 func describeOwner(o model.Owner) string {
-	src := "local"
-	if o.AgentID != model.LocalAgentID {
-		src = "agent " + o.AgentID
-	}
-	return fmt.Sprintf("%s container %s service %s", src, o.ContainerName, o.Service)
+	return fmt.Sprintf("%s container %s service %s", describeSource(o.AgentID), o.ContainerName, o.Service)
 }
 
 // rekeyLegacy rewrites the key of a legacy row whose identity fields and
@@ -114,6 +111,67 @@ func isClaiming(r model.Resource, idx map[rowKey]map[string]string, held holdSet
 	}
 	cls, ok := idx[keyOf(r)][r.Owner.Key()]
 	return ok && cls == rowClass(r)
+}
+
+// sourceOf names the source of an owner: "" (local) or the agent ID.
+func sourceOf(o model.Owner) string { return o.AgentID }
+
+func describeSource(src string) string {
+	if src == model.LocalAgentID {
+		return "local"
+	}
+	return "agent " + src
+}
+
+// rowOlder orders rows by creation (oldest first), then ID, then owner.
+func rowOlder(a, b model.Resource) bool {
+	if !a.CreatedAt.Equal(b.CreatedAt) {
+		return a.CreatedAt.Before(b.CreatedAt)
+	}
+	if a.ID != b.ID {
+		return a.ID < b.ID
+	}
+	return a.Owner.Less(b.Owner)
+}
+
+// hostSources maps every hostname to the one source owning it: the source of
+// the oldest reserving row, else the source of the first claim (claimLess:
+// local first, then agents by ID).
+func hostSources(claims []claim, rows []model.Resource, reserves func(model.Resource) bool) map[string]string {
+	sorted := append([]model.Resource(nil), rows...)
+	sort.SliceStable(sorted, func(i, j int) bool { return rowOlder(sorted[i], sorted[j]) })
+	out := map[string]string{}
+	for _, r := range sorted {
+		if _, seen := out[r.Hostname]; !seen && reserves(r) {
+			out[r.Hostname] = sourceOf(r.Owner)
+		}
+	}
+	for _, c := range sortClaims(claims) {
+		if _, seen := out[c.Res.Hostname]; !seen {
+			out[c.Res.Hostname] = sourceOf(c.Res.Owner)
+		}
+	}
+	return out
+}
+
+// resolveSources enforces per-source hostname ownership (§6.4 step 1a): a
+// claim on a hostname owned by another source is rejected, whatever its
+// class, kind, path or record type.
+func resolveSources(claims []claim, tracked []model.Resource, held holdSet) ([]claim, []model.Resource) {
+	idx := claimIndex(claims)
+	owners := hostSources(claims, tracked, func(r model.Resource) bool { return isClaiming(r, idx, held) })
+	var kept []claim
+	var rejected []model.Resource
+	for _, c := range sortClaims(claims) {
+		src := owners[c.Res.Hostname]
+		if src == sourceOf(c.Res.Owner) {
+			kept = append(kept, c)
+			continue
+		}
+		reason := fmt.Sprintf("conflict: hostname %s is owned by %s", c.Res.Hostname, describeSource(src))
+		rejected = append(rejected, rejectRow(c.Res, reason))
+	}
+	return kept, rejected
 }
 
 type hostClass struct {
