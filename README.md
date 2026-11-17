@@ -27,7 +27,7 @@ Create a `.env` file (keep it out of version control):
 LABELGATE_CLOUDFLARE_API_TOKEN=your-api-token
 LABELGATE_CLOUDFLARE_ACCOUNT_ID=your-account-id
 LABELGATE_CLOUDFLARE_TUNNEL_ID=your-tunnel-id
-# Required for the API and dashboard; without it both are disabled.
+# Required for the API and dashboard; without it both are disabled. At least 16 characters.
 # Generate one with: openssl rand -hex 32
 LABELGATE_API_TOKEN=a-long-random-string
 # Authenticate cloudflared (not for labelgate)
@@ -97,6 +97,8 @@ docker compose up -d
 That's it. Labelgate watches your containers and syncs labels to Cloudflare automatically. Open `http://localhost:28111/dashboard/` and sign in with your `LABELGATE_API_TOKEN` to see what it manages.
 
 > **Important:** `LABELGATE_API_TOKEN` is required. Without it the API and the dashboard are disabled (Labelgate keeps syncing and logs an error). Never publish the port to the internet without TLS in front of it.
+>
+> If you change `api.base_path` (`LABELGATE_API_BASE_PATH`, default `/api`), the dashboard picks it up automatically: the server injects a `<meta name="labelgate-api-base">` tag into the dashboard page. Agent tokens (`connect.token`, `agent.accept_token`, per-agent `token`) must be at least 32 characters; generate them with `openssl rand -hex 32`. High entropy matters because a captured handshake can be attacked offline. Agent IDs are lower-case and may contain dots (`^[a-z0-9][a-z0-9._-]{0,62}$`).
 
 ### Good to know
 

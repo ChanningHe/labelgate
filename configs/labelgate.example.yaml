@@ -82,8 +82,9 @@ db:
   path: /app/config/labelgate.db          # LABELGATE_DB_PATH
 
 # HTTP API and dashboard configuration
-# api.token is REQUIRED: if it is empty, the API and the dashboard are disabled
+# api.token is REQUIRED (>= 16 characters, e.g. openssl rand -hex 32): if it is empty, the API and the dashboard are disabled
 # (a loud error is logged; the reconciler keeps running).
+# The dashboard follows base_path automatically (the server injects it into the page).
 api:
   enabled: true                           # LABELGATE_API_ENABLED
   address: ":8080"                        # LABELGATE_API_ADDRESS
@@ -95,6 +96,7 @@ agent:
   enabled: false                          # LABELGATE_AGENT_ENABLED
   listen: ":8081"                         # LABELGATE_AGENT_LISTEN (agents connect to wss://<host>:8081/ws)
   # Shared token for agents not listed under "agents". Prefer per-agent tokens.
+  # All agent tokens must be >= 32 characters (openssl rand -hex 32).
   # accept_token: ""                      # LABELGATE_AGENT_ACCEPT_TOKEN
   # Restrict what accept_token agents may claim (empty = unrestricted hostnames / only the default tunnel)
   # accept_hostnames: ["*.remote.example.com"]   # LABELGATE_AGENT_ACCEPT_HOSTNAMES (comma-separated globs)
@@ -105,10 +107,10 @@ agent:
   #   ca: /path/to/ca.pem                 # LABELGATE_AGENT_TLS_CA    (verifies inbound agents when the main dials them)
   #   insecure_skip_verify: false         # LABELGATE_AGENT_TLS_INSECURE_SKIP_VERIFY (NOT recommended)
 
-  # Pre-configured agents (config file only). The key is the agent ID: ^[a-z0-9][a-z0-9_-]{0,62}$
+  # Pre-configured agents (config file only). The key is the agent ID: ^[a-z0-9][a-z0-9._-]{0,62}$
   # agents:
   #   remote-host-1:
-  #     token: "long-random-agent-token"  # required, one token per agent
+  #     token: "replace-with-openssl-rand-hex-32"  # required, one token per agent
   #     name: "Remote host 1"             # optional display name
   #     default_tunnel: "default"         # tunnel used when a label omits `tunnel`
   #     tunnels: ["default"]              # tunnels this agent may target (empty = only its default tunnel)
@@ -120,7 +122,7 @@ agent:
 #   mode: outbound                        # LABELGATE_CONNECT_MODE  (outbound, inbound)
 #   endpoint: wss://main.example.com:8081/ws   # LABELGATE_CONNECT_ENDPOINT (outbound; the /ws path is required)
 #   # listen: ":8082"                     # LABELGATE_CONNECT_LISTEN  (inbound)
-#   token: "long-random-agent-token"      # LABELGATE_CONNECT_TOKEN   (required)
+#   token: "replace-with-openssl-rand-hex-32"      # LABELGATE_CONNECT_TOKEN   (required)
 #   agent_id: ""                          # LABELGATE_CONNECT_AGENT_ID (default: first 12 hex chars of /etc/machine-id, else sanitized hostname)
 #   heartbeat_interval: 30s               # LABELGATE_CONNECT_HEARTBEAT_INTERVAL (>= 1s)
 #   tls:

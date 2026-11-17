@@ -61,7 +61,8 @@ backoff = 2.0
 path = "/app/config/labelgate.db"
 
 # HTTP API and dashboard configuration
-# token is REQUIRED: if it is empty, the API and the dashboard are disabled.
+# token is REQUIRED (>= 16 characters, e.g. openssl rand -hex 32): if it is empty, the API and the dashboard are disabled.
+# The dashboard follows base_path automatically (the server injects it into the page).
 [api]
 enabled = true
 address = ":8080"
@@ -72,7 +73,7 @@ token = "change-me-to-a-long-random-string"   # prefer LABELGATE_API_TOKEN
 [agent]
 enabled = false
 listen = ":8081"           # agents connect to wss://<host>:8081/ws
-# accept_token = ""        # shared token; prefer per-agent tokens
+# accept_token = ""        # shared token, >= 32 characters; prefer per-agent tokens
 # accept_hostnames = ["*.remote.example.com"]
 # accept_tunnels = []
 
@@ -82,9 +83,9 @@ listen = ":8081"           # agents connect to wss://<host>:8081/ws
 # ca = "/path/to/ca.pem"       # verifies inbound agents when the main dials them
 # insecure_skip_verify = false # NOT recommended
 
-# Pre-configured agents. The key is the agent ID: ^[a-z0-9][a-z0-9_-]{0,62}$
+# Pre-configured agents (tokens >= 32 characters: openssl rand -hex 32). The key is the agent ID: ^[a-z0-9][a-z0-9._-]{0,62}$
 # [agent.agents.remote-host-1]
-# token = "long-random-agent-token"
+# token = "replace-with-openssl-rand-hex-32"
 # name = "Remote host 1"
 # default_tunnel = "default"
 # tunnels = ["default"]
@@ -96,7 +97,7 @@ listen = ":8081"           # agents connect to wss://<host>:8081/ws
 # mode = "outbound"                              # outbound, inbound
 # endpoint = "wss://main.example.com:8081/ws"    # outbound; the /ws path is required
 # listen = ":8082"                               # inbound
-# token = "long-random-agent-token"              # required
+# token = "replace-with-openssl-rand-hex-32"              # required
 # agent_id = ""                                  # default: first 12 hex chars of /etc/machine-id
 # heartbeat_interval = "30s"
 
