@@ -44,13 +44,14 @@ func dnsComment(instanceID, user string) string {
 	return strings.TrimRight(string([]rune(c)[:maxCommentLen]), " ")
 }
 
-// desiredRecord is the record a row should have on Cloudflare.
+// desiredRecord is the record a row should have on Cloudflare, normalized
+// the way Cloudflare stores it so comparisons with live records never flap.
 func desiredRecord(r model.Resource, instanceID string) cloudflare.DNSRecord {
-	return cloudflare.DNSRecord{
+	return cloudflare.NormalizeDNSRecord(cloudflare.DNSRecord{
 		Name: r.Hostname, Type: r.RecordType, Content: r.Content, Proxied: r.Proxied,
-		TTL: normTTL(r.TTL, r.Proxied), Priority: r.Priority, Weight: r.Weight, Port: r.Port,
+		TTL: r.TTL, Priority: r.Priority, Weight: r.Weight, Port: r.Port,
 		Flags: r.Flags, Tag: r.Tag, Comment: dnsComment(instanceID, r.Comment),
-	}
+	})
 }
 
 func isHostTarget(t model.DNSType) bool {
@@ -73,6 +74,7 @@ func sameContent(t model.DNSType, a, b string) bool {
 
 // recordDiffers compares the fields labelgate manages for the record type.
 func recordDiffers(live, want cloudflare.DNSRecord) bool {
+	live = cloudflare.NormalizeDNSRecord(live)
 	if !sameContent(want.Type, live.Content, want.Content) || live.Proxied != want.Proxied ||
 		normTTL(live.TTL, live.Proxied) != want.TTL || live.Comment != want.Comment {
 		return true

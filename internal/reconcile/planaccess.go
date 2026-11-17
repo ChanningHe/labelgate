@@ -56,21 +56,32 @@ func decisionOrDefault(d string) string {
 	return d
 }
 
-// desiredPolicies builds one reusable policy per (hostname, index).
-func desiredPolicies(def model.AccessPolicyDef, app, host string) []cloudflare.AccessPolicy {
+// desiredPolicies builds one reusable policy per (hostname, index), with
+// rules normalized the way Cloudflare returns them.
+func desiredPolicies(def model.AccessPolicyDef, app, host string) ([]cloudflare.AccessPolicy, error) {
 	out := make([]cloudflare.AccessPolicy, 0, len(def.Policies))
 	for _, p := range def.Policies {
 		name := p.Name
 		if name == "" {
 			name = app
 		}
-		out = append(out, cloudflare.AccessPolicy{
+		pol := cloudflare.AccessPolicy{
 			Name:     fmt.Sprintf("%s (%s)", name, host),
 			Decision: model.DecisionToAPI(decisionOrDefault(p.Decision)),
-			Include:  p.Include, Require: p.Require, Exclude: p.Exclude,
-		})
+		}
+		var err error
+		if pol.Include, err = cloudflare.NormalizeAccessRules(p.Include); err != nil {
+			return nil, err
+		}
+		if pol.Require, err = cloudflare.NormalizeAccessRules(p.Require); err != nil {
+			return nil, err
+		}
+		if pol.Exclude, err = cloudflare.NormalizeAccessRules(p.Exclude); err != nil {
+			return nil, err
+		}
+		out = append(out, pol)
 	}
-	return out
+	return out, nil
 }
 
 func rulesEqual(a, b []model.AccessRule) bool {
@@ -155,19 +166,23 @@ func planAccess(row model.Resource, w claim, al accountLive, observed bool, inst
 		op.Fail = msg
 		return op
 	}
-	op.Steps, op.Detach = policySteps(row, *w.Def, al.Policies)
+	want, err := desiredPolicies(*w.Def, row.AppName, row.Hostname)
+	if err != nil {
+		op.Fail = "access policy definition " + w.Def.Name + ": " + err.Error()
+		return op
+	}
+	op.Steps, op.Detach = policySteps(row, want, al.Policies)
 	op.App = desiredApp(row, *w.Def, op.Steps, live, tag)
 	op.Mode = appModeFor(op, live, tag)
 	return op
 }
 
 // policySteps pairs desired policies with owned live ones by index.
-func policySteps(row model.Resource, def model.AccessPolicyDef, live []cloudflare.AccessPolicy) ([]policyStep, []string) {
+func policySteps(row model.Resource, want, live []cloudflare.AccessPolicy) ([]policyStep, []string) {
 	byID := map[string]cloudflare.AccessPolicy{}
 	for _, p := range live {
 		byID[p.ID] = p
 	}
-	want := desiredPolicies(def, row.AppName, row.Hostname)
 	steps := make([]policyStep, 0, len(want))
 	for i, p := range want {
 		if i < len(row.PolicyIDs) {
