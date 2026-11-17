@@ -41,10 +41,18 @@ LABELGATE_CLOUDFLARE_ACCOUNT_ID=your-account-id
 # Required for Tunnel mode
 LABELGATE_CLOUDFLARE_TUNNEL_ID=your-tunnel-id
 
+# Required for the API and dashboard (without it both are disabled)
+# Generate one with: openssl rand -hex 32
+LABELGATE_API_TOKEN=a-long-random-string
+
 # cloudflared tunnel token (for cloudflared daemon, not Labelgate!)
 # Get this from: Cloudflare Dashboard > Zero Trust > Networks > Tunnels
 TUNNEL_TOKEN=your-tunnel-token
 ```
+
+<Callout type="warn">
+`LABELGATE_API_TOKEN` is mandatory for the dashboard and the HTTP API. If it is empty, both are **disabled** (Labelgate keeps syncing and logs an error). Keep your `.env` file out of version control.
+</Callout>
 
 <Callout type="info">
 If you don't have a Tunnel yet, you can create one in the [Cloudflare Dashboard > Zero Trust > Networks > Tunnels](https://one.dash.cloudflare.com/).
@@ -55,18 +63,24 @@ If you don't have a Tunnel yet, you can create one in the [Cloudflare Dashboard 
 ```yaml
 services:
   labelgate:
-    image: labelgate:latest
+    image: ghcr.io/channinghe/labelgate:v0.3
     restart: unless-stopped
     # use command "stat -c '%g' /var/run/docker.sock" to get the group id of the docker socket
     group_add:
       - "REPLACE_WITH_GROUP_ID"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Run "sudo chown -R 65532:65532 ./labelgate-data" so the non-root container user can write the database
       - ./labelgate-data:/app/config
     environment:
       - LABELGATE_CLOUDFLARE_API_TOKEN
       - LABELGATE_CLOUDFLARE_ACCOUNT_ID
       - LABELGATE_CLOUDFLARE_TUNNEL_ID
+      - LABELGATE_API_TOKEN
+    # Dashboard and API (authenticated with LABELGATE_API_TOKEN).
+    # Bound to localhost on purpose: put TLS / a VPN / Cloudflare Access in front before exposing it.
+    ports:
+      - "127.0.0.1:8080:8080"
     # labelgate no need to connect to the network "cloudflared-network"
     # Because Labelgate simply uses the Cloudflare API to create tunnel ingress rules or DNS records.
     network_mode: bridge
@@ -98,16 +112,16 @@ networks:
     name: cloudflared-network
 ```
 
-For services that not in this docker-compose.yaml,you can add the network "cloudflared-network" to the service.
+For services that are not in this docker-compose.yaml, you can add the network "cloudflared-network" to the service.
 
 ```yaml
 services:
   other-app:
     image: nginx:alpine
-    container_name: other-app    
+    container_name: other-app
     labels:
-      labelgate.tunnel.web.hostname: "app.example.com"
-      labelgate.tunnel.web.service: "http://webapp:80"
+      labelgate.tunnel.other.hostname: "other.example.com"
+      labelgate.tunnel.other.service: "http://other-app:80"
     networks:
       - cloudflared-network
 networks:
@@ -124,8 +138,10 @@ docker compose up -d
 Labelgate will:
 1. Connect to the Docker daemon and discover running containers
 2. Parse the labels on `webapp`
-3. Create a Tunnel ingress rule pointing `app.example.com` to `http://webapp:80`
-4. Cloudflare automatically creates a CNAME DNS record for the tunnel hostname
+3. Add a Tunnel ingress rule pointing `app.example.com` to `http://webapp:80`, leaving any ingress rules you manage by hand untouched
+4. Create a CNAME record `app.example.com` to `<tunnel-id>.cfargotunnel.com`, marked in its comment as owned by this Labelgate instance
+
+If `app.example.com` already exists as a record or rule that Labelgate did not create, it is **not** taken over: you get a `conflict` error instead. See [Ownership & Conflicts](/docs/ownership).
 
 ### 4. Verify
 
@@ -137,6 +153,16 @@ You can also check the Labelgate logs:
 docker compose logs labelgate
 ```
 
+Open `http://localhost:8080/dashboard/` and sign in with your `LABELGATE_API_TOKEN` to see the managed resources, or query the API:
+
+```bash
+curl -H "Authorization: Bearer $LABELGATE_API_TOKEN" http://localhost:8080/api/overview
+```
+
+<Callout type="info">
+Resources Labelgate owns are removed again about 30 minutes (`sync.remove_delay`) after their container is gone, because `cleanup` defaults to `true`. Set `labelgate.tunnel.web.cleanup: "false"` to keep them.
+</Callout>
+
 ## DNS-Only Example
 
 If you only need DNS record management (no tunnels), it's even simpler:
@@ -144,11 +170,13 @@ If you only need DNS record management (no tunnels), it's even simpler:
 ```yaml
 services:
   labelgate:
-    image: labelgate:latest
+    image: ghcr.io/channinghe/labelgate:v0.3
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./labelgate-data:/app/config
     environment:
       - LABELGATE_CLOUDFLARE_API_TOKEN
+      - LABELGATE_API_TOKEN
 
   myapp:
     image: nginx:alpine
@@ -162,5 +190,7 @@ services:
 ## What's Next?
 
 - [Configuration](/docs/configuration) - Learn about config files, environment variables, and multi-credential setup
+- [Ownership & Conflicts](/docs/ownership) - What Labelgate will and will not touch on Cloudflare
+- [Upgrading to v0.3](/docs/upgrading) - Coming from v0.2?
 - [Label Reference](/docs/labels) - Full reference for all DNS, Tunnel, and Access labels
 - [Examples](/docs/examples/single-host) - More real-world deployment examples

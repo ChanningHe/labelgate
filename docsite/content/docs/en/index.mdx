@@ -47,24 +47,25 @@ Labelgate has three operators, each managing a specific type of Cloudflare resou
 
 Labelgate uses an event-driven reconciliation model:
 
-1. **Docker events** trigger immediate reconciliation when containers start, stop, or die
-2. **Periodic sync** runs every 2 minutes as a fallback to catch any missed events
-3. The reconciler compares **desired state** (from container labels) against **actual state** (from Cloudflare API) and applies the necessary changes
+1. **Docker events** and **agent reports** trigger reconciliation (debounced) when containers start, stop, or die
+2. **Periodic sync** runs every `sync.interval` (default 5 minutes) as a fallback to catch any missed events
+3. A single reconciler collects the **desired state** (from container labels), validates it, resolves hostname conflicts, plans the changes against the **actual state** (from the Cloudflare API) and applies them. All Cloudflare changes are serialised through it
 
 ### Providers
 
-Providers are the source of container information. Currently, Labelgate supports Docker as a provider, with Kubernetes planned for the future. The Docker provider supports three connection methods:
+Providers are the source of container information. Currently, Labelgate supports Docker as a provider, with Kubernetes planned for the future. The Docker provider supports two connection methods:
 
 - **Unix socket** - Local Docker daemon (`unix:///var/run/docker.sock`)
-- **TCP** - Remote Docker daemon (`tcp://host:2376`)
-- **SSH** - Remote Docker via SSH (`ssh://user@host`)
+- **TCP** - Remote Docker daemon (`tcp://host:2376`, use TLS)
+
+`ssh://` endpoints were removed in v0.3. For remote hosts, run a Labelgate [agent](/docs/examples/multi-host) there instead.
 
 ### State Persistence
 
 All managed resources are tracked in a local SQLite database. This enables:
 
-- **Ownership tracking** - Know which container owns which Cloudflare resource
-- **Conflict detection** - Prevent duplicate hostname assignments
+- **Ownership tracking** - Know which container owns which Cloudflare resource, and mark what Labelgate created so that it never touches anything else (see [Ownership & Conflicts](/docs/ownership))
+- **Conflict detection** - The existing owner of a hostname wins; newcomers are rejected with a visible error
 - **Graceful recovery** - Resume operations after restarts without duplicate resources
 
 ## How It Works
@@ -110,3 +111,5 @@ All managed resources are tracked in a local SQLite database. This enables:
 - [Getting Started](/docs/getting-started) - Set up Labelgate in minutes
 - [Label Reference](/docs/labels) - Complete label format documentation
 - [Configuration](/docs/configuration) - Advanced configuration options
+- [Ownership & Conflicts](/docs/ownership) - What Labelgate will and will not touch
+- [Upgrading to v0.3](/docs/upgrading) - Breaking changes since v0.2
