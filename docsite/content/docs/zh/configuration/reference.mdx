@@ -170,7 +170,7 @@ Labelgate 只会删除**它自己拥有**的 Cloudflare 资源（参见[所有�
 map 的键就是 agent ID，必须匹配 `^[a-z0-9][a-z0-9._-]{0,62}$`（小写字母、数字、`.`、`_` 和 `-`）。
 
 <Callout type="warn">
-在 v0.3.0 中，配置加载器会把 map 键中的 `.` 当作路径分隔符，因此 `agent.agents.nas.lan` 这样的条目会以 `unknown key` 被拒绝。命名 agent 请使用不含点的 ID（`nas-lan`）。含点的 ID 对 `connect.agent_id` 是合法的，但这样的 agent 只能通过 `agent.accept_token` 认证。
+含点的 agent ID 可以直接用作 map 键，写成一个完整的键即可（YAML `nas.lan:`，TOML `[agent.agents."nas.lan"]`，JSON `"nas.lan": {...}`）。
 </Callout>
 
 | 键 | 必填 | 说明 |

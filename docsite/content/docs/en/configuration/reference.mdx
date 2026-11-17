@@ -170,7 +170,7 @@ See [Multi-Host](/docs/examples/multi-host) for how these fit together.
 The map key is the agent ID and must match `^[a-z0-9][a-z0-9._-]{0,62}$` (lower-case letters, digits, `.`, `_` and `-`).
 
 <Callout type="warn">
-In v0.3.0 the config loader treats `.` in a map key as a path separator, so an entry such as `agent.agents.nas.lan` is rejected with `unknown key`. Use IDs without dots for named agents (`nas-lan`). An ID with dots is valid for `connect.agent_id`, but such an agent can then only authenticate through `agent.accept_token`.
+Agent IDs with dots work as map keys: write them as one key (YAML `nas.lan:`, TOML `[agent.agents."nas.lan"]`, JSON `"nas.lan": {...}`).
 </Callout>
 
 | Key | Required | Description |
