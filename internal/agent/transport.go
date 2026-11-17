@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	readHeaderTimeout = 10 * time.Second
+	readHeaderTimeout = 5 * time.Second // pre-auth: bounded like the handshake
 	idleTimeout       = 60 * time.Second
 	shutdownTimeout   = 5 * time.Second
 	healthBody        = `{"status":"ok"}`
@@ -166,33 +166,14 @@ func handleHealth(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write([]byte(healthBody))
 }
 
-// semaphore bounds concurrent unauthenticated connections.
-type semaphore chan struct{}
-
-func (s semaphore) tryAcquire() bool {
-	select {
-	case s <- struct{}{}:
-		return true
-	default:
-		return false
-	}
-}
-
-func (s semaphore) release() { <-s }
-
-// upgrade acquires a pending-handshake slot and upgrades the request. The
-// returned release func is idempotent; ok=false means the response was written.
-func upgrade(sem semaphore, up *websocket.Upgrader, w http.ResponseWriter, r *http.Request) (*websocket.Conn, func(), bool) {
-	if !sem.tryAcquire() {
+// upgrade acquires a pending-handshake slot for the peer and upgrades the
+// request. The returned release func is idempotent; ok=false means the
+// response was written.
+func upgrade(lim *pendingLimiter, up *websocket.Upgrader, w http.ResponseWriter, r *http.Request) (*websocket.Conn, func(), bool) {
+	release, ok := lim.acquire(r.RemoteAddr)
+	if !ok {
 		http.Error(w, "too many pending connections", http.StatusServiceUnavailable)
 		return nil, nil, false
-	}
-	released := false
-	release := func() {
-		if !released {
-			released = true
-			sem.release()
-		}
 	}
 	ws, err := up.Upgrade(w, r, nil)
 	if err != nil { // Upgrade already replied with an HTTP error

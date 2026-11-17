@@ -43,12 +43,13 @@ const (
 	MaxHandshakeMessage  = 64 << 10 // read limit until authenticated
 	MaxMessage           = 8 << 20  // read limit after authentication
 	MaxContainers        = 4096     // per report; more -> error too_large
-	HandshakeTimeout     = 10 * time.Second
+	HandshakeTimeout     = 5 * time.Second
 	WriteWait            = 10 * time.Second
 	PingInterval         = 20 * time.Second
 	PongWait             = 60 * time.Second // read deadline, refreshed by every frame incl. pong
 	SendQueueSize        = 16               // per-connection outbound queue (single writer goroutine)
 	MaxPendingHandshakes = 64               // concurrent unauthenticated connections per listener
+	MaxPendingPerIP      = 4                // ... per remote IPv4 address or IPv6 /64
 )
 
 // MsgType is the envelope type.
