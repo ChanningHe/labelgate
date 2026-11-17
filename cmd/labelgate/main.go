@@ -3,6 +3,7 @@
 //
 //	labelgate [--config PATH] [--version]      run (mode from config)
 //	labelgate [--config PATH] healthcheck      container HEALTHCHECK
+//	labelgate --help                           print usage
 //
 // Exit codes: 0 clean shutdown (SIGINT/SIGTERM) or healthy, 1 fatal error /
 // unhealthy / bad configuration, 2 usage error.
@@ -34,6 +35,13 @@ const (
 
 const healthcheckCommand = "healthcheck"
 
+const usageHeader = `Usage:
+  labelgate [flags]               run (mode from config)
+  labelgate [flags] healthcheck   container HEALTHCHECK
+
+Flags:
+`
+
 func main() {
 	os.Exit(newApp().run(os.Args[1:], os.Stdout, os.Stderr))
 }
@@ -45,7 +53,11 @@ func (a *app) run(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	configPath := fs.StringP("config", "c", "", "path to configuration file")
 	showVersion := fs.Bool("version", false, "print version and exit")
+	fs.Usage = func() { fmt.Fprint(stdout, usageHeader+fs.FlagUsages()) } // only called for --help/-h
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return exitOK
+		}
 		fmt.Fprintf(stderr, "labelgate: %v\n", err)
 		return exitUsage
 	}

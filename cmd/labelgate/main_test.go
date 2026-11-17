@@ -47,6 +47,8 @@ func TestRunVersionAndUsage(t *testing.T) {
 		wantErr  string
 	}{
 		{"version", []string{"--version"}, exitOK, "labelgate ", ""},
+		{"help", []string{"--help"}, exitOK, "Usage:", ""},
+		{"help shorthand", []string{"-h"}, exitOK, "--config", ""},
 		{"unknown flag", []string{"--nope"}, exitUsage, "", "unknown flag"},
 		{"unknown command", []string{"frobnicate"}, exitUsage, "", "unknown command"},
 		{"extra arguments", []string{"healthcheck", "extra"}, exitUsage, "", "unknown command"},
@@ -59,7 +61,8 @@ func TestRunVersionAndUsage(t *testing.T) {
 			if got := h.app.run(tt.args, &out, &errOut); got != tt.wantCode {
 				t.Fatalf("exit = %d, want %d", got, tt.wantCode)
 			}
-			if !strings.Contains(out.String(), tt.wantOut) || !strings.Contains(errOut.String(), tt.wantErr) {
+			if !strings.Contains(out.String(), tt.wantOut) || !strings.Contains(errOut.String(), tt.wantErr) ||
+				(tt.wantErr == "" && errOut.Len() > 0) {
 				t.Fatalf("stdout=%q stderr=%q", out.String(), errOut.String())
 			}
 		})
