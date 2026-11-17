@@ -128,6 +128,16 @@ func legacyTimeOr(s sql.NullString, fallback int64) int64 {
 	return fallback
 }
 
+// normalizeLegacyAgentID lower-cases a v0.2 agent ID so mixed-case IDs
+// (e.g. "NAS.lan") stay valid under the v0.3 pattern. An ID that is still
+// invalid after lower-casing is returned unchanged.
+func normalizeLegacyAgentID(id string) string {
+	if lower := strings.ToLower(id); model.ValidAgentID(lower) {
+		return lower
+	}
+	return id
+}
+
 // toResource maps a legacy row to a schema-7 resource. ok is false when the
 // row cannot be represented (unknown kind, empty hostname, DNS without type).
 func (r legacyRow) toResource() (model.Resource, bool) {
@@ -135,7 +145,7 @@ func (r legacyRow) toResource() (model.Resource, bool) {
 	res := model.Resource{
 		Kind:     model.Kind(r.resourceType),
 		Hostname: host,
-		Owner: model.Owner{AgentID: r.agentID, ContainerName: r.containerName,
+		Owner: model.Owner{AgentID: normalizeLegacyAgentID(r.agentID), ContainerName: r.containerName,
 			ContainerID: r.containerID, Service: r.serviceName},
 		Credential: r.credential, AccountID: r.accountID, ZoneID: r.zoneID, CFID: r.cfID,
 		RecordType: model.DNSType(strings.ToUpper(strings.TrimSpace(r.recordType))),
@@ -396,7 +406,7 @@ func convertLegacyAgents(ctx context.Context, tx *sql.Tx, now int64) error {
 	for _, a := range agents {
 		_, err := tx.ExecContext(ctx, `INSERT INTO agents
 			(id, name, default_tunnel, public_ip, last_seen, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?)`, a.id, a.name, a.tunnel, a.ip, now, a.created, now)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`, normalizeLegacyAgentID(a.id), a.name, a.tunnel, a.ip, now, a.created, now)
 		if err != nil {
 			return fmt.Errorf("insert migrated agent %q: %w", a.id, err)
 		}

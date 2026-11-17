@@ -1,6 +1,9 @@
 package model
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestIsOwnedComment(t *testing.T) {
 	cases := []struct {
@@ -45,6 +48,14 @@ func TestHostname(t *testing.T) {
 func TestIDsAndKeys(t *testing.T) {
 	if !ValidAgentID("host-1_a") || ValidAgentID("") || ValidAgentID("!x") || ValidAgentID("Host") {
 		t.Error("ValidAgentID mismatch")
+	}
+	for id, want := range map[string]bool{
+		"nas.lan": true, "a.b.c": true, "n1.": true, "NAS.lan": false,
+		".nas": false, "-nas": false, "a b": false, strings.Repeat("a", 63): true, strings.Repeat("a", 64): false,
+	} {
+		if got := ValidAgentID(id); got != want {
+			t.Errorf("ValidAgentID(%q) = %v, want %v", id, got, want)
+		}
 	}
 	if !ValidInstanceID("abcd1234") || ValidInstanceID("ab") || ValidInstanceID("ABCD1234") {
 		t.Error("ValidInstanceID mismatch")

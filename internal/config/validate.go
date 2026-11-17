@@ -390,7 +390,7 @@ func checkAgentServer(cfg Config) error {
 func checkAgentEntry(cf CloudflareConfig, id string, e AgentEntry) error {
 	field := "agent.agents." + id
 	if !model.ValidAgentID(id) {
-		return fail(field, "invalid agent ID %q (must match ^[a-z0-9][a-z0-9_-]{0,62}$)", id)
+		return fail(field, "invalid agent ID %q (must match ^[a-z0-9][a-z0-9._-]{0,62}$)", id)
 	}
 	if strings.TrimSpace(e.Token) == "" {
 		return fail(field+".token", "must not be empty")
@@ -423,7 +423,7 @@ func checkConnect(cfg Config) error {
 	case strings.TrimSpace(c.Token) == "":
 		return fail("connect.token", "must not be empty in agent mode")
 	case c.AgentID != "" && !model.ValidAgentID(c.AgentID):
-		return fail("connect.agent_id", "%q must match ^[a-z0-9][a-z0-9_-]{0,62}$", c.AgentID)
+		return fail("connect.agent_id", "%q must match ^[a-z0-9][a-z0-9._-]{0,62}$", c.AgentID)
 	case c.HeartbeatInterval < MinHeartbeatInterval:
 		return fail("connect.heartbeat_interval", "must be >= %s, got %s", MinHeartbeatInterval, c.HeartbeatInterval)
 	}

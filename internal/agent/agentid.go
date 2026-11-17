@@ -20,7 +20,7 @@ const (
 func resolveAgentID(explicit string, machineID, hostname func() (string, error)) (string, error) {
 	if explicit != "" {
 		if !model.ValidAgentID(explicit) {
-			return "", fmt.Errorf("agent: connect.agent_id %q is invalid (want ^[a-z0-9][a-z0-9_-]{0,62}$)", explicit)
+			return "", fmt.Errorf("agent: connect.agent_id %q is invalid (want ^[a-z0-9][a-z0-9._-]{0,62}$)", explicit)
 		}
 		return explicit, nil
 	}
@@ -53,13 +53,13 @@ func sanitizeAgentID(s string) string {
 	var b strings.Builder
 	for _, r := range strings.ToLower(strings.TrimSpace(s)) {
 		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '_', r == '-':
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '_', r == '-', r == '.':
 			b.WriteRune(r)
 		default:
 			b.WriteByte('-')
 		}
 	}
-	id := strings.TrimLeft(b.String(), "-_")
+	id := strings.TrimLeft(b.String(), "-_.")
 	return truncate(id, maxAgentIDLen)
 }
 
