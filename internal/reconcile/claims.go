@@ -26,10 +26,6 @@ func recordContentKey(r cloudflare.DNSRecord) string {
 	return contentKey(r.Type, r.Content, r.Priority, r.Weight, r.Port, r.Flags, r.Tag)
 }
 
-func rowContentKey(r model.Resource) string {
-	return contentKey(r.RecordType, r.Content, r.Priority, r.Weight, r.Port, r.Flags, r.Tag)
-}
-
 // isDynamicTarget reports whether an A/AAAA target is resolved per cycle.
 func isDynamicTarget(t model.DNSType, target string) bool {
 	return (t == model.DNSTypeA || t == model.DNSTypeAAAA) &&

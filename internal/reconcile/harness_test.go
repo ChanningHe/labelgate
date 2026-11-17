@@ -27,7 +27,6 @@ var (
 	ownMarker  = model.DNSMarker(testInstance)
 	ownTag     = model.AccessTag(testInstance)
 	testZoneV  = cloudflare.Zone{ID: testZone, Name: "example.com", AccountID: testAccount, Credential: "default"}
-	testAcct   = cloudflare.Account{ID: testAccount, Credential: "default"}
 	errBoom    = errors.New("boom")
 	mutatingOp = map[cffake.Op]bool{
 		cffake.OpCreateDNSRecord: true, cffake.OpUpdateDNSRecord: true, cffake.OpDeleteDNSRecord: true,
