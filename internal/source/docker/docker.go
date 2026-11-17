@@ -4,48 +4,216 @@ package docker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"net/netip"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/network"
+	"github.com/moby/moby/client"
 
 	"github.com/channinghe/labelgate/internal/config"
 	"github.com/channinghe/labelgate/internal/model"
 	"github.com/channinghe/labelgate/internal/source"
-	"github.com/moby/moby/client"
 )
 
-var errNotImplemented = errors.New("docker source: not implemented")
+// DefaultEndpoint is used when docker.endpoint is empty.
+const DefaultEndpoint = "unix:///var/run/docker.sock"
+
+const shortIDLen = 12
+
+// Supported endpoint schemes. ssh:// was removed in v0.3.
+const (
+	schemeUnix = "unix"
+	schemeTCP  = "tcp"
+)
 
 // Source is the Docker implementation of source.Source.
 //
-// Required behavior (WP6):
 //   - Endpoints unix:// and tcp:// only; tcp:// uses TLS when docker.tls.* is
-//     set (CA verifies the daemon, cert+key = client certificate). API version
-//     negotiated. No ssh://, no InsecureIgnoreHostKey.
-//   - Snapshot lists running containers only; Name without leading "/";
-//     Networks = network name -> IPAddress (IPv4, or GlobalIPv6Address when no IPv4).
-//   - Watch: subscribe first, then notify; reconnect with config.RetryConfig
-//     backoff (ctx-aware sleeps), notify after each reconnect; also notify every
-//     docker.poll_interval.
-//   - Library: prefer github.com/moby/moby/client (current upstream module);
-//     the chosen module must be govulncheck-clean for reachable code.
+//     set (CA verifies the daemon, cert+key = client certificate). The API
+//     version is negotiated by the client library.
+//   - Snapshot lists running containers (filtered by docker.filter_label).
+//   - Watch subscribes to the event stream first and signals right after each
+//     (re)subscription, so nothing between a list and the subscription is lost;
+//     failures reconnect with ctx-aware backoff forever.
 type Source struct {
-	cli *client.Client
-	log *slog.Logger
+	cli    *client.Client
+	filter string
+	poll   time.Duration
+	retry  config.RetryConfig
+	log    *slog.Logger
+	now    func() time.Time
 }
 
 var _ source.Source = (*Source)(nil)
 
-// New connects to the Docker daemon described by cfg (no I/O until first call).
+// New builds a Docker client for cfg. No I/O happens until the first call.
 func New(cfg config.DockerConfig, retry config.RetryConfig, log *slog.Logger) (*Source, error) {
-	return nil, errNotImplemented
+	endpoint := cfg.Endpoint
+	if endpoint == "" {
+		endpoint = DefaultEndpoint
+	}
+	scheme, err := endpointScheme(endpoint)
+	if err != nil {
+		return nil, err
+	}
+	if log == nil {
+		log = slog.Default()
+	}
+	var opts []client.Opt
+	if scheme == schemeTCP {
+		hc, err := tlsHTTPClient(cfg.TLS, log)
+		if err != nil {
+			return nil, err
+		}
+		if hc != nil {
+			opts = append(opts, client.WithHTTPClient(hc))
+		}
+	}
+	opts = append(opts, client.WithHost(endpoint))
+	cli, err := client.New(opts...)
+	if err != nil {
+		return nil, fmt.Errorf("docker: create client for %q: %w", endpoint, err)
+	}
+	return &Source{
+		cli:    cli,
+		filter: cfg.FilterLabel,
+		poll:   cfg.PollInterval,
+		retry:  retry,
+		log:    log,
+		now:    time.Now,
+	}, nil
 }
+
+// endpointScheme accepts unix:// and tcp:// only.
+func endpointScheme(endpoint string) (string, error) {
+	scheme, rest, ok := strings.Cut(endpoint, "://")
+	if !ok || rest == "" {
+		return "", fmt.Errorf("docker: invalid endpoint %q: want unix:///path or tcp://host:port", endpoint)
+	}
+	switch scheme {
+	case schemeUnix, schemeTCP:
+		return scheme, nil
+	case "ssh":
+		return "", errors.New("docker: ssh:// endpoints were removed in v0.3; use a unix socket or tcp:// with TLS")
+	default:
+		return "", fmt.Errorf("docker: unsupported endpoint scheme %q: want unix or tcp", scheme)
+	}
+}
+
+// Close releases the Docker client.
+func (s *Source) Close() error { return s.cli.Close() }
 
 // Snapshot implements source.Source.
 func (s *Source) Snapshot(ctx context.Context) (model.Snapshot, error) {
-	return model.Snapshot{}, errNotImplemented
+	res, err := s.cli.ContainerList(ctx, client.ContainerListOptions{Filters: s.labelFilters(nil)})
+	if err != nil {
+		return model.Snapshot{}, fmt.Errorf("docker: list containers: %w", err)
+	}
+	containers := make([]model.Container, 0, len(res.Items))
+	for _, c := range res.Items {
+		if c.State != container.StateRunning || !matchesFilter(c.Labels, s.filter) {
+			continue
+		}
+		containers = append(containers, toContainer(c))
+	}
+	slices.SortFunc(containers, func(a, b model.Container) int {
+		if c := strings.Compare(a.Name, b.Name); c != 0 {
+			return c
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	return model.Snapshot{
+		AgentID:    model.LocalAgentID,
+		Complete:   true,
+		Containers: containers,
+		TakenAt:    s.now().UTC(),
+	}, nil
 }
 
-// Watch implements source.Source.
-func (s *Source) Watch(ctx context.Context, notify func()) error { return errNotImplemented }
+// labelFilters returns base plus the daemon-side label filter, if configured.
+func (s *Source) labelFilters(base client.Filters) client.Filters {
+	f := client.Filters{}
+	for term, vals := range base {
+		for v := range vals {
+			f.Add(term, v)
+		}
+	}
+	if s.filter != "" {
+		f.Add("label", s.filter)
+	}
+	return f
+}
 
-// Close releases the Docker client.
-func (s *Source) Close() error { return nil }
+func toContainer(c container.Summary) model.Container {
+	labels := make(map[string]string, len(c.Labels))
+	for k, v := range c.Labels {
+		labels[k] = v
+	}
+	return model.Container{
+		ID:       c.ID,
+		Name:     containerName(c),
+		Labels:   labels,
+		Networks: networkAddrs(c),
+		State:    string(c.State),
+	}
+}
+
+// containerName is the first name without its leading slash (short ID if unnamed).
+func containerName(c container.Summary) string {
+	if len(c.Names) > 0 {
+		if n := strings.TrimPrefix(c.Names[0], "/"); n != "" {
+			return n
+		}
+	}
+	if len(c.ID) > shortIDLen {
+		return c.ID[:shortIDLen]
+	}
+	return c.ID
+}
+
+// networkAddrs maps network name -> IPv4 address, or the global IPv6 address
+// when the endpoint has no IPv4. Networks without an address are omitted.
+func networkAddrs(c container.Summary) map[string]string {
+	if c.NetworkSettings == nil {
+		return nil
+	}
+	out := make(map[string]string, len(c.NetworkSettings.Networks))
+	for name, ep := range c.NetworkSettings.Networks {
+		if addr, ok := endpointAddr(ep); ok {
+			out[name] = addr.String()
+		}
+	}
+	return out
+}
+
+func endpointAddr(ep *network.EndpointSettings) (netip.Addr, bool) {
+	if ep == nil {
+		return netip.Addr{}, false
+	}
+	if ep.IPAddress.IsValid() {
+		return ep.IPAddress, true
+	}
+	if ep.GlobalIPv6Address.IsValid() {
+		return ep.GlobalIPv6Address, true
+	}
+	return netip.Addr{}, false
+}
+
+// matchesFilter implements docker.filter_label: "key" requires the label,
+// "key=value" requires that exact value; "" matches everything.
+func matchesFilter(labels map[string]string, filter string) bool {
+	if filter == "" {
+		return true
+	}
+	key, want, hasValue := strings.Cut(filter, "=")
+	got, ok := labels[key]
+	if !ok {
+		return false
+	}
+	return !hasValue || got == want
+}
