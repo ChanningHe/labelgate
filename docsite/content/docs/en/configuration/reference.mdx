@@ -118,7 +118,7 @@ All endpoints except `GET {base_path}/health` require `Authorization: Bearer <to
 | `GET {base}/agents` | Agents (`active`, `disconnected` within grace, `removed`) |
 | `GET {base}/version` | Version information |
 
-Resource lists accept `status`, `agent_id`, `hostname`, `limit` (default `500`, max `1000`) and `offset`. `total` is the true filtered count. Invalid parameters return `400`. Rejected [conflicting claims](/docs/ownership#conflicts) appear in the resource lists with status `error` and the conflict reason in `last_error`.
+Resource lists accept `status`, `agent_id`, `hostname`, `limit` (default `500`, max `1000`) and `offset`. `total` is the true filtered count. Invalid parameters return `400`. Rejected [conflicting claims](/docs/ownership#conflicts-between-claims) appear in the resource lists with status `error` and the conflict reason in `last_error`.
 
 ### Healthcheck
 
