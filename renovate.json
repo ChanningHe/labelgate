@@ -17,9 +17,10 @@
     },
     {
       "customType": "regex",
-      "description": "Go tools run via go run with a version pinned in workflow env (# renovate: datasource=... depName=...)",
-      "managerFilePatterns": ["/^\\.github/workflows/[^/]+\\.ya?ml$/"],
+      "description": "Go tools run via go run with a version pinned in workflow env or the justfile (# renovate: datasource=... depName=...)",
+      "managerFilePatterns": ["/^\\.github/workflows/[^/]+\\.ya?ml$/", "/^justfile$/"],
       "matchStrings": [
+        "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>\\S+)\\n[a-z_]+_version := \"(?<currentValue>v[0-9][0-9A-Za-z.+-]*)\"",
         "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>\\S+)\\n\\s+[A-Z_]+_VERSION: (?<currentValue>v[0-9][0-9A-Za-z.+-]*)"
       ]
     }
