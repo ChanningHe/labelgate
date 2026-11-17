@@ -19,7 +19,11 @@ Every config file key maps directly to an environment variable:
 | `sync.remove_delay` | `LABELGATE_SYNC_REMOVE_DELAY` |
 | `api.base_path` | `LABELGATE_API_BASE_PATH` |
 
-Priority: **environment variables > config file > defaults**. Map-valued sections (`cloudflare.credentials`, `cloudflare.tunnels`, `agent.agents`) are config-file only.
+Priority: **environment variables > config file > defaults**. Map-valued sections (`cloudflare.credentials`, `cloudflare.tunnels`, `agent.agents`) are config-file only. An environment variable that is set but empty is ignored (it does not blank a value from the config file). Map keys are case-insensitive and lower-cased.
+
+**Durations** are strings with a unit: `30s`, `5m`, `24h`. A bare number is an error everywhere: `sync.interval: 30` and `LABELGATE_SYNC_INTERVAL=30` fail with `invalid duration` (and a YAML `orphan_ttl: 0` fails with `duration must be a string`). Write `0s` for zero.
+
+**Validation depends on the mode.** In `mode: main` Labelgate validates the Cloudflare, sync, database, API and agent-server settings. In `mode: agent` it validates only the logging, `docker`, `retry` and `connect` settings, and the rest is ignored. Keys must be valid in both modes: an unknown key is always an error.
 
 <Callout type="warn">
 Configuration is decoded strictly: an **unknown key is a startup error**, and so are invalid values (for example an unknown `mode`, `log_level` or `log_format`, or a zero `docker.poll_interval`). Labelgate never silently falls back to a default for a value you set.
@@ -45,9 +49,14 @@ Configuration is decoded strictly: an **unknown key is a startup error**, and so
 | `LABELGATE_DOCKER_ENDPOINT` | `docker.endpoint` | `unix:///var/run/docker.sock` | Docker daemon endpoint. `unix://` and `tcp://` only |
 | `LABELGATE_DOCKER_POLL_INTERVAL` | `docker.poll_interval` | `2m` | Fallback polling interval (must be > 0) |
 | `LABELGATE_DOCKER_FILTER_LABEL` | `docker.filter_label` | - | Only watch containers with this label (`key` or `key=value`) |
-| `LABELGATE_DOCKER_TLS_CA` | `docker.tls.ca` | - | TLS CA certificate (for `tcp://` with TLS) |
-| `LABELGATE_DOCKER_TLS_CERT` | `docker.tls.cert` | - | TLS client certificate |
+| `LABELGATE_DOCKER_TLS_CA` | `docker.tls.ca` | - | CA certificate that verifies the daemon (for `tcp://`) |
+| `LABELGATE_DOCKER_TLS_CERT` | `docker.tls.cert` | - | TLS client certificate (must be set together with `key`) |
 | `LABELGATE_DOCKER_TLS_KEY` | `docker.tls.key` | - | TLS client key |
+| `LABELGATE_DOCKER_TLS_INSECURE_SKIP_VERIFY` | `docker.tls.insecure_skip_verify` | `false` | Skip verification of the daemon's certificate. **Not recommended**; logs a warning at startup |
+
+A `tcp://` endpoint uses TLS only when at least one `docker.tls.*` key is set; otherwise the connection is plain, unauthenticated TCP.
+
+Only running containers are considered. With `docker.filter_label` set, containers without that label (or value) are ignored entirely.
 
 ## Cloudflare Credentials
 
@@ -75,9 +84,9 @@ Labelgate only ever deletes Cloudflare resources **that it owns** (see [Ownershi
 | Environment Variable | Config File Path | Default | Description |
 |---------------------|------------------|---------|-------------|
 | `LABELGATE_SYNC_INTERVAL` | `sync.interval` | `5m` | Periodic full reconciliation (in addition to Docker events and agent reports). Minimum `10s` |
-| `LABELGATE_SYNC_REMOVE_DELAY` | `sync.remove_delay` | `30m` | Delay before an orphaned resource with `cleanup=true` is deleted. `0` deletes on the next cycle |
-| `LABELGATE_SYNC_ORPHAN_TTL` | `sync.orphan_ttl` | `0` | Drop the database row (never the Cloudflare object) of orphaned resources with `cleanup=false` after this long. `0` = never |
-| `LABELGATE_SYNC_AGENT_GRACE` | `sync.agent_grace` | `24h` | How long an agent's last reported containers stay desired after the agent was last seen. See [Multi-Host](/docs/examples/multi-host#agent-grace) |
+| `LABELGATE_SYNC_REMOVE_DELAY` | `sync.remove_delay` | `30m` | Delay before an orphaned resource with `cleanup=true` is deleted. `0s` deletes it in the cycle in which it becomes orphaned. Must be >= 0 |
+| `LABELGATE_SYNC_ORPHAN_TTL` | `sync.orphan_ttl` | `0` | Drop the database row (never the Cloudflare object) of orphaned resources with `cleanup=false` after this long. `0s` = never. Must be >= 0 |
+| `LABELGATE_SYNC_AGENT_GRACE` | `sync.agent_grace` | `24h` | How long an agent's last reported containers stay desired after the agent was last seen. Must be >= 0. See [Multi-Host](/docs/examples/multi-host#agent-grace) |
 
 <Callout type="warn">
 A `remove_delay` of `0` means "delete as soon as a resource is no longer desired". Do not copy `0s` from old example files; keep the `30m` default unless you have a reason.
@@ -96,15 +105,15 @@ The database stores the instance ID, ownership records and agent state. Back it 
 | Environment Variable | Config File Path | Default | Description |
 |---------------------|------------------|---------|-------------|
 | `LABELGATE_API_ENABLED` | `api.enabled` | `true` | Enable the HTTP API and dashboard |
-| `LABELGATE_API_ADDRESS` | `api.address` | `:8080` | Listen address |
-| `LABELGATE_API_BASE_PATH` | `api.base_path` | `/api` | API base path. Must start with `/`, no trailing `/`, and must not be `/dashboard`. The dashboard follows it automatically |
+| `LABELGATE_API_ADDRESS` | `api.address` | `:8080` | Listen address (`[host]:port`). Only validated when the API is enabled |
+| `LABELGATE_API_BASE_PATH` | `api.base_path` | `/api` | API base path. Must start with `/`, must not end with `/`, must not contain whitespace, `?` or `#`, and must not be `/dashboard` or below it. The dashboard follows it automatically |
 | `LABELGATE_API_TOKEN` | `api.token` | - | Bearer token, at least 16 characters. **Required**: if empty, the API **and** the dashboard are disabled |
 
 <Callout type="warn">
 **`api.token` is mandatory.** Without it Labelgate logs a loud error, keeps reconciling, and serves **neither** the API **nor** the dashboard. There is no unauthenticated mode. It must be at least 16 characters; use a long random value (`openssl rand -hex 32`) and prefer passing it through `LABELGATE_API_TOKEN`.
 </Callout>
 
-All endpoints except `GET {base_path}/health` require `Authorization: Bearer <token>`. The dashboard is served at `/dashboard/`. The server injects a `<meta name="labelgate-api-base">` tag into the dashboard's `index.html` carrying the configured `api.base_path`, so the dashboard picks up a custom base path automatically and needs no build-time or client-side setting. Even with a token, do not expose the port to the public internet; put it behind a VPN, a reverse proxy with TLS, or a Cloudflare Access application.
+All endpoints except `GET {base_path}/health` require `Authorization: Bearer <token>` (a missing or wrong token gets `401` with `{"error":"unauthorized"}`, including for unknown paths below the base path). Only `GET` and `HEAD` are accepted; other methods get `405`. `/` and `/dashboard` redirect to `/dashboard/`. The dashboard is served at `/dashboard/`. The server injects a `<meta name="labelgate-api-base">` tag into the dashboard's `index.html` carrying the configured `api.base_path`, so the dashboard picks up a custom base path automatically and needs no build-time or client-side setting. Even with a token, do not expose the port to the public internet; put it behind a VPN, a reverse proxy with TLS, or a Cloudflare Access application.
 
 ### Endpoints
 
@@ -124,12 +133,12 @@ Resource lists accept `status`, `agent_id`, `hostname`, `limit` (default `500`, 
 
 The container image runs `labelgate healthcheck` as its `HEALTHCHECK`. It reads the same configuration as the daemon:
 
-- **Main mode, API enabled with a token:** requests `GET http://127.0.0.1:<port>{base_path}/health` (wildcard listen addresses such as `:8080` or `0.0.0.0` are mapped to loopback) with a 2s timeout. HTTP 200 = healthy.
+- **Main mode, API enabled with a token:** requests `GET http://127.0.0.1:<port>{base_path}/health` (wildcard listen addresses such as `:8080` or `0.0.0.0` are mapped to loopback; a specific host such as `192.168.1.5:8080` is used as is) with a 2s timeout. HTTP 200 = healthy.
 - **Main mode, API disabled or no token:** reports healthy (exit 0). Process liveness is Docker's job, so the container is not marked unhealthy just because the API is off.
 - **Agent mode, inbound:** healthy if a TCP connection to `connect.listen` succeeds.
 - **Agent mode, outbound:** healthy (exit 0).
 
-Custom `api.address` and `api.base_path` values are honoured automatically.
+Custom `api.address` and `api.base_path` values are honoured automatically. The command exits with `0` when healthy and `1` when unhealthy or when the configuration cannot be loaded (the reason is printed to stderr). It needs the same environment and config file as the daemon, so a token shorter than 16 characters makes the healthcheck fail the same way startup does.
 
 ## Retry Settings
 
@@ -147,10 +156,10 @@ See [Multi-Host](/docs/examples/multi-host) for how these fit together.
 | Environment Variable | Config File Path | Default | Description |
 |---------------------|------------------|---------|-------------|
 | `LABELGATE_AGENT_ENABLED` | `agent.enabled` | `false` | Start the agent WebSocket listener and dial inbound agents |
-| `LABELGATE_AGENT_LISTEN` | `agent.listen` | `:8081` | Listen address. Agents connect to `<scheme>://<host>:8081/ws` |
+| `LABELGATE_AGENT_LISTEN` | `agent.listen` | `:8081` | Listen address. Agents connect to `<scheme>://<host>:8081/ws`; `GET /health` answers `{"status":"ok"}` without authentication |
 | `LABELGATE_AGENT_ACCEPT_TOKEN` | `agent.accept_token` | - | Shared token accepted from agents that are **not** listed under `agent.agents`. At least 32 characters when set |
-| `LABELGATE_AGENT_ACCEPT_HOSTNAMES` | `agent.accept_hostnames` | - | Glob list limiting the hostnames `accept_token` agents may claim. Empty = unrestricted |
-| `LABELGATE_AGENT_ACCEPT_TUNNELS` | `agent.accept_tunnels` | - | Tunnels `accept_token` agents may target. Empty = only the default tunnel |
+| `LABELGATE_AGENT_ACCEPT_HOSTNAMES` | `agent.accept_hostnames` | - | Glob list limiting the hostnames `accept_token` agents may claim (see [Allow-lists](/docs/examples/multi-host#allow-lists)). Empty = unrestricted |
+| `LABELGATE_AGENT_ACCEPT_TUNNELS` | `agent.accept_tunnels` | - | Tunnels `accept_token` agents may target: `default`, a key of `cloudflare.tunnels` or a tunnel ID. Empty = only the default tunnel |
 | `LABELGATE_AGENT_TLS_CERT` | `agent.tls.cert` | - | Server certificate of the agent listener (enables `wss://`) |
 | `LABELGATE_AGENT_TLS_KEY` | `agent.tls.key` | - | Server key (must be set together with `cert`) |
 | `LABELGATE_AGENT_TLS_CA` | `agent.tls.ca` | system roots | CA used to verify inbound agents when the main dials them |
@@ -158,7 +167,11 @@ See [Multi-Host](/docs/examples/multi-host) for how these fit together.
 
 ### Per-agent entries (`agent.agents.<id>`, config file only)
 
-The map key is the agent ID and must match `^[a-z0-9][a-z0-9._-]{0,62}$` (lower-case letters, digits, `.`, `_` and `-`; dots are allowed, e.g. `nas.lan`).
+The map key is the agent ID and must match `^[a-z0-9][a-z0-9._-]{0,62}$` (lower-case letters, digits, `.`, `_` and `-`).
+
+<Callout type="warn">
+In v0.3.0 the config loader treats `.` in a map key as a path separator, so an entry such as `agent.agents.nas.lan` is rejected with `unknown key`. Use IDs without dots for named agents (`nas-lan`). An ID with dots is valid for `connect.agent_id`, but such an agent can then only authenticate through `agent.accept_token`.
+</Callout>
 
 | Key | Required | Description |
 |-----|----------|-------------|
@@ -182,11 +195,11 @@ openssl rand -hex 32
 | Environment Variable | Config File Path | Default | Description |
 |---------------------|------------------|---------|-------------|
 | `LABELGATE_CONNECT_MODE` | `connect.mode` | `outbound` | `outbound` (agent dials main) or `inbound` (main dials agent) |
-| `LABELGATE_CONNECT_ENDPOINT` | `connect.endpoint` | - | Main instance URL, e.g. `wss://main.example.com:8081/ws`. Required for outbound. **The `/ws` path is required** |
-| `LABELGATE_CONNECT_LISTEN` | `connect.listen` | - | Listen address. Required for inbound |
+| `LABELGATE_CONNECT_ENDPOINT` | `connect.endpoint` | - | Main instance URL, e.g. `wss://main.example.com:8081/ws`. Required for outbound; must be a `ws://` or `wss://` URL. **The `/ws` path is required** (it is not checked at startup, but without it the main answers 404) |
+| `LABELGATE_CONNECT_LISTEN` | `connect.listen` | - | Listen address (`[host]:port`). Required for inbound. Serves `/ws` and an unauthenticated `/health` |
 | `LABELGATE_CONNECT_TOKEN` | `connect.token` | - | Authentication token, at least 32 characters **(required)** |
-| `LABELGATE_CONNECT_AGENT_ID` | `connect.agent_id` | First 12 hex chars of `/etc/machine-id`, else the hostname lower-cased and sanitized | Agent identifier, `^[a-z0-9][a-z0-9._-]{0,62}$`. Dots are allowed; upper-case is not |
-| `LABELGATE_CONNECT_HEARTBEAT_INTERVAL` | `connect.heartbeat_interval` | `30s` | Period of full state reports (>= 1s) |
+| `LABELGATE_CONNECT_AGENT_ID` | `connect.agent_id` | First 12 hex chars of `/etc/machine-id`, else the hostname lower-cased and sanitized | Agent identifier, `^[a-z0-9][a-z0-9._-]{0,62}$`. Dots are allowed; upper-case is not, and an explicit value is never rewritten. The derived default is the first 12 characters of `/etc/machine-id` when they are hex, else the hostname with invalid characters replaced by `-` and truncated to 63 characters |
+| `LABELGATE_CONNECT_HEARTBEAT_INTERVAL` | `connect.heartbeat_interval` | `30s` | Period of full state reports (>= 1s). A report is also sent on connect and shortly after container changes |
 | `LABELGATE_CONNECT_TLS_CA` | `connect.tls.ca` | system roots | CA used to verify the main instance when dialing it |
 | `LABELGATE_CONNECT_TLS_CERT` | `connect.tls.cert` | - | Server certificate of the agent's inbound listener |
 | `LABELGATE_CONNECT_TLS_KEY` | `connect.tls.key` | - | Server key of the inbound listener |
@@ -208,7 +221,7 @@ These v0.2 keys now fail validation with an explicit error. Delete them from you
 | `db.retention` | `LABELGATE_DB_RETENTION` | Was never implemented; deleted rows are no longer retained |
 | `db.vacuum_interval` | `LABELGATE_DB_VACUUM_INTERVAL` | Was never implemented |
 
-A `docker.endpoint` starting with `ssh://` is also rejected. Use the local unix socket, or `tcp://` with TLS (`docker.tls.*`), or run a Labelgate [agent](/docs/examples/multi-host) on the remote host.
+A bare `docker.ssh` section is rejected too, and so is a `docker.endpoint` starting with `ssh://`. Use the local unix socket, or `tcp://` with TLS (`docker.tls.*`), or run a Labelgate [agent](/docs/examples/multi-host) on the remote host.
 
 `sync.interval` still exists and is now actually used (default `5m`, previously documented as `1h` but ignored).
 
@@ -244,7 +257,7 @@ Secrets should still be passed via environment variables where possible; see [Hy
 ### Credential Resolution Order
 
 1. A `credential` label names a credential: that one is used, or the service errors if it does not exist or cannot see the zone.
-2. Otherwise the **longest-suffix zone match** across all credentials (case-insensitive). `zones` patterns restrict which zones a named credential is considered for.
+2. Otherwise the **longest-suffix zone match** across all credentials (case-insensitive); on a tie the root credential wins. `zones` patterns restrict which zones a named credential is considered for (they are ignored when a `credential` label names it explicitly). If the zone list of any credential cannot be loaded, the lookup fails rather than guessing.
 3. Otherwise the root credential (`cloudflare.api_token`).
 4. Otherwise the service errors. There is no hidden fallback.
 
@@ -258,7 +271,7 @@ A `tunnel` label (name or tunnel ID) is resolved to a tunnel ID. An **unknown tu
 
 - **Exact match**: `example.com` matches `example.com`
 - **Suffix match**: `example.com` also matches `www.example.com` and `a.b.example.com`; the longest matching zone wins (so `badexample.com` never matches `example.com`)
-- **Wildcard patterns** in `zones`: `*.example.com` matches subdomains of `example.com`
+- **Wildcard patterns** in `zones`: `*.example.com` matches zones below `example.com` (`a.example.com`, `a.b.example.com`) but not `example.com` itself, so list both
 - Zones are discovered through the Cloudflare API with full pagination, cached per credential, and refreshed on a miss and periodically.
 
 ## Full YAML Config Example
@@ -281,7 +294,7 @@ cloudflare:
 sync:
   interval: 5m
   remove_delay: 30m
-  orphan_ttl: 0
+  orphan_ttl: 0s
   agent_grace: 24h
 
 db:
@@ -295,7 +308,7 @@ retry:
 
 api:
   enabled: true
-  address: :8080
+  address: ":8080"
   base_path: /api
   # Set via LABELGATE_API_TOKEN environment variable (required)
   token: ""

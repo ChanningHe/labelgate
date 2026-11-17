@@ -16,7 +16,7 @@ services:
       - ./labelgate-data:/app/config
       
       # Optional: custom config file
-      # - ./labelgate.yaml:/app/config/labelgate.yaml:ro
+      # - ./labelgate.yaml:/etc/labelgate/labelgate.yaml:ro
     
     environment:
       # Cloudflare credentials (required)

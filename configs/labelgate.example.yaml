@@ -34,6 +34,7 @@ docker:
   #   ca: /path/to/ca.pem                 # LABELGATE_DOCKER_TLS_CA
   #   cert: /path/to/cert.pem             # LABELGATE_DOCKER_TLS_CERT
   #   key: /path/to/key.pem               # LABELGATE_DOCKER_TLS_KEY
+  #   insecure_skip_verify: false         # LABELGATE_DOCKER_TLS_INSECURE_SKIP_VERIFY (NOT recommended)
 
 # Cloudflare configuration (main mode: required unless skip_credential_validation)
 # Default credential and tunnel are at root level for simple ENV mapping.
