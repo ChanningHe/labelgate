@@ -1,7 +1,7 @@
 services:
   # Main Labelgate instance
   labelgate:
-    image: ghcr.io/channinghe/labelgate:${LABELGATE_VERSION:-v0}
+    image: ghcr.io/channinghe/labelgate:${LABELGATE_VERSION:-v0.3}
     container_name: labelgate
     restart: unless-stopped
 
@@ -22,6 +22,10 @@ services:
       - LABELGATE_CLOUDFLARE_API_TOKEN=${LABELGATE_CLOUDFLARE_API_TOKEN}
       - LABELGATE_CLOUDFLARE_ACCOUNT_ID=${LABELGATE_CLOUDFLARE_ACCOUNT_ID}
       - LABELGATE_CLOUDFLARE_TUNNEL_ID=${LABELGATE_CLOUDFLARE_TUNNEL_ID}
+
+      # API and dashboard bearer token (>= 16 chars; generate: openssl rand -hex 32).
+      # Required for the API and dashboard; if empty, both are disabled.
+      - LABELGATE_API_TOKEN=${LABELGATE_API_TOKEN}
       
       # Optional settings
       - LABELGATE_LOG_LEVEL=${LABELGATE_LOG_LEVEL:-info}
