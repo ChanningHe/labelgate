@@ -3,6 +3,7 @@ package reconcile
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/channinghe/labelgate/internal/model"
 )
@@ -106,5 +107,129 @@ func TestSameSourceSharesHostname(t *testing.T) {
 	}
 	if n := len(h.recordsNamed(appHost)); n != 2 {
 		t.Fatalf("records %d", n)
+	}
+}
+
+// A local container absent for one cycle (compose recreate) keeps its
+// hostname: a rejected agent claimant on the same key never takes over.
+func TestTransientAbsenceKeepsHostname(t *testing.T) {
+	h := newHarness(t)
+	local := dnsSpec("web", appHost)
+	local.Target = "192.0.2.1"
+	h.src.set(ctr("web", dnsOnly(local)))
+	evil := dnsSpec("evil", appHost)
+	evil.Target = "198.51.100.66"
+	h.st.setAgents(agentSnap("edge", h.clk.now(), ctr("x", dnsOnly(evil))))
+	h.cycle()
+	recID := h.row(model.KindDNS, appKey).CFID
+
+	h.src.set() // container being recreated
+	h.cycle()
+	h.wantOnlyRejected("edge", ownedByLocal, 1)
+	h.src.set(ctr("web", dnsOnly(local)))
+	h.cycle()
+	row := h.row(model.KindDNS, appKey)
+	if row.Owner.AgentID != "" || row.CFID != recID || row.Status != model.StatusActive || !row.OrphanedAt.IsZero() {
+		t.Fatalf("row %+v", row)
+	}
+	if recs := h.recordsNamed(appHost); len(recs) != 1 || recs[0].Content != "192.0.2.1" {
+		t.Fatalf("records %+v", recs)
+	}
+}
+
+// A rejected agent with a bypass-everyone definition never takes over a
+// local Access application while its owner is briefly absent.
+func TestTransientAbsenceCannotDowngradeAccess(t *testing.T) {
+	h := newHarness(t)
+	local := accessCtr("web", teamDef("alice@example.com"))
+	h.src.set(local)
+	h.cycle()
+	open := model.AccessPolicyDef{Name: "team", Policies: []model.AccessPolicy{{
+		Decision: model.AccessDecisionBypass,
+		Include:  []model.AccessRule{{Selector: model.SelectorEveryone, Values: []string{}}},
+	}}}
+	h.st.setAgents(agentSnap("evil", h.clk.now(), accessCtr("e", open)))
+	h.cycle()
+	h.src.set()
+	h.cycle()
+	h.src.set(local)
+	h.cycle()
+	pols := h.cf.Policies(testAccount)
+	if len(pols) != 1 || pols[0].Decision != "allow" || pols[0].Include[0].Values[0] != "alice@example.com" {
+		t.Fatalf("policies %+v", pols)
+	}
+	if row := h.row(model.KindAccess, appHost); row.Owner.AgentID != "" || row.Status != model.StatusActive {
+		t.Fatalf("access row %+v", row)
+	}
+	h.wantOnlyRejected("evil", ownedByLocal, 1)
+}
+
+// Another owner's class claim never supersedes (deletes) an orphaned
+// cleanup=false record, neither during nor after remove_delay.
+func TestOtherOwnerNeverSupersedesCleanupFalse(t *testing.T) {
+	h := newHarness(t)
+	local := dnsSpec("web", appHost)
+	local.Target, local.Cleanup = "192.0.2.1", false
+	tun := ctr("zz", tunOnly(tunSpec("t", appHost, "http://zz:80")))
+	h.src.set(ctr("web", dnsOnly(local)), tun)
+	h.cycle()
+	h.src.set(tun)
+	for _, step := range []time.Duration{0, 31 * time.Minute, time.Hour} {
+		h.clk.advance(step)
+		h.cycle()
+		recs := h.recordsNamed(appHost)
+		if len(recs) != 1 || recs[0].Content != "192.0.2.1" {
+			t.Fatalf("after %s: records %+v", step, recs)
+		}
+	}
+	if row := h.row(model.KindDNS, cnameKey); row.Status != model.StatusError || !strings.Contains(row.LastError, "cleanup=false") {
+		t.Fatalf("cname row %+v", row)
+	}
+}
+
+// The reservation of an absent owner ends at remove_delay: then another
+// source may take over the row (cleanup=true would delete it at that time).
+func TestOrphanReservationEndsAtRemoveDelay(t *testing.T) {
+	h := newHarness(t)
+	h.src.set(ctr("web", dnsOnly(dnsSpec("web", appHost))))
+	h.cycle()
+	recID := h.row(model.KindDNS, appKey).CFID
+	h.src.set()
+	h.st.setAgents(agentSnap("edge", h.clk.now(), ctr("x", dnsOnly(dnsSpec("web", appHost)))))
+	h.cycle()
+	h.wantOnlyRejected("edge", ownedByLocal, 1)
+	h.clk.advance(29 * time.Minute)
+	h.st.setAgents(agentSnap("edge", h.clk.now(), ctr("x", dnsOnly(dnsSpec("web", appHost)))))
+	h.cycle()
+	h.wantOnlyRejected("edge", ownedByLocal, 1)
+	h.clk.advance(time.Minute)
+	h.cycle()
+	row := h.row(model.KindDNS, appKey)
+	if row.Owner.AgentID != "edge" || row.CFID != recID || row.Status != model.StatusActive {
+		t.Fatalf("row %+v", row)
+	}
+	if len(h.st.list(true)) != 0 {
+		t.Fatal("rejection not cleared")
+	}
+}
+
+// With rows of several sources on one hostname (written by older versions),
+// the source of the oldest row keeps the hostname.
+func TestMixedSourceRowsOldestWins(t *testing.T) {
+	h := newHarness(t)
+	h.st.seed(model.Resource{Kind: model.KindDNS, Key: model.DNSKey(appHost, model.DNSTypeAAAA, ""), Hostname: appHost,
+		Owner: model.Owner{AgentID: "edge", ContainerName: "x", Service: "v6"}, RecordType: model.DNSTypeAAAA,
+		Content: "2001:db8::66", TTL: 1, Status: model.StatusActive, Cleanup: true})
+	h.clk.advance(time.Minute)
+	h.st.seed(model.Resource{Kind: model.KindDNS, Key: appKey, Hostname: appHost,
+		Owner: model.Owner{ContainerName: "web", Service: "web"}, RecordType: model.DNSTypeA,
+		Content: "203.0.113.10", Proxied: true, TTL: 1, Status: model.StatusActive, Cleanup: true})
+	aaaa := model.DNSSpec{Service: "v6", Hostname: appHost, Type: model.DNSTypeAAAA, Target: "2001:db8::66", Cleanup: true}
+	h.src.set(ctr("web", dnsOnly(dnsSpec("web", appHost))))
+	h.st.setAgents(agentSnap("edge", h.clk.now(), ctr("x", dnsOnly(aaaa))))
+	h.cycle()
+	rej := h.st.list(true)
+	if len(rej) != 1 || rej[0].Owner.AgentID != "" || !strings.Contains(rej[0].LastError, "is owned by agent edge") {
+		t.Fatalf("rejected %+v", rej)
 	}
 }

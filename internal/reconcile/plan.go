@@ -136,7 +136,8 @@ func (lc *lifecycle) orphan(t model.Resource, in planInput, classes map[string]s
 		lc.transitions = append(lc.transitions, n)
 	}
 	lc.rows[k] = n
-	if cls, ok := classes[n.Hostname]; ok && rowClass(n) != "" && cls != rowClass(n) {
+	cls, ok := classes[n.Hostname]
+	if ok && rowClass(n) != "" && cls != rowClass(n) && (n.Cleanup || ownSwitch(n, in.Winners)) {
 		lc.superseded[k], lc.due[k] = true, true
 		return
 	}
@@ -157,6 +158,19 @@ func (lc *lifecycle) orphan(t model.Resource, in planInput, classes map[string]s
 		}
 		lc.later(at)
 	}
+}
+
+// ownSwitch reports whether the row's own container now wins its hostname
+// (with another class): only such a switch may delete a cleanup=false
+// resource before its time. Other owners never supersede it.
+func ownSwitch(r model.Resource, winners []claim) bool {
+	for _, w := range winners {
+		o := w.Res.Owner
+		if w.Res.Hostname == r.Hostname && o.AgentID == r.Owner.AgentID && o.ContainerName == r.Owner.ContainerName {
+			return true
+		}
+	}
+	return false
 }
 
 func (lc *lifecycle) later(at time.Time) {

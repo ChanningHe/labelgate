@@ -44,7 +44,7 @@ func (r *Reconciler) cycle(ctx context.Context, now time.Time) ([]string, time.T
 	}
 	tracked, prevRejected := splitRows(all)
 	held := newHoldSet(col.Sources, col.Holds, tracked, col.Claims)
-	res := resolve(col.Claims, tracked, held)
+	res := resolve(col.Claims, tracked, held, now, r.settings.RemoveDelay)
 	rejected := dedupeRejected(concatRows(col.Rejected, res.Rejected, heldRejected(prevRejected, held)))
 	issues = append(issues, rejectionIssues(rejected)...)
 	if !rejectedEqual(prevRejected, rejected) {

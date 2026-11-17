@@ -173,7 +173,8 @@ func createOp(op dnsOp, row model.Resource, want cloudflare.DNSRecord, recs []cl
 			return failDNS(op.Key, model.ConflictNotOwned)
 		}
 		if !deleting[rec.ID] {
-			return failDNS(op.Key, "waiting for superseded "+string(rec.Type)+" record "+rec.ID)
+			return failDNS(op.Key, "conflict: labelgate "+string(rec.Type)+" record "+rec.ID+
+				" is kept (cleanup=false or not yet removed); delete it on Cloudflare to use this hostname")
 		}
 		op.Blockers = append(op.Blockers, rec.ID)
 	}
