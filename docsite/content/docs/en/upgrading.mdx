@@ -1,0 +1,106 @@
+---
+title: Upgrading to v0.3
+description: Breaking changes, automatic database migration, and the upgrade checklist for moving from Labelgate v0.2 to v0.3.
+---
+
+v0.3 is a rewrite of the backend. Labels and the HTTP API stay compatible, but several defaults and security properties changed on purpose. Read this page before upgrading.
+
+## Checklist
+
+1. Back up your data directory (the SQLite database). Labelgate also makes its own backup, see [below](#database-migration).
+2. Change the image tag to `ghcr.io/channinghe/labelgate:v0.3` (see [Image tag](#image-tag)).
+3. Set `LABELGATE_API_TOKEN`, otherwise the dashboard and API are disabled (see [API token required](#api-token-required)).
+4. Remove [removed config keys](#removed-config-keys) from your config and environment.
+5. Make sure your labels are valid (see [Stricter label validation](#stricter-label-validation)).
+6. If you use agents, **upgrade every agent in the same maintenance window** (see [Agents](#agents)).
+7. Start the new version and check the dashboard (or `GET /api/overview`) for errors.
+
+## Breaking changes
+
+### Image tag
+
+The image is published as `ghcr.io/channinghe/labelgate`. There is no `latest` tag. Use:
+
+| Tag | Meaning |
+|-----|---------|
+| `v0.3.0` | Exact version |
+| `v0.3` | Latest patch of 0.3.x (recommended) |
+
+The floating tag `v0` is **not** moved to 0.3 and stays on 0.1.x. If you currently use `ghcr.io/channinghe/labelgate:v0`, you must switch to `v0.3` explicitly to upgrade.
+
+### API token required
+
+`api.token` (`LABELGATE_API_TOKEN`) is now **mandatory**. In v0.2 an empty token meant "no authentication"; in v0.3 an empty token means the **API and the dashboard are disabled** (a loud error is logged, the reconciler keeps running). Set a long random token (`openssl rand -hex 32`) and sign in to the dashboard with it. Do not publish the port to the internet without TLS in front of it.
+
+`api.base_path` is now honoured by the dashboard as well.
+
+### Agents
+
+The agent protocol changed (mutual HMAC authentication, verified TLS). **v0.2 agents cannot connect to a v0.3 main instance and vice versa.** Upgrade the main instance and all agents together, and:
+
+- the WebSocket endpoint must include the **`/ws` path** (`wss://main.example.com:8081/ws`);
+- TLS certificates are **verified by default**. If your agents used self-signed certificates, configure `connect.tls.ca` / `agent.tls.ca`, or (not recommended) opt in to `insecure_skip_verify`;
+- `connect.tls.cert` / `key` no longer mean "client certificate"; they are the server certificate of an inbound agent's listener;
+- agent IDs must match `^[a-z0-9][a-z0-9_-]{0,62}$`; every named agent needs its own non-empty `token`.
+
+While a v0.2 agent cannot connect, its resources are **not** removed immediately. After the migration, the main instance holds each agent's last known resources until the agent reports again, for at most `sync.agent_grace` (default **24h**). After that they become orphaned and, because `cleanup` defaults to `true`, are deleted after `sync.remove_delay` (default 30m). Upgrade agents within the grace period.
+
+### Ownership model
+
+Labelgate now deletes and modifies only what it owns, and it **never adopts** pre-existing records. See [Ownership & Conflicts](/docs/ownership). In practice:
+
+- New DNS records get the comment marker `labelgate:<instance_id>`; Access applications get a `labelgate-<instance_id>` tag.
+- If a hostname you label already exists as a record, Access application or tunnel rule that Labelgate does not own, you get `conflict: existing record not owned by labelgate` instead of the old behaviour of silently taking it over.
+- Tunnel updates preserve your manually managed ingress rules, the catch-all rule and the global `originRequest` / `warp-routing` settings.
+- Access policies are now updated on every reconcile (removing an e-mail from a label removes access), and foreign policies are never touched.
+
+### `cleanup` defaults to `true`
+
+The code has always defaulted `cleanup` to `true`, but the v0.2 documentation claimed `false`. The documentation is fixed; behaviour is unchanged. Resources that Labelgate owns are deleted `sync.remove_delay` (default `30m`) after the container goes away. Set `cleanup: "false"` per service to keep them. Make sure your config files do not contain `remove_delay: 0s`, which means "delete immediately".
+
+### Stricter label validation
+
+Invalid label values and unknown properties are now **errors** instead of being silently replaced by defaults:
+
+- an invalid boolean, integer or enum value (`proxied: "maybe"`, `ttl: "abc"`, `type: "AAAAA"`) drops that service and reports an error;
+- an unknown property (`labelgate.dns.web.hostnme`) is reported as an error;
+- hostnames are normalised (lower-case, trimmed, trailing dot removed) and validated;
+- the same hostname used by a DNS and a tunnel service is a conflict (see [Ownership & Conflicts](/docs/ownership#conflicts-between-claims)).
+
+Label errors are logged with the container and label key and turn the sync status to `error` in `/overview` and the dashboard. Previously ignored typos can therefore surface after the upgrade; this is intended.
+
+### Removed config keys
+
+| Removed | Replacement |
+|---------|-------------|
+| `docker.ssh.key`, `docker.ssh.key_passphrase`, `docker.ssh.known_hosts` and `ssh://` Docker endpoints | Local socket, `tcp://` with `docker.tls.*`, or a Labelgate agent on the remote host |
+| `db.retention` | None (delete the key) |
+| `db.vacuum_interval` | None (delete the key) |
+
+These now fail at startup with an explicit error. Unknown `mode`, `log_level` and `log_format` values also fail instead of silently falling back.
+
+### Other behaviour changes
+
+- `sync.interval` is now implemented; the default is `5m` (it was documented as `1h` but unused). Minimum `10s`.
+- Labels no longer default `credential` to `"default"`. Credentials are chosen automatically by longest-suffix zone match, then the root credential. An unknown `tunnel` label is an error instead of silently using another tunnel.
+- The process exits with a non-zero status on fatal errors, so `restart: on-failure` works.
+- `HEALTHCHECK` honours `api.address` and `api.base_path`, and reports healthy when the API is disabled.
+- API pagination: `limit` defaults to 500 (max 1000), `total` is the true count, invalid parameters return `400`.
+
+## Database migration
+
+The v0.2 database is migrated automatically on first start; there is nothing to run.
+
+1. Before touching a v0.2 database, Labelgate writes a consistent backup next to it using `VACUUM INTO`: `<db.path>.v0.2.bak` (by default `/app/config/labelgate.db.v0.2.bak`). **If the backup cannot be written, the migration does not run** and Labelgate stops with an error. Make sure the directory is writable and has free space.
+2. The migration then runs in a single transaction. Deleted rows are dropped, duplicates are collapsed (the most recently updated wins), hostnames are normalised and timestamps converted.
+3. A random **instance ID** is generated and stored.
+4. Every resource v0.2 was tracking is treated as **owned by this instance**, because Labelgate created it. On the next update each DNS record is stamped with the comment marker and each Access application with the tag. Tunnel CNAME records that v0.2 created without tracking them get tracking rows too.
+5. Reusable Access policies created by v0.2 are not owned in the new model. They are never adopted and never deleted; Labelgate creates new per-hostname policies and you can delete the old ones in the Cloudflare dashboard.
+
+There is no downgrade path: v0.3 refuses a database written by a newer schema, and v0.2 cannot read the new one. To roll back, stop Labelgate, restore `labelgate.db.v0.2.bak` (or your own backup) as the database, and start the previous image.
+
+## Verifying the upgrade
+
+- Open the dashboard (or call `GET /api/overview` with your token) and confirm the sync status is `success`.
+- Check `GET /api/resources/dns?status=error` for conflicts that need manual resolution.
+- Check that each agent shows as `active` in `GET /api/agents`.
