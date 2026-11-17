@@ -8,6 +8,9 @@ import (
 	"time"
 )
 
+// agentToken meets the 32-character minimum for agent tokens.
+var agentToken = strings.Repeat("k", MinAgentTokenLen)
+
 // validMain returns a valid main-mode config with a root credential and tunnel.
 func validMain() Config {
 	cfg := Defaults()
@@ -21,7 +24,7 @@ func validMain() Config {
 func validAgent() Config {
 	cfg := Defaults()
 	cfg.Mode = ModeAgent
-	cfg.Connect.Token = "agent-token"
+	cfg.Connect.Token = agentToken
 	cfg.Connect.Endpoint = "wss://main.example.com:8081/ws"
 	return cfg
 }
@@ -151,6 +154,9 @@ func TestValidate_API(t *testing.T) {
 		{"bad address port", m, func(c *Config) { c.API.Address = ":http" }, "api.address", "invalid port"},
 		{"disabled api skips checks", m, func(c *Config) { c.API.Enabled = false; c.API.Address = "x"; c.API.BasePath = "x" }, "", ""},
 		{"empty token ok (api disabled at runtime)", m, func(c *Config) { c.API.Token = "" }, "", ""},
+		{"short api token", m, func(c *Config) { c.API.Token = strings.Repeat("a", MinAPITokenLen-1) }, "api.token", "openssl rand -hex 32"},
+		{"minimum api token ok", m, func(c *Config) { c.API.Token = strings.Repeat("a", MinAPITokenLen) }, "", ""},
+		{"short api token ignored when api disabled", m, func(c *Config) { c.API.Enabled = false; c.API.Token = "x" }, "", ""},
 	})
 }
 
@@ -167,20 +173,20 @@ func TestValidate_Cloudflare(t *testing.T) {
 		{"no credential but skipped", m, func(c *Config) { c.Cloudflare = CloudflareConfig{}; c.SkipCredentialValidation = true }, "", ""},
 		{"only named credential ok", m, func(c *Config) {
 			c.Cloudflare = CloudflareConfig{}
-			creds(c, "corp", CredentialConfig{APIToken: "t"})
+			creds(c, "corp", CredentialConfig{APIToken: agentToken})
 		}, "", ""},
 		{"tunnel id without account", m, func(c *Config) { c.Cloudflare.AccountID = "" }, "cloudflare.account_id", "required"},
 		{"tunnel id without token", m, func(c *Config) {
 			c.Cloudflare.APIToken = ""
-			creds(c, "corp", CredentialConfig{APIToken: "t"})
+			creds(c, "corp", CredentialConfig{APIToken: agentToken})
 		}, "cloudflare.api_token", "root credential"},
-		{"credential named default", m, func(c *Config) { creds(c, "default", CredentialConfig{APIToken: "t"}) }, "cloudflare.credentials.default", "reserved"},
-		{"credential bad name", m, func(c *Config) { creds(c, "Corp Co", CredentialConfig{APIToken: "t"}) }, "cloudflare.credentials.Corp Co", "must match"},
+		{"credential named default", m, func(c *Config) { creds(c, "default", CredentialConfig{APIToken: agentToken}) }, "cloudflare.credentials.default", "reserved"},
+		{"credential bad name", m, func(c *Config) { creds(c, "Corp Co", CredentialConfig{APIToken: agentToken}) }, "cloudflare.credentials.Corp Co", "must match"},
 		{"credential empty token", m, func(c *Config) { creds(c, "corp", CredentialConfig{APIToken: " "}) }, "cloudflare.credentials.corp.api_token", "must not be empty"},
-		{"credential bad zone", m, func(c *Config) { creds(c, "corp", CredentialConfig{APIToken: "t", Zones: []string{"[bad"}}) }, "cloudflare.credentials.corp.zones", "invalid zone pattern"},
-		{"credential empty zone", m, func(c *Config) { creds(c, "corp", CredentialConfig{APIToken: "t", Zones: []string{""}}) }, "cloudflare.credentials.corp.zones", "invalid zone pattern"},
+		{"credential bad zone", m, func(c *Config) { creds(c, "corp", CredentialConfig{APIToken: agentToken, Zones: []string{"[bad"}}) }, "cloudflare.credentials.corp.zones", "invalid zone pattern"},
+		{"credential empty zone", m, func(c *Config) { creds(c, "corp", CredentialConfig{APIToken: agentToken, Zones: []string{""}}) }, "cloudflare.credentials.corp.zones", "invalid zone pattern"},
 		{"credential zones ok", m, func(c *Config) {
-			creds(c, "corp", CredentialConfig{APIToken: "t", Zones: []string{"example.com", "*.corp.io"}})
+			creds(c, "corp", CredentialConfig{APIToken: agentToken, Zones: []string{"example.com", "*.corp.io"}})
 		}, "", ""},
 		{"tunnel named default", m, func(c *Config) { tunnels(c, "default", TunnelConfig{AccountID: "a", TunnelID: "t"}) }, "cloudflare.tunnels.default", "reserved"},
 		{"tunnel bad name", m, func(c *Config) { tunnels(c, "-x", TunnelConfig{AccountID: "a", TunnelID: "t"}) }, "cloudflare.tunnels.-x", "must match"},
@@ -191,11 +197,11 @@ func TestValidate_Cloudflare(t *testing.T) {
 		}, "cloudflare.tunnels.sec.credential", "not defined"},
 		{"tunnel root credential missing", m, func(c *Config) {
 			c.Cloudflare.APIToken, c.Cloudflare.TunnelID, c.Cloudflare.AccountID = "", "", ""
-			creds(c, "corp", CredentialConfig{APIToken: "t"})
+			creds(c, "corp", CredentialConfig{APIToken: agentToken})
 			tunnels(c, "sec", TunnelConfig{AccountID: "a", TunnelID: "t"})
 		}, "cloudflare.tunnels.sec.credential", "root credential"},
 		{"tunnel with named credential ok", m, func(c *Config) {
-			creds(c, "corp", CredentialConfig{APIToken: "t"})
+			creds(c, "corp", CredentialConfig{APIToken: agentToken})
 			tunnels(c, "sec", TunnelConfig{AccountID: "a", TunnelID: "t", Credential: "corp"})
 		}, "", ""},
 		{"tunnel with explicit root credential ok", m, func(c *Config) {
@@ -244,17 +250,22 @@ func TestValidate_AgentServer(t *testing.T) {
 		{"accept hostnames ok", base, func(c *Config) { c.Agent.AcceptHostnames = []string{"*.ok.com", "a.b.com"} }, "", ""},
 		{"accept tunnels unknown", base, func(c *Config) { c.Agent.AcceptTunnels = []string{"nope"} }, "agent.accept_tunnels", "unknown tunnel"},
 		{"accept tunnels by name, default and id", base, func(c *Config) { c.Agent.AcceptTunnels = []string{"sec", "default", "t2", "tunnel-1"} }, "", ""},
-		{"agent invalid id", base, func(c *Config) { entry(c, "Bad ID", AgentEntry{Token: "t"}) }, "agent.agents.Bad ID", "invalid agent ID"},
+		{"agent invalid id", base, func(c *Config) { entry(c, "Bad ID", AgentEntry{Token: agentToken}) }, "agent.agents.Bad ID", "invalid agent ID"},
 		{"agent empty token", base, func(c *Config) { entry(c, "web", AgentEntry{}) }, "agent.agents.web.token", "must not be empty"},
+		{"agent short token", base, func(c *Config) { entry(c, "web", AgentEntry{Token: strings.Repeat("a", MinAgentTokenLen-1)}) }, "agent.agents.web.token", "openssl rand -hex 32"},
+		{"agent multibyte token counts characters", base, func(c *Config) { entry(c, "web", AgentEntry{Token: strings.Repeat("é", MinAgentTokenLen)}) }, "", ""},
+		{"short accept token", base, func(c *Config) { c.Agent.AcceptToken = "shared" }, "agent.accept_token", "openssl rand -hex 32"},
+		{"accept token ok", base, func(c *Config) { c.Agent.AcceptToken = agentToken }, "", ""},
+		{"agent dotted id ok", base, func(c *Config) { entry(c, "nas.lan", AgentEntry{Token: agentToken}) }, "", ""},
 		{"agent whitespace token", base, func(c *Config) { entry(c, "web", AgentEntry{Token: "  "}) }, "agent.agents.web.token", "must not be empty"},
-		{"agent bad connect_to", base, func(c *Config) { entry(c, "web", AgentEntry{Token: "t", ConnectTo: "http://h/ws"}) }, "agent.agents.web.connect_to", "ws:// or wss://"},
-		{"agent connect_to without host", base, func(c *Config) { entry(c, "web", AgentEntry{Token: "t", ConnectTo: "ws://"}) }, "agent.agents.web.connect_to", "ws:// or wss://"},
-		{"agent unknown default tunnel", base, func(c *Config) { entry(c, "web", AgentEntry{Token: "t", DefaultTunnel: "nope"}) }, "agent.agents.web.default_tunnel", "unknown tunnel"},
-		{"agent unknown tunnel", base, func(c *Config) { entry(c, "web", AgentEntry{Token: "t", Tunnels: []string{"nope"}}) }, "agent.agents.web.tunnels", "unknown tunnel"},
-		{"agent bad hostname glob", base, func(c *Config) { entry(c, "web", AgentEntry{Token: "t", Hostnames: []string{"a b"}}) }, "agent.agents.web.hostnames", "invalid pattern"},
+		{"agent bad connect_to", base, func(c *Config) { entry(c, "web", AgentEntry{Token: agentToken, ConnectTo: "http://h/ws"}) }, "agent.agents.web.connect_to", "ws:// or wss://"},
+		{"agent connect_to without host", base, func(c *Config) { entry(c, "web", AgentEntry{Token: agentToken, ConnectTo: "ws://"}) }, "agent.agents.web.connect_to", "ws:// or wss://"},
+		{"agent unknown default tunnel", base, func(c *Config) { entry(c, "web", AgentEntry{Token: agentToken, DefaultTunnel: "nope"}) }, "agent.agents.web.default_tunnel", "unknown tunnel"},
+		{"agent unknown tunnel", base, func(c *Config) { entry(c, "web", AgentEntry{Token: agentToken, Tunnels: []string{"nope"}}) }, "agent.agents.web.tunnels", "unknown tunnel"},
+		{"agent bad hostname glob", base, func(c *Config) { entry(c, "web", AgentEntry{Token: agentToken, Hostnames: []string{"a b"}}) }, "agent.agents.web.hostnames", "invalid pattern"},
 		{"agent full ok", base, func(c *Config) {
 			entry(c, "web-1", AgentEntry{
-				Token: "t", Name: "Web", DefaultTunnel: "sec", Tunnels: []string{"sec"},
+				Token: agentToken, Name: "Web", DefaultTunnel: "sec", Tunnels: []string{"sec"},
 				Hostnames: []string{"*.example.com"}, ConnectTo: "wss://agent:8081/ws",
 			})
 		}, "", ""},
@@ -268,6 +279,7 @@ func TestValidate_AgentMode(t *testing.T) {
 	a := validAgent
 	runValidateCases(t, []validateCase{
 		{"empty token", a, func(c *Config) { c.Connect.Token = "" }, "connect.token", "must not be empty"},
+		{"short token", a, func(c *Config) { c.Connect.Token = "tok" }, "connect.token", "openssl rand -hex 32"},
 		{"outbound missing endpoint", a, func(c *Config) { c.Connect.Endpoint = "" }, "connect.endpoint", "required"},
 		{"outbound http endpoint", a, func(c *Config) { c.Connect.Endpoint = "https://main/ws" }, "connect.endpoint", "ws:// or wss://"},
 		{"outbound ws ok", a, func(c *Config) { c.Connect.Endpoint = "ws://main:8081/ws" }, "", ""},
@@ -286,7 +298,7 @@ func TestValidate_AgentMode(t *testing.T) {
 
 func TestValidate_DoesNotMutate(t *testing.T) {
 	cfg := validMain()
-	cfg.Cloudflare.Credentials = map[string]CredentialConfig{"corp": {APIToken: "t"}}
+	cfg.Cloudflare.Credentials = map[string]CredentialConfig{"corp": {APIToken: agentToken}}
 	before := cfg.Cloudflare.Credentials["corp"].APIToken
 	if err := Validate(cfg); err != nil {
 		t.Fatal(err)

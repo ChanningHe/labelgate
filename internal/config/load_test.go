@@ -223,11 +223,11 @@ cloudflare:
   account_id: a1
 agent:
   enabled: true
-  accept_token: shared
+  accept_token: "ssssssssssssssssssssssssssssssss"
   accept_hostnames: ["*.example.com"]
   agents:
     web-1:
-      token: secret
+      token: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
       name: Web One
       default_tunnel: default
       tunnels: [default]
@@ -236,7 +236,7 @@ agent:
 `)
 	cfg := mustLoad(t, path, env("LABELGATE_AGENT_ACCEPT_TUNNELS", "default, t1 ,"))
 	a := cfg.Agent
-	if !a.Enabled || a.AcceptToken != "shared" || !reflect.DeepEqual(a.AcceptHostnames, []string{"*.example.com"}) {
+	if !a.Enabled || a.AcceptToken != strings.Repeat("s", 32) || !reflect.DeepEqual(a.AcceptHostnames, []string{"*.example.com"}) {
 		t.Errorf("agent: %+v", a)
 	}
 	if !reflect.DeepEqual(a.AcceptTunnels, []string{"default", "t1"}) {
@@ -244,7 +244,7 @@ agent:
 	}
 	e := a.Agents["web-1"]
 	want := AgentEntry{
-		Token: "secret", Name: "Web One", DefaultTunnel: "default", Tunnels: []string{"default"},
+		Token: strings.Repeat("x", 32), Name: "Web One", DefaultTunnel: "default", Tunnels: []string{"default"},
 		Hostnames: []string{"web.example.com"}, ConnectTo: "wss://web-1:8081/ws",
 	}
 	if !reflect.DeepEqual(e, want) {
@@ -255,7 +255,7 @@ agent:
 func TestLoad_AgentModeFromEnv(t *testing.T) {
 	cfg := mustLoad(t, "", env(
 		"LABELGATE_MODE", "agent",
-		"LABELGATE_CONNECT_TOKEN", "tok",
+		"LABELGATE_CONNECT_TOKEN", strings.Repeat("t", 32),
 		"LABELGATE_CONNECT_ENDPOINT", "wss://main/ws",
 		"LABELGATE_CONNECT_HEARTBEAT_INTERVAL", "45s",
 		"LABELGATE_CONNECT_TLS_CA", "/ca.pem",
