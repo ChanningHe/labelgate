@@ -1,6 +1,7 @@
 package reconcile
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -42,6 +43,33 @@ func TestAgentGraceKeepsThenOrphans(t *testing.T) {
 	if len(h.records()) != 0 {
 		t.Fatal("orphaned agent record not cleaned up")
 	}
+}
+
+// A connected agent is present even when its last report is older than the
+// grace window (e.g. a short agent_grace and a long heartbeat).
+func TestConnectedAgentIsPresentBeyondGrace(t *testing.T) {
+	connected := true
+	h := newHarness(t, func(s *Settings) {
+		s.AgentGrace = time.Minute
+		s.Connected = func(id string) bool { return connected && id == "edge" }
+	})
+	h.st.setAgents(agentSnap("edge", h.clk.now(), ctr("web", dnsOnly(dnsSpec("web", appHost)))))
+	h.cycle()
+	h.clk.advance(10 * time.Minute)
+	h.cf.ResetCalls()
+	h.cycle()
+	if row := h.row(model.KindDNS, appKey); row.Status != model.StatusActive || !row.OrphanedAt.IsZero() {
+		t.Fatalf("connected agent orphaned: %+v", row)
+	}
+	if h.mutations() != 0 {
+		t.Fatalf("mutations %+v", h.cf.Calls())
+	}
+	if d := h.r.runCycle(context.Background()); !d.IsZero() && !d.After(h.clk.now()) {
+		t.Fatalf("deadline in the past: %s", d)
+	}
+	connected = false
+	h.cycle()
+	wantStatus(t, h.row(model.KindDNS, appKey), model.StatusPendingCleanup)
 }
 
 func TestAgentNotAllowedOrphans(t *testing.T) {

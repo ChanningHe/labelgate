@@ -60,6 +60,9 @@ type Settings struct {
 	Debounce    time.Duration
 	MaxDebounce time.Duration
 	Agents      AgentPolicies
+	// Connected reports live agent sessions (agent.Hub.Connected): a
+	// connected agent is present regardless of AgentGrace. nil = none.
+	Connected func(agentID string) bool
 }
 
 // Deps are the reconciler's collaborators.

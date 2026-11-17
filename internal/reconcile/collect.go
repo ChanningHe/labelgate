@@ -74,14 +74,18 @@ func (r *Reconciler) classifyAgent(s model.Snapshot, now time.Time, out *collect
 	policy := r.settings.Agents(s.AgentID)
 	src := &sourceInfo{AgentID: s.AgentID, Snapshot: s, Policy: policy}
 	expiry := s.TakenAt.Add(r.settings.AgentGrace)
+	connected := r.settings.Connected != nil && r.settings.Connected(s.AgentID)
 	switch {
-	case !policy.Allowed, s.TakenAt.IsZero(), now.After(expiry):
+	case !policy.Allowed, s.TakenAt.IsZero(), now.After(expiry) && !connected:
 		src.State = sourceAbsent
 		return src
 	case !s.Complete:
 		src.State = sourceHeld
 	default:
 		src.State = sourcePresent
+	}
+	if !expiry.After(now) { // connected beyond grace: no deadline to wait for
+		return src
 	}
 	if out.Deadline.IsZero() || expiry.Before(out.Deadline) {
 		out.Deadline = expiry

@@ -132,7 +132,10 @@ func TestValidate_SyncAndDB(t *testing.T) {
 		{"remove delay negative", m, func(c *Config) { c.Sync.RemoveDelay = -1 }, "sync.remove_delay", ">= 0"},
 		{"remove delay zero ok", m, func(c *Config) { c.Sync.RemoveDelay = 0 }, "", ""},
 		{"orphan ttl negative", m, func(c *Config) { c.Sync.OrphanTTL = -1 }, "sync.orphan_ttl", ">= 0"},
-		{"agent grace negative", m, func(c *Config) { c.Sync.AgentGrace = -1 }, "sync.agent_grace", ">= 0"},
+		{"agent grace negative", m, func(c *Config) { c.Sync.AgentGrace = -1 }, "sync.agent_grace", ">= 5m"},
+		{"agent grace zero", m, func(c *Config) { c.Sync.AgentGrace = 0 }, "sync.agent_grace", ">= 5m"},
+		{"agent grace below floor", m, func(c *Config) { c.Sync.AgentGrace = 4 * time.Minute }, "sync.agent_grace", ">= 5m"},
+		{"agent grace floor ok", m, func(c *Config) { c.Sync.AgentGrace = MinAgentGrace }, "", ""},
 		{"empty db path", m, func(c *Config) { c.DB.Path = "  " }, "db.path", "must not be empty"},
 	})
 }

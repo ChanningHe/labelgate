@@ -23,6 +23,9 @@ const (
 	MinSyncInterval = 10 * time.Second
 	// MinHeartbeatInterval is the smallest allowed connect.heartbeat_interval.
 	MinHeartbeatInterval = time.Second
+	// MinAgentGrace is the smallest allowed sync.agent_grace: shorter windows
+	// would orphan agents between two heartbeats.
+	MinAgentGrace = 5 * time.Minute
 	// MinAgentTokenLen is the smallest allowed agent token (named agents,
 	// agent.accept_token, connect.token). Tokens are guessable offline from a
 	// captured handshake, so they must carry real entropy.
@@ -57,7 +60,7 @@ func fail(field, format string, args ...any) error {
 //     retry.max_delay >= retry.delay.
 //   - docker.endpoint unix:// or tcp:// (ssh:// -> removal message);
 //     docker.poll_interval > 0; TLS cert and key set together.
-//   - main mode: sync.interval >= 10s, remove_delay/orphan_ttl/agent_grace >= 0,
+//   - main mode: sync.interval >= 10s, remove_delay/orphan_ttl >= 0, agent_grace >= 5m,
 //     db.path set, api.address and api.base_path shape, cloudflare credentials
 //     and tunnels (names, tokens, references), default_tunnel resolvable, at
 //     least one credential unless skip_credential_validation, agent listener
@@ -193,8 +196,8 @@ func checkSyncDB(cfg Config) error {
 		return fail("sync.remove_delay", "must be >= 0, got %s", s.RemoveDelay)
 	case s.OrphanTTL < 0:
 		return fail("sync.orphan_ttl", "must be >= 0, got %s", s.OrphanTTL)
-	case s.AgentGrace < 0:
-		return fail("sync.agent_grace", "must be >= 0, got %s", s.AgentGrace)
+	case s.AgentGrace < MinAgentGrace:
+		return fail("sync.agent_grace", "must be >= 5m, got %s", s.AgentGrace)
 	case strings.TrimSpace(cfg.DB.Path) == "":
 		return fail("db.path", "must not be empty")
 	}
