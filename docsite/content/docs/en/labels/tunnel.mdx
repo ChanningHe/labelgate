@@ -9,19 +9,23 @@ description: Complete reference for Labelgate Tunnel label properties.
 labelgate.tunnel.<service_name>.<property>=<value>
 ```
 
+Invalid values and unknown properties are errors; see [Strict Validation](/docs/labels#strict-validation).
+
 ## Properties
 
 | Property | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `hostname` | Yes | - | Public hostname for the service |
+| `hostname` | Yes | - | Public hostname for the service (normalised to lower-case) |
 | `service` | Yes | - | Backend service URL: `protocol://host:port` |
-| `tunnel` | No | `default` | Tunnel name to use |
+| `tunnel` | No | default tunnel | Tunnel name (key of `cloudflare.tunnels`) or tunnel ID. Empty = `default_tunnel` / the root tunnel. An unknown tunnel is an error |
 | `path` | No | - | Path regex to match (e.g., `\.(jpg\|png)$`) |
-| `credential` | No | `default` | Credential name to use |
-| `cleanup` | No | `false` | Delete ingress rule when container stops |
+| `credential` | No | automatic | Credential used for the tunnel's CNAME record and Access. Empty = zone match, then root credential |
+| `cleanup` | No | `true` | Remove the ingress rule (and its CNAME) after the container is gone and `sync.remove_delay` has passed. Only owned rules are ever removed |
 | `access` | No | - | Access policy name to apply |
 
 ## Service Protocols
+
+The `service` scheme must be one of:
 
 | Protocol | Format | Description |
 |----------|--------|-------------|
@@ -32,16 +36,26 @@ labelgate.tunnel.<service_name>.<property>=<value>
 | TCP | `tcp://host:port` | Raw TCP |
 | UDP | `udp://host:port` | UDP (requires WARP) |
 | Unix | `unix:/path/to/socket` | Unix socket |
+| Unix + TLS | `unix+tls:/path/to/socket` | Unix socket with TLS |
 | Hello World | `hello_world` | Test endpoint |
 | HTTP Status | `http_status:404` | Return a fixed status code |
+| Bastion | `bastion` | Browser-rendered bastion |
 
 <Callout type="info">
-When using tunnel mode, Cloudflare automatically creates a CNAME DNS record for the hostname pointing to your tunnel. You do not need to create a separate DNS record.
+For each tunnel hostname Labelgate creates a CNAME record pointing to `<tunnel-id>.cfargotunnel.com`, marked as owned like every other DNS record. Do not add a separate DNS service for the same hostname: that is a [conflict](/docs/labels#dns-and-tunnel-on-the-same-hostname).
 </Callout>
+
+<Callout type="warn">
+Services reported by [agents](/docs/examples/multi-host) are checked by an SSRF guard: `localhost`, loopback, link-local, unspecified and multicast addresses and `unix:` services are rejected, and the tunnel must be on the agent's allow-list.
+</Callout>
+
+## Ownership of Ingress Rules
+
+Labelgate only manages the ingress rules it created, identified by (tunnel, hostname, path). Rules you created by hand, the catch-all rule, the global `originRequest` and `warp-routing` settings are preserved untouched. If you label a hostname that already has a manual rule, the service gets `conflict: existing record not owned by labelgate` and the manual rule is left alone. See [Ownership & Conflicts](/docs/ownership#coexisting-with-manually-managed-tunnel-ingress).
 
 ## Origin Request Configuration
 
-Fine-tune the connection between cloudflared and your origin service:
+Fine-tune the connection between cloudflared and your origin service. Duration values accept `30s`-style durations or plain seconds (`30`). An unset or empty setting is removed from the rule; settings Labelgate does not model are preserved.
 
 ### Connection Settings
 
@@ -133,6 +147,8 @@ services:
 
 ### Path-based routing
 
+Path rules are first-class: the identity of a rule is (tunnel, hostname, path), so several services can share a hostname with different paths. For the same hostname, more specific paths are written before less specific ones.
+
 ```yaml
 services:
   static:
@@ -141,4 +157,7 @@ services:
       labelgate.tunnel.static.hostname: "example.com"
       labelgate.tunnel.static.service: "http://static:80"
       labelgate.tunnel.static.path: "\\.(jpg|png|css|js)$"
+      labelgate.tunnel.api.hostname: "example.com"
+      labelgate.tunnel.api.service: "http://api:3000"
+      labelgate.tunnel.api.path: "^/api/"
 ```

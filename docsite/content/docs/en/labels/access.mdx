@@ -171,9 +171,19 @@ labels:
   labelgate.tunnel.admin.access: "internal"
 ```
 
+## Ownership
+
+Access applications created by Labelgate carry the Access tag `labelgate-<instance_id>`. Reusable policies are created **per hostname** (named `<policy.name or app name> (<hostname>)`) and their IDs are recorded in Labelgate's database. Only these objects are ever modified or deleted:
+
+- Policies are **updated on every reconcile** when include, require, exclude, decision or name differ. Removing `bob@example.com` from a label removes Bob's access on the next sync.
+- A policy or application that Labelgate did not create is never adopted, updated or deleted, even if its name matches. If an application with the hostname's domain exists without Labelgate's tag, the service reports `conflict: existing record not owned by labelgate`.
+- If updating an application fails, the service goes to the error state. Labelgate never creates a second application as a workaround.
+
+Policy definitions are resolved within the **same source**: first the same container, then the other containers of the same host or agent. Two different definitions with the same name in one source are rejected as ambiguous, and an agent can never bind or alter definitions on the main host. See [Ownership & Conflicts](/docs/ownership#access-applications-and-policies).
+
 ## Cleanup Behavior
 
-Access policies don't have their own `cleanup` label. Instead, the cleanup behavior is **inherited from the tunnel or DNS service** that references the access policy.
+Access policies don't have their own `cleanup` label. Instead, the cleanup behavior is **inherited from the tunnel or DNS service** that references the access policy. `cleanup` defaults to `true`.
 
 ```yaml
 labels:
@@ -183,13 +193,13 @@ labels:
   labelgate.tunnel.web.hostname: "app.company.io"
   labelgate.tunnel.web.service: "http://app:80"
   labelgate.tunnel.web.access: "team"
-  labelgate.tunnel.web.cleanup: "true"  # This controls access cleanup too
+  labelgate.tunnel.web.cleanup: "false"  # This controls access cleanup too
 ```
 
-When `cleanup` is enabled on the referencing service:
-- If the container stops, the Access Application on Cloudflare will be removed after the configured `sync.remove_delay` (default: 30 minutes)
-- The associated reusable policies are also cleaned up if no other application references them
+When `cleanup` is enabled on the referencing service (the default):
+- If the container stops, the Access application on Cloudflare is removed after the configured `sync.remove_delay` (default: 30 minutes)
+- The reusable policies Labelgate created for it are deleted as well
 
-When `cleanup` is disabled (default):
-- The Access Application is marked as **orphaned** in labelgate but preserved on Cloudflare
-- It will be reactivated automatically if the container restarts
+When `cleanup` is disabled:
+- The Access application is marked as **orphaned** in Labelgate but preserved on Cloudflare
+- It is reactivated automatically if the container restarts

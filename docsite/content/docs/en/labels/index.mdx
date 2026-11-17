@@ -40,11 +40,25 @@ labels:
   labelgate.tunnel.api.service: "http://app:3000"
 ```
 
-## Hostname Constraints
+## Strict Validation
 
-### DNS and Tunnel Conflict
+Labels are validated when they are parsed. Since v0.3 mistakes are reported instead of being silently replaced by defaults:
 
-The same hostname **cannot** have both a DNS record and a Tunnel ingress rule. Cloudflare Tunnel automatically creates a CNAME record for tunnel hostnames, so adding a manual DNS record would conflict.
+- An **invalid value** (a boolean that is not `true`/`false`, a non-numeric `ttl`, an unknown record type, a CAA `tag` outside `issue`/`issuewild`/`iodef`, a port outside 0-65535, a malformed hostname...) **drops that service**.
+- An **unknown property** (for example `labelgate.dns.web.hostnme`) is reported as an error; the rest of the service is kept.
+- Service names that violate the rules above, or that are reserved, are skipped with an error.
+
+Every label error is logged with the container name and label key, and sets the sync status to `error`, which is shown in the dashboard and in `GET /api/overview`. Check them after changing labels.
+
+## Hostnames
+
+Hostnames are normalised (trimmed, lower-cased, trailing dot removed) and validated. `App.Example.com.` and `app.example.com` are the same hostname.
+
+## Hostname Conflicts
+
+### DNS and Tunnel on the Same Hostname
+
+The same hostname cannot be used both as a DNS record and as a Tunnel ingress rule: a tunnel hostname is served through its own CNAME record. This is a **conflict error** on the service that arrives second, whether the two services are in the same container, different containers, or on different hosts.
 
 ```yaml
 # WRONG - hostname conflict
@@ -60,9 +74,13 @@ labels:
   labelgate.tunnel.web.hostname: "app.example.com"
 ```
 
-### First Container Wins
+### Existing Owner Wins
 
-When multiple containers claim the same hostname, the first container to register wins. Subsequent containers will log an error and skip that hostname.
+When several services claim the same hostname, the service that already owns it keeps it. A newcomer is **rejected** with a stored error such as `conflict: app.example.com|A already claimed by ...`, which is visible in the dashboard and the API. The decision is deterministic and does not flip between sync cycles. See [Ownership & Conflicts](/docs/ownership#conflicts-between-claims).
+
+### Existing Cloudflare Records
+
+If Cloudflare already has a record, Access application or tunnel rule for the hostname that Labelgate did not create, the service reports `conflict: existing record not owned by labelgate` and nothing is modified. See [Ownership & Conflicts](/docs/ownership#pre-existing-resources-are-never-adopted) to resolve it.
 
 ## Label Types
 
