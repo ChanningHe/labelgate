@@ -4,6 +4,8 @@
 # Naming rule: YAML path a.b.c -> ENV LABELGATE_A_B_C (lists: comma-separated).
 # Priority: environment > config file > defaults.
 # Unknown keys are errors, so typos fail fast at startup.
+# Durations are strings such as "30s", "5m", "24h" (also "0s"); a bare number such as 0 is rejected.
+# In mode: agent only log_*, docker, retry and connect are validated and used; in mode: main the connect section is ignored.
 #
 # NOTE: You can run Labelgate without a config file by using only environment variables.
 # See .env.example for environment variable configuration.
@@ -66,7 +68,7 @@ cloudflare:
 sync:
   interval: 5m                            # LABELGATE_SYNC_INTERVAL (>= 10s) periodic full reconcile
   remove_delay: 30m                       # LABELGATE_SYNC_REMOVE_DELAY (>= 0) delay before deleting orphaned resources (cleanup=true)
-  orphan_ttl: 0                           # LABELGATE_SYNC_ORPHAN_TTL (>= 0) drop DB rows of orphaned resources with cleanup=false (0 = never)
+  orphan_ttl: 0s                          # LABELGATE_SYNC_ORPHAN_TTL (>= 0) drop DB rows of orphaned resources with cleanup=false (0 = never)
   agent_grace: 24h                        # LABELGATE_SYNC_AGENT_GRACE (>= 0) keep an offline agent's resources for this long
 
 # Retry configuration (general retry policy for API calls and reconnection)

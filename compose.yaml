@@ -11,7 +11,8 @@ services:
     volumes:
       # Docker socket for container monitoring
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      # Persistent storage
+      # Persistent storage. The container runs as UID 65532: run
+      # "sudo chown -R 65532:65532 ./labelgate-data" once so it can write the database.
       - ./labelgate-data:/app/config
       
       # Optional: custom config file
@@ -35,9 +36,10 @@ services:
       - LABELGATE_DB_PATH=/app/config/labelgate.db
     
     ports:
-      # HTTP API && Dashboard Port
-      - "28111:8080"
-      # Agent Server (enable if using agents)
+      # HTTP API and dashboard (authenticated with LABELGATE_API_TOKEN).
+      # Bound to localhost on purpose: put TLS, a VPN or Cloudflare Access in front before exposing it.
+      - "127.0.0.1:28111:8080"
+      # Agent server (needs LABELGATE_AGENT_ENABLED=true; agents connect to wss://<host>:8081/ws)
       # - "8081:8081"
     
     # labels:
