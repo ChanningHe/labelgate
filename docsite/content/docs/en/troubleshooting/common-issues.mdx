@@ -231,4 +231,4 @@ services:
 
 **Problem:** Labelgate exits with `open store "/app/config/labelgate.db": ...` (for example `unable to open database file`), or a migration backup fails.
 
-**Solution:** The image runs as a non-root user (UID 65532). Make the data directory writable for it: `sudo chown -R 65532:65532 ./labelgate-data`. A Docker named volume is created root-owned, so it needs the same treatment (or use `user: root`). When upgrading from v0.2, the directory also needs free space for the `labelgate.db.v0.2.bak` backup.
+**Solution:** The image runs as a non-root user (UID 65532). The image ships `/app/config` owned by that user, so a Docker named volume is writable automatically. A bind mount keeps the host directory's ownership: make it writable with `sudo chown -R 65532:65532 ./labelgate-data` (or use `user: root`). A named volume created by an older image is root-owned and needs the same treatment. When upgrading from v0.2, the directory also needs free space for the `labelgate.db.v0.2.bak` backup.

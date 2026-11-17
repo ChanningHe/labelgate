@@ -8,7 +8,7 @@ All examples pass `LABELGATE_API_TOKEN`, which enables the dashboard and API. Wi
 </Callout>
 
 <Callout type="warn">
-For brevity the examples leave out two things the non-root image (UID 65532) needs: `group_add` with the group that owns the Docker socket, and a writable data directory. A Docker named volume such as `labelgate-data` is created root-owned and cannot be written by the container, so either use a bind mount that you `chown -R 65532:65532`, or set `user: root`. See [Getting Started](/docs/getting-started#create-compose) for the complete service definition.
+For brevity the examples leave out something the non-root image (UID 65532) needs: `group_add` with the group that owns the Docker socket. The image ships `/app/config` owned by UID 65532, so a Docker named volume such as `labelgate-data` is writable out of the box; a bind mount must be `chown -R 65532:65532` first. See [Getting Started](/docs/getting-started#create-compose) for the complete service definition.
 </Callout>
 
 ## DNS-Only Setup

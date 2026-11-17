@@ -8,7 +8,7 @@ description: 单主机部署的 Docker Compose 示例。
 </Callout>
 
 <Callout type="warn">
-为了简洁，这些示例省略了非 root 镜像（UID 65532）所需的两样东西：用 `group_add` 加入拥有 Docker socket 的组，以及可写的数据目录。像 `labelgate-data` 这样的 Docker 命名卷创建时属于 root，容器无法写入，所以请改用执行过 `chown -R 65532:65532` 的 bind mount，或者设置 `user: root`。完整的服务定义见[快速开始](/zh/docs/getting-started#create-compose)。
+为了简洁，这些示例省略了非 root 镜像（UID 65532）所需的 `group_add`（加入拥有 Docker socket 的组）。镜像自带属主为 UID 65532 的 `/app/config`，因此像 `labelgate-data` 这样的 Docker 命名卷开箱即可写入；bind mount 则需要先执行 `chown -R 65532:65532`。完整的服务定义见[快速开始](/zh/docs/getting-started#create-compose)。
 </Callout>
 
 ## 仅 DNS 配置

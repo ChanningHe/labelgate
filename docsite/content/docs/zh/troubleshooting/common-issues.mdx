@@ -231,4 +231,4 @@ services:
 
 **问题：** Labelgate 以 `open store "/app/config/labelgate.db": ...`（例如 `unable to open database file`）退出，或迁移备份失败。
 
-**解决方案：** 镜像以非 root 用户（UID 65532）运行。请让数据目录对它可写：`sudo chown -R 65532:65532 ./labelgate-data`。Docker 命名卷创建时属于 root，需要同样处理（或者使用 `user: root`）。从 v0.2 升级时，目录还需要有足够空间存放 `labelgate.db.v0.2.bak` 备份。
+**解决方案：** 镜像以非 root 用户（UID 65532）运行。镜像自带属主为该用户的 `/app/config`，因此 Docker 命名卷会自动可写。bind mount 保留宿主机目录的属主：请执行 `sudo chown -R 65532:65532 ./labelgate-data`（或使用 `user: root`）。由旧镜像创建的命名卷属于 root，需要同样处理。从 v0.2 升级时，目录还需要有足够空间存放 `labelgate.db.v0.2.bak` 备份。
