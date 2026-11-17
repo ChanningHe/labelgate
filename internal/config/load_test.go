@@ -384,6 +384,7 @@ func TestLoad_UnknownKeys(t *testing.T) {
 
 func TestLoad_RemovedKeys(t *testing.T) {
 	files := map[string]string{
+		"docker.ssh.host":           "docker:\n  ssh:\n    host: user@h\n",
 		"docker.ssh.key":            "docker:\n  ssh:\n    key: /k\n",
 		"docker.ssh.key_passphrase": "docker:\n  ssh:\n    key_passphrase: p\n",
 		"docker.ssh.known_hosts":    "docker:\n  ssh:\n    known_hosts: /h\n",
@@ -410,7 +411,7 @@ func TestLoad_RemovedKeys(t *testing.T) {
 	t.Run("empty ssh section", func(t *testing.T) {
 		path := writeFile(t, t.TempDir(), "c.yaml", "cloudflare:\n  api_token: t\ndocker:\n  ssh: {}\n")
 		_, err := load(path, env(), nil)
-		wantValidationError(t, err, "docker.ssh.key", "ssh://")
+		wantValidationError(t, err, "docker.ssh.host", "ssh://")
 	})
 	t.Run("sibling keys in a kept section are fine", func(t *testing.T) {
 		path := writeFile(t, t.TempDir(), "c.yaml", "cloudflare:\n  api_token: t\ndb:\n  path: /tmp/x.db\n")

@@ -237,6 +237,7 @@ func Defaults() Config {
 
 // RemovedKeys are v0.2 keys that now fail validation, with the reason shown to the user.
 var RemovedKeys = map[string]string{
+	"docker.ssh.host":           "ssh:// Docker endpoints were removed in v0.3; use a unix socket or tcp:// with TLS",
 	"docker.ssh.key":            "ssh:// Docker endpoints were removed in v0.3; use a unix socket or tcp:// with TLS",
 	"docker.ssh.key_passphrase": "ssh:// Docker endpoints were removed in v0.3; use a unix socket or tcp:// with TLS",
 	"docker.ssh.known_hosts":    "ssh:// Docker endpoints were removed in v0.3; use a unix socket or tcp:// with TLS",

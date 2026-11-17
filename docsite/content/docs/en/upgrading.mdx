@@ -78,7 +78,7 @@ Label errors are logged with the container and label key and turn the sync statu
 
 | Removed | Replacement |
 |---------|-------------|
-| `docker.ssh.key`, `docker.ssh.key_passphrase`, `docker.ssh.known_hosts` and `ssh://` Docker endpoints | Local socket, `tcp://` with `docker.tls.*`, or a Labelgate agent on the remote host |
+| `docker.ssh.host`, `docker.ssh.key`, `docker.ssh.key_passphrase`, `docker.ssh.known_hosts` and `ssh://` Docker endpoints | Local socket, `tcp://` with `docker.tls.*`, or a Labelgate agent on the remote host |
 | `db.retention` | None (delete the key) |
 | `db.vacuum_interval` | None (delete the key) |
 
