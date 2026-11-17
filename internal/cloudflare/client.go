@@ -2,12 +2,17 @@ package cloudflare
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
+	"sort"
+	"strings"
+	"sync"
 	"time"
 
 	cf "github.com/cloudflare/cloudflare-go/v6"
+	"github.com/cloudflare/cloudflare-go/v6/option"
 
 	"github.com/channinghe/labelgate/internal/config"
 )
@@ -34,79 +39,233 @@ type Options struct {
 	Now     func() time.Time
 }
 
-var errNotImplemented = errors.New("cloudflare: not implemented")
-
-// Client is the production API implementation (cloudflare-go/v6 for typed
-// endpoints, raw JSON via the SDK's generic Get/Put for tunnel configurations
-// so unmodelled fields round-trip).
+// Client is the production API implementation on top of cloudflare-go/v6.
 //
-// Implementation notes (WP2):
-//   - One SDK client per credential; no shared mutable fields without locks
-//     (the v0.2 SetAccountID race must not return).
+// All requests go through the SDK's generic Execute (auth, base URL, request
+// encoding, API error decoding) with SDK retries disabled; paging, per-request
+// timeouts, retries and error mapping are done here so that every page honours
+// ctx (the SDK auto-pager fetches follow-up pages with context.Background()).
+// Wire types are small local structs mirroring the SDK's JSON field names, and
+// tunnel configurations are passed through as raw JSON so unmodelled fields
+// round-trip.
+//
+//   - One SDK client per credential; immutable after New except the per
+//     credential zone cache and Health, each guarded by its own mutex.
 //   - Access rules: model.AccessRule{emails, [a,b]} <-> one CF rule object per
 //     value ({"email":{"email":"a"}}); everyone/certificate -> {"everyone":{}}
-//     / {"certificate":{}}. Live rules of other types map to
-//     Selector "unsupported:<key>" with the raw JSON as the single value, so an
-//     owned policy edited by hand is detected as different and rewritten.
+//     / {"certificate":{}}. Live rules of other shapes map to Selector
+//     "unsupported:<key>" with the raw JSON as the single value.
 //   - DNS SRV/CAA use the structured "data" object; MX uses priority.
 //   - Health is updated after every request (transport error or 5xx = unreachable).
 type Client struct {
-	sdk map[string]*cf.Client // credential name -> SDK client
+	creds         map[string]*credEntry
+	credOrder     []string // sorted credential names
+	tunnels       []Tunnel // sorted: root first, then by Ref
+	defaultTunnel string   // Ref of the default tunnel; "" = none
+	retry         config.RetryConfig
+	timeout       time.Duration
+	log           *slog.Logger
+	now           func() time.Time
+	sleep         func(ctx context.Context, d time.Duration) error
+
+	healthMu sync.Mutex
+	health   Health
+}
+
+// credEntry is one API token with its SDK client and zone cache.
+type credEntry struct {
+	name     string
+	sdk      *cf.Client
+	patterns []string // lower-case zone patterns for automatic selection; empty = all
+	accounts []string // account IDs known from config (token verify fallback)
+	cache    zoneCache
 }
 
 var _ API = (*Client)(nil)
 
 // New builds a client from configuration. It performs no network I/O.
-func New(opts Options) (*Client, error) { return nil, errNotImplemented }
+func New(opts Options) (*Client, error) {
+	c := &Client{
+		creds:   map[string]*credEntry{},
+		retry:   opts.Retry,
+		timeout: CallTimeout,
+		log:     opts.Log,
+		now:     opts.Now,
+		sleep:   sleepCtx,
+	}
+	if c.log == nil {
+		c.log = slog.New(slog.DiscardHandler)
+	}
+	if c.now == nil {
+		c.now = time.Now
+	}
+	if c.retry.Attempts < 1 {
+		c.retry.Attempts = 1
+	}
+	base := []option.RequestOption{option.WithEnvironmentProduction(), option.WithMaxRetries(0)}
+	if opts.BaseURL != "" {
+		base = append(base, option.WithBaseURL(opts.BaseURL))
+	}
+	hc := opts.HTTPClient
+	if hc == nil {
+		hc = &http.Client{}
+	}
+	base = append(base, option.WithHTTPClient(hc))
+	if err := c.addCredentials(opts.Cloudflare, base); err != nil {
+		return nil, err
+	}
+	if err := c.addTunnels(opts.Cloudflare); err != nil {
+		return nil, err
+	}
+	if err := c.setDefaultTunnel(opts.DefaultTunnel); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
 
-func (c *Client) Verify(ctx context.Context) error { return errNotImplemented }
-func (c *Client) Health() Health                   { return Health{} }
-func (c *Client) ResolveZone(ctx context.Context, hostname, credential string) (Zone, error) {
-	return Zone{}, errNotImplemented
+// newSDK builds an SDK client that ignores CLOUDFLARE_* environment variables
+// (cf.NewClient would pick them up, e.g. CLOUDFLARE_BASE_URL or
+// CLOUDFLARE_API_KEY, and leak the token elsewhere or add auth headers).
+func newSDK(base []option.RequestOption, token string) *cf.Client {
+	opts := append(append([]option.RequestOption(nil), base...), option.WithAPIToken(token))
+	return &cf.Client{Options: opts}
 }
-func (c *Client) ResolveTunnel(ref string) (Tunnel, error) { return Tunnel{}, errNotImplemented }
-func (c *Client) ListDNSRecords(ctx context.Context, zone Zone) ([]DNSRecord, error) {
-	return nil, errNotImplemented
+
+func (c *Client) addCredentials(cfg config.CloudflareConfig, base []option.RequestOption) error {
+	if cfg.APIToken != "" {
+		c.creds[config.RootCredential] = &credEntry{
+			name: config.RootCredential,
+			sdk:  newSDK(base, cfg.APIToken),
+		}
+		if cfg.AccountID != "" {
+			c.creds[config.RootCredential].accounts = []string{cfg.AccountID}
+		}
+	}
+	for name, cc := range cfg.Credentials {
+		if name == config.RootCredential {
+			return fmt.Errorf("cloudflare: credential name %q is reserved for cloudflare.api_token", name)
+		}
+		if cc.APIToken == "" {
+			return fmt.Errorf("cloudflare: credential %q has no api_token", name)
+		}
+		patterns := make([]string, 0, len(cc.Zones))
+		for _, p := range cc.Zones {
+			patterns = append(patterns, strings.ToLower(strings.TrimSpace(p)))
+		}
+		c.creds[name] = &credEntry{name: name, sdk: newSDK(base, cc.APIToken), patterns: patterns}
+	}
+	for name := range c.creds {
+		c.credOrder = append(c.credOrder, name)
+	}
+	sort.Strings(c.credOrder)
+	return nil
 }
-func (c *Client) CreateDNSRecord(ctx context.Context, zone Zone, rec DNSRecord) (DNSRecord, error) {
-	return DNSRecord{}, errNotImplemented
+
+func (c *Client) addTunnels(cfg config.CloudflareConfig) error {
+	if cfg.TunnelID != "" {
+		t := Tunnel{Ref: config.RootTunnel, ID: strings.ToLower(cfg.TunnelID), AccountID: cfg.AccountID, Credential: config.RootCredential}
+		if err := c.addTunnel(t); err != nil {
+			return err
+		}
+	}
+	names := make([]string, 0, len(cfg.Tunnels))
+	for name := range cfg.Tunnels {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		tc := cfg.Tunnels[name]
+		if name == config.RootTunnel {
+			return fmt.Errorf("cloudflare: tunnel name %q is reserved for cloudflare.tunnel_id", name)
+		}
+		cred := tc.Credential
+		if cred == "" {
+			cred = config.RootCredential
+		}
+		t := Tunnel{Ref: name, ID: strings.ToLower(tc.TunnelID), AccountID: tc.AccountID, Credential: cred}
+		if err := c.addTunnel(t); err != nil {
+			return err
+		}
+	}
+	return nil
 }
-func (c *Client) UpdateDNSRecord(ctx context.Context, zone Zone, rec DNSRecord) (DNSRecord, error) {
-	return DNSRecord{}, errNotImplemented
+
+func (c *Client) addTunnel(t Tunnel) error {
+	if t.ID == "" || t.AccountID == "" {
+		return fmt.Errorf("cloudflare: tunnel %q needs tunnel_id and account_id", t.Ref)
+	}
+	cr, ok := c.creds[t.Credential]
+	if !ok {
+		return fmt.Errorf("cloudflare: tunnel %q: credential %q: %w", t.Ref, t.Credential, ErrUnknownCredential)
+	}
+	if !slices.Contains(cr.accounts, t.AccountID) {
+		cr.accounts = append(cr.accounts, t.AccountID)
+	}
+	c.tunnels = append(c.tunnels, t)
+	return nil
 }
-func (c *Client) DeleteDNSRecord(ctx context.Context, zone Zone, recordID string) error {
-	return errNotImplemented
+
+func (c *Client) setDefaultTunnel(ref string) error {
+	if ref == "" || ref == config.RootTunnel {
+		if _, ok := c.tunnelByRef(config.RootTunnel); ok {
+			c.defaultTunnel = config.RootTunnel
+		}
+		return nil
+	}
+	if _, ok := c.tunnelByRef(ref); !ok {
+		return fmt.Errorf("cloudflare: default_tunnel %q: %w", ref, ErrUnknownTunnel)
+	}
+	c.defaultTunnel = ref
+	return nil
 }
-func (c *Client) GetTunnelConfig(ctx context.Context, t Tunnel) (TunnelConfig, error) {
-	return TunnelConfig{}, errNotImplemented
+
+func (c *Client) tunnelByRef(ref string) (Tunnel, bool) {
+	for _, t := range c.tunnels {
+		if t.Ref == ref {
+			return t, true
+		}
+	}
+	return Tunnel{}, false
 }
-func (c *Client) PutTunnelConfig(ctx context.Context, t Tunnel, cfg TunnelConfig) error {
-	return errNotImplemented
+
+// ResolveTunnel maps a tunnel reference (configured name or ID) to a tunnel.
+func (c *Client) ResolveTunnel(ref string) (Tunnel, error) {
+	if ref == "" {
+		if c.defaultTunnel == "" {
+			return Tunnel{}, ErrNoDefaultTunnel
+		}
+		ref = c.defaultTunnel
+	}
+	if t, ok := c.tunnelByRef(ref); ok {
+		return t, nil
+	}
+	id := strings.ToLower(ref)
+	for _, t := range c.tunnels {
+		if t.ID == id {
+			return t, nil
+		}
+	}
+	return Tunnel{}, fmt.Errorf("%s: %w", ref, ErrUnknownTunnel)
 }
-func (c *Client) EnsureAccessTag(ctx context.Context, acct Account, tag string) error {
-	return errNotImplemented
+
+// credByName returns the named credential or ErrUnknownCredential.
+func (c *Client) credByName(name string) (*credEntry, error) {
+	cr, ok := c.creds[name]
+	if !ok {
+		return nil, fmt.Errorf("credential %q: %w", name, ErrUnknownCredential)
+	}
+	return cr, nil
 }
-func (c *Client) ListAccessApps(ctx context.Context, acct Account) ([]AccessApp, error) {
-	return nil, errNotImplemented
+
+// Health reports the outcome of the most recent request.
+func (c *Client) Health() Health {
+	c.healthMu.Lock()
+	defer c.healthMu.Unlock()
+	return c.health
 }
-func (c *Client) CreateAccessApp(ctx context.Context, acct Account, app AccessApp) (AccessApp, error) {
-	return AccessApp{}, errNotImplemented
-}
-func (c *Client) UpdateAccessApp(ctx context.Context, acct Account, app AccessApp) (AccessApp, error) {
-	return AccessApp{}, errNotImplemented
-}
-func (c *Client) DeleteAccessApp(ctx context.Context, acct Account, appID string) error {
-	return errNotImplemented
-}
-func (c *Client) ListAccessPolicies(ctx context.Context, acct Account) ([]AccessPolicy, error) {
-	return nil, errNotImplemented
-}
-func (c *Client) CreateAccessPolicy(ctx context.Context, acct Account, p AccessPolicy) (AccessPolicy, error) {
-	return AccessPolicy{}, errNotImplemented
-}
-func (c *Client) UpdateAccessPolicy(ctx context.Context, acct Account, p AccessPolicy) (AccessPolicy, error) {
-	return AccessPolicy{}, errNotImplemented
-}
-func (c *Client) DeleteAccessPolicy(ctx context.Context, acct Account, policyID string) error {
-	return errNotImplemented
+
+func (c *Client) setHealth(h Health) {
+	c.healthMu.Lock()
+	defer c.healthMu.Unlock()
+	c.health = h
 }
