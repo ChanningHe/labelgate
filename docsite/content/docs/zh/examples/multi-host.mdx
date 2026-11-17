@@ -1,9 +1,9 @@
 ---
-title: 多主机（代理模式）
-description: 使用代理模式在多个 Docker 主机上部署 Labelgate。
+title: 多主机（Agent 模式）
+description: 使用 Agent 模式跨多台 Docker 主机部署 Labelgate，包括认证、TLS 和按 agent 设置的允许列表。
 ---
 
-代理模式允许您监控多个主机上的 Docker 容器。一个中央**主**实例处理所有 Cloudflare API 调用，而远程主机上的轻量级**代理**实例收集容器标签并报告回来。
+Agent 模式让你可以管理多台主机上的容器。中心化的 **Main** 实例负责所有 Cloudflare API 调用，远程主机上的轻量级 **Agent** 实例负责收集容器标签并上报。
 
 ## 架构
 
@@ -20,25 +20,112 @@ description: 使用代理模式在多个 Docker 主机上部署 Labelgate。
 └──────────────┘
 ```
 
+Agent 不持有任何 Cloudflare 凭据。它们只发送容器和公网 IP 的完整快照；main 实例会按该 agent 的允许列表校验快照，然后像处理本地容器一样进行协调。
+
 ## 连接模式
 
-### 出站（代理连接到主实例）
+### Outbound（Agent 连接 Main）
 
-最适合位于 NAT 或防火墙后面的代理。代理发起连接。
+适合位于 NAT 或防火墙之后的 agent。由 agent 主动拨号 main 实例的 `agent.listen` 端口。
 
-### 入站（主实例连接到代理）
+### Inbound（Main 连接 Agent）
 
-最适合位于内部网络上的代理，主实例可以直接访问它们。
+适合 main 实例可以直接访问的网络。Agent 监听 `connect.listen`，由 main 实例拨号 agent 的 `connect_to` 地址。
 
-## 出站模式示例
+两种模式使用**相同的握手流程，具有相同的安全特性**。
 
-### 主实例
+## 传输与 TLS
+
+- 端点始终是带有 **`/ws` 路径**的 WebSocket 地址：`wss://main.example.com:8081/ws`。缺少 `/ws` 会得到 404。
+- **除非在完全可信的网络内，否则请一律使用 `wss://`。** 使用明文 `ws://` 时，握手仍会对双方进行认证（token 不会被发送），但之后的数据没有机密性和完整性保护。被动监听者能看到你的容器名、标签和公网 IP，主动攻击者还可以篡改数据流。
+- **默认启用 TLS 校验**，使用系统根证书或你配置的 CA。Agent 不会再静默跳过校验。
+- 如需信任私有 CA，请设置 `connect.tls.ca`（agent 拨号 main）或 `agent.tls.ca`（main 拨号 inbound agent）。
+- `insecure_skip_verify: true`（`connect.tls.insecure_skip_verify` / `agent.tls.insecure_skip_verify`）会关闭证书校验。它是仅供测试的显式选择，启动时会输出醒目警告，不应在生产环境使用。
+- 服务端证书：outbound agent 场景在 main 上设置 `agent.tls.cert` / `key`；inbound agent 则设置 `connect.tls.cert` / `key`。你也可以在反向代理处终止 TLS 并转发 WebSocket。
+
+## 认证 [#authentication]
+
+认证是基于共享 token 的双向挑战—应答，两种模式完全一致：
+
+1. Agent 发送 `hello`，包含它的 agent ID 和一个随机 nonce。
+2. Main 实例回应它自己的 nonce，以及一个证明它知道 token 的 HMAC。
+3. Agent 在发送任何其他内容**之前**先校验这个 HMAC，然后回复自己的 HMAC。
+4. Main 实例校验后发送 `welcome`。
+
+token 本身**永远不会在网络上传输**，所以即使有人连上 inbound agent 的端口，也得不到任何信息，agent 也不会向对方发送任何数据。连接方向（outbound 或 inbound）被绑定进 HMAC，因此会话无法从一个方向被中继到另一个方向。token 使用常量时间比较，并且不会写入日志。未知的 agent ID 与错误的 token 返回完全相同的 `unauthorized` 错误。
+
+如果已经有相同 ID 的 agent 在线，新的连接会在认证之后被拒绝（`duplicate_agent`），已有的会话不受影响。Agent ID 必须匹配 `^[a-z0-9][a-z0-9_-]{0,62}$`。如果没有设置 `connect.agent_id`，则取 `/etc/machine-id` 的前 12 位十六进制字符，再退而取清洗后的主机名。
+
+## 命名 agent 与共享 token agent
+
+**命名 agent** 列在 `agent.agents.<id>` 下，每个都有**自己的 token**（推荐）：
 
 ```yaml
-# docker-compose.yaml (main host)
+agent:
+  enabled: true
+  listen: :8081
+  agents:
+    docker-host-1:
+      token: ${AGENT_1_TOKEN}
+      name: Docker host 1
+      default_tunnel: default
+      tunnels: [default]
+      hostnames: ["*.host1.example.com"]
+```
+
+**共享 token agent** 使用 `agent.accept_token`：任何没有列在 `agent.agents` 下的 agent ID 都可以用它连接。由于这个 token 是共享密钥，持有它的人可以冒用任何未注册的 agent ID，所以请限制这类 agent 能做的事：
+
+```yaml
+agent:
+  enabled: true
+  accept_token: ${AGENT_SHARED_TOKEN}
+  accept_hostnames: ["*.agents.example.com"]
+  accept_tunnels: [default]
+```
+
+### 允许列表
+
+| 设置 | 作用对象 | 效果 |
+|------|----------|------|
+| `agent.agents.<id>.hostnames` | 单个命名 agent | 该 agent 可声明的主机名 glob 列表。为空表示不限制 |
+| `agent.agents.<id>.tunnels` | 单个命名 agent | 该 agent 可使用的 tunnel。为空表示只能用它的默认 tunnel |
+| `agent.agents.<id>.default_tunnel` | 单个命名 agent | 其标签省略 `tunnel` 时使用的 tunnel |
+| `agent.accept_hostnames` | 所有 `accept_token` agent | 与 `hostnames` 相同 |
+| `agent.accept_tunnels` | 所有 `accept_token` agent | 与 `tunnels` 相同。为空表示只能用全局默认 tunnel |
+
+glob 使用 `path.Match` 语法，作用于小写主机名（`*.example.com`）。违反允许列表的声明会被拒绝并附带原因，在 dashboard 和 API 中可见，并且不会到达 Cloudflare。
+
+对 agent 的服务做 tunnel 解析的顺序：标签中的 `tunnel` > agent 的 `default_tunnel` > 全局默认 tunnel，且结果**必须在该 agent 允许的 tunnel 之内**。
+
+### SSRF 防护
+
+由 agent 定义的 tunnel 服务可以让 cloudflared 访问任意地址，所以来自 agent 的 tunnel 服务会被检查。以下目标会被拒绝：
+
+- `localhost` 或 `*.localhost`，
+- 回环地址、链路本地地址（`169.254.0.0/16`、`fe80::/10`）、未指定地址或组播地址的 IP 字面量，
+- `unix:` / `unix+tls:` socket。
+
+本地容器（main 主机自己的标签）是受信任的，不受此防护限制。
+
+### Agent 无法修改本地的 Access 策略
+
+Access 策略定义只在**声明者所在的来源**内解析：agent 只能引用它自己容器上的定义，永远不能绑定或修改 main 主机上的定义。
+
+## Agent 宽限期 [#agent-grace]
+
+Agent 的资源与 `last_seen` 绑定，而 `last_seen` 由 **main 实例**在接受上报时用它自己的时钟记录。单纯的断线不会让任何东西变成孤立：只要 `last_seen` 在 `sync.agent_grace`（默认 **24h**）之内，该 agent 最近上报的容器就仍然被视为期望状态。每个 agent 的最新状态都存放在数据库里，所以重启 main 实例同样不会使 agent 的资源变成孤立。
+
+宽限期结束后，agent 的资源变为孤立状态，如果它们的 `cleanup` 是 `true`（默认），会在 `sync.remove_delay` 之后被删除。在 dashboard 中，agent 的状态是 `active`（已连接）、`disconnected`（宽限期内）或 `removed`。如果某个 agent 报告它的 Docker 守护进程不可达，它最后一份有效快照会被保留，资源保持被持有状态。
+
+## Outbound 模式示例
+
+### Main 实例
+
+```yaml
+# docker-compose.yaml（main 主机）
 services:
   labelgate:
-    image: labelgate:latest
+    image: ghcr.io/channinghe/labelgate:v0.3
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -47,10 +134,10 @@ services:
       - LABELGATE_CLOUDFLARE_API_TOKEN
       - LABELGATE_CLOUDFLARE_ACCOUNT_ID
       - LABELGATE_CLOUDFLARE_TUNNEL_ID
-      - LABELGATE_AGENT_ENABLED=true
-      - LABELGATE_AGENT_LISTEN=:8081
+      - LABELGATE_API_TOKEN
+      - LABELGATE_CONFIG=/etc/labelgate/labelgate.yaml
     ports:
-      - "8081:8081"
+      - "8081:8081"   # agent 监听端口
     configs:
       - source: labelgate-config
         target: /etc/labelgate/labelgate.yaml
@@ -69,98 +156,99 @@ configs:
       agent:
         enabled: true
         listen: :8081
+        tls:
+          cert: /app/config/tls/server.crt
+          key: /app/config/tls/server.key
         agents:
           docker-host-1:
             token: ${AGENT_1_TOKEN}
             default_tunnel: default
+            hostnames: ["*.host1.example.com"]
           docker-host-2:
             token: ${AGENT_2_TOKEN}
             default_tunnel: default
+            hostnames: ["*.host2.example.com"]
 ```
 
-### 代理实例
+<Callout type="info">
+Docker Compose 会在执行 `docker compose up` 时对 `configs.content` 中的 `${AGENT_1_TOKEN}` 做变量替换，所以 token 来自你的 `.env` 文件。请把 TLS 证书和密钥放在 `labelgate-data` 卷（`/app/config/tls/`）中，或者从宿主机挂载进去。
+</Callout>
+
+### Agent 实例
 
 ```yaml
-# docker-compose.yaml (remote host)
+# docker-compose.yaml（远程主机）
 services:
   labelgate-agent:
-    image: labelgate:latest
+    image: ghcr.io/channinghe/labelgate:v0.3
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       - LABELGATE_MODE=agent
       - LABELGATE_CONNECT_MODE=outbound
-      - LABELGATE_CONNECT_ENDPOINT=wss://main-host.example.com:8081
-      - LABELGATE_CONNECT_TOKEN=${AGENT_TOKEN}
-      - LABELGATE_DEFAULT_TUNNEL=default
+      - LABELGATE_CONNECT_ENDPOINT=wss://main-host.example.com:8081/ws
+      - LABELGATE_CONNECT_AGENT_ID=docker-host-1
+      - LABELGATE_CONNECT_TOKEN=${AGENT_1_TOKEN}
+      # main 证书所用的私有 CA（默认使用系统根证书）
+      # - LABELGATE_CONNECT_TLS_CA=/certs/ca.pem
 
-  # Your services with labels (same as single-host)
+  # 你的带标签的服务（与单主机部署相同）
   webapp:
     image: nginx:alpine
     labels:
-      labelgate.tunnel.web.hostname: "remote-app.example.com"
+      labelgate.tunnel.web.hostname: "web.host1.example.com"
       labelgate.tunnel.web.service: "http://webapp:80"
 ```
 
-## 入站模式示例
+Agent 的 `connect.agent_id` 必须与 main 实例上 `agent.agents` 下的键一致。
 
-### 主实例
+## Inbound 模式示例 [#inbound-mode-example]
+
+### Main 实例
 
 ```yaml
-# docker-compose.yaml (main host)
-services:
-  labelgate:
-    image: labelgate:latest
-    restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - labelgate-data:/app/config
-    environment:
-      - LABELGATE_CLOUDFLARE_API_TOKEN
-      - LABELGATE_CLOUDFLARE_ACCOUNT_ID
-      - LABELGATE_CLOUDFLARE_TUNNEL_ID
-    configs:
-      - source: labelgate-config
-        target: /etc/labelgate/labelgate.yaml
-
-volumes:
-  labelgate-data:
-
-configs:
-  labelgate-config:
-    content: |
-      agent:
-        enabled: true
-        agents:
-          docker-host-1:
-            connect_to: wss://192.168.1.11:8082
-            token: ${AGENT_1_TOKEN}
+# labelgate.yaml（main 主机）
+agent:
+  enabled: true
+  tls:
+    ca: /app/config/tls/ca.pem   # 签发 agent 证书的 CA
+  agents:
+    docker-host-1:
+      connect_to: wss://192.168.1.11:8082/ws
+      token: ${AGENT_1_TOKEN}
+      hostnames: ["*.host1.example.com"]
 ```
 
-### 代理实例（入站）
+### Agent 实例
 
 ```yaml
-# docker-compose.yaml (remote host)
+# docker-compose.yaml（远程主机）
 services:
   labelgate-agent:
-    image: labelgate:latest
+    image: ghcr.io/channinghe/labelgate:v0.3
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./tls:/certs:ro
     environment:
       - LABELGATE_MODE=agent
       - LABELGATE_CONNECT_MODE=inbound
       - LABELGATE_CONNECT_LISTEN=:8082
-      - LABELGATE_CONNECT_TOKEN=${AGENT_TOKEN}
+      - LABELGATE_CONNECT_AGENT_ID=docker-host-1
+      - LABELGATE_CONNECT_TOKEN=${AGENT_1_TOKEN}
+      - LABELGATE_CONNECT_TLS_CERT=/certs/server.crt
+      - LABELGATE_CONNECT_TLS_KEY=/certs/server.key
     ports:
       - "8082:8082"
 ```
 
-## 重要提示
+由于认证是双向的，陌生人连上 8082 端口既拿不到 token，也拿不到任何数据；agent 只会和能证明自己知道 token 的对端通信。Inbound 拨号方会带退避地重连，agent 在接受一个更新的、已认证的 main 会话时，会关闭旧会话。Agent 上无需认证的 `/health` 端点只返回 `{"status":"ok"}`。
 
-- **代理是轻量级的**：它们只收集容器标签并向主实例报告。所有 Cloudflare API 调用都在主实例上进行。
-- **主机名冲突**：会检测跨主机的主机名冲突。首先注册主机名的容器获胜，无论它在哪个主机上。
-- **隧道分配**：容器标签 > 代理默认隧道 > 全局默认隧道。
-- **重连**：如果连接断开，代理会自动使用指数退避重连。
-- **TLS**：对于生产环境，始终为代理连接使用 TLS。在服务器端配置证书（出站模式在主实例，入站模式在代理）。
+## 要点
+
+- **Agent 很轻量**：它们只收集容器标签并上报给 main 实例。所有 Cloudflare API 调用都发生在 main 实例上。
+- **冲突**：会检测跨主机的主机名冲突。**先到者胜出**，与它在哪台主机上无关；后来者会被拒绝并给出可见的错误。参见[所有权与冲突](/zh/docs/ownership#conflicts-between-claims)。
+- **Tunnel 分配**：容器标签 > agent 的 `default_tunnel` > 全局默认 tunnel，并且限制在 agent 被允许的 tunnel 范围内。
+- **重连**：连接断开时，agent 会以指数退避自动重连，期间资源会被保留 `sync.agent_grace` 的时长。
+- **升级**：v0.2 的 agent 无法与 v0.3 的 main 实例通信，请一起升级，参见[升级到 v0.3](/zh/docs/upgrading#agents)。
