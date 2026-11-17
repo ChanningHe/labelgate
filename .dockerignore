@@ -7,9 +7,9 @@ bin/
 dev/
 
 # local secrets
-.env
-*.env
-!.env.example
+**/.env
+**/*.env
+!**/.env.example
 
 # coverage
 coverage.out
