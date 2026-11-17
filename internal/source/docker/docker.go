@@ -6,13 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/netip"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/moby/moby/api/types/container"
-	"github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
 
 	"github.com/channinghe/labelgate/internal/config"
@@ -154,12 +152,14 @@ func toContainer(c container.Summary) model.Container {
 	for k, v := range c.Labels {
 		labels[k] = v
 	}
+	v4, v6 := networkAddrs(c)
 	return model.Container{
-		ID:       c.ID,
-		Name:     containerName(c),
-		Labels:   labels,
-		Networks: networkAddrs(c),
-		State:    string(c.State),
+		ID:        c.ID,
+		Name:      containerName(c),
+		Labels:    labels,
+		Networks:  v4,
+		Networks6: v6,
+		State:     string(c.State),
 	}
 }
 
@@ -176,32 +176,31 @@ func containerName(c container.Summary) string {
 	return c.ID
 }
 
-// networkAddrs maps network name -> IPv4 address, or the global IPv6 address
-// when the endpoint has no IPv4. Networks without an address are omitted.
-func networkAddrs(c container.Summary) map[string]string {
+// networkAddrs returns the per-network addresses of a container: v4 maps
+// network name -> IPv4 address (global IPv6 as a fallback for consumers that
+// predate v6), v6 maps network name -> global IPv6 address. Networks without
+// an address of a kind are omitted from that map.
+func networkAddrs(c container.Summary) (v4, v6 map[string]string) {
 	if c.NetworkSettings == nil {
-		return nil
+		return nil, nil
 	}
-	out := make(map[string]string, len(c.NetworkSettings.Networks))
+	v4 = make(map[string]string, len(c.NetworkSettings.Networks))
+	v6 = make(map[string]string, len(c.NetworkSettings.Networks))
 	for name, ep := range c.NetworkSettings.Networks {
-		if addr, ok := endpointAddr(ep); ok {
-			out[name] = addr.String()
+		if ep == nil {
+			continue
+		}
+		if ep.GlobalIPv6Address.IsValid() {
+			v6[name] = ep.GlobalIPv6Address.String()
+		}
+		switch {
+		case ep.IPAddress.IsValid():
+			v4[name] = ep.IPAddress.String()
+		case ep.GlobalIPv6Address.IsValid():
+			v4[name] = ep.GlobalIPv6Address.String()
 		}
 	}
-	return out
-}
-
-func endpointAddr(ep *network.EndpointSettings) (netip.Addr, bool) {
-	if ep == nil {
-		return netip.Addr{}, false
-	}
-	if ep.IPAddress.IsValid() {
-		return ep.IPAddress, true
-	}
-	if ep.GlobalIPv6Address.IsValid() {
-		return ep.GlobalIPv6Address, true
-	}
-	return netip.Addr{}, false
+	return v4, v6
 }
 
 // matchesFilter implements docker.filter_label: "key" requires the label,

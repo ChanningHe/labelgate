@@ -64,6 +64,21 @@ LABELGATE_CLOUDFLARE_API_TOKEN=your-token
 LABELGATE_API_TOKEN=a-long-random-string
 ```
 
+## Command Line
+
+```
+labelgate [-c|--config PATH] [--version]      run (main or agent mode, from the configuration)
+labelgate [-c|--config PATH] healthcheck      container HEALTHCHECK, see below
+```
+
+| Exit code | Meaning |
+|-----------|---------|
+| `0` | Clean shutdown after `SIGINT`/`SIGTERM`; `healthcheck`: healthy; `--version` |
+| `1` | Fatal error, invalid configuration, or `healthcheck`: unhealthy |
+| `2` | Usage error (unknown flag or command) |
+
+The configuration is read once at startup. Sending `SIGHUP` only logs a warning: restart Labelgate to apply changes. On `SIGINT`/`SIGTERM` the API and agent listener stop first, then the reconciler, then the database is closed; a second signal terminates immediately. The [healthcheck](/docs/configuration/reference#healthcheck) reads the same configuration as the daemon.
+
 ## Next Steps
 
 - [Configuration Reference](/docs/configuration/reference) - Complete list of all options, defaults, removed keys and multi-credential setup

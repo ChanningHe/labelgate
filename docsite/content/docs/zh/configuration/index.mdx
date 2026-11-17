@@ -64,6 +64,21 @@ LABELGATE_CLOUDFLARE_API_TOKEN=your-token
 LABELGATE_API_TOKEN=a-long-random-string
 ```
 
+## 命令行
+
+```
+labelgate [-c|--config PATH] [--version]      运行（main 或 agent 模式，由配置决定）
+labelgate [-c|--config PATH] healthcheck      容器 HEALTHCHECK，见下文
+```
+
+| 退出码 | 含义 |
+|--------|------|
+| `0` | 收到 `SIGINT`/`SIGTERM` 后正常关闭；`healthcheck`：健康；`--version` |
+| `1` | 致命错误、配置无效，或 `healthcheck`：不健康 |
+| `2` | 用法错误（未知的参数或命令） |
+
+配置只在启动时读取一次。发送 `SIGHUP` 只会输出一条警告：要让修改生效，请重启 Labelgate。收到 `SIGINT`/`SIGTERM` 后，先停止 API 和 agent 监听，再停止 reconciler，最后关闭数据库；再次发送信号会立即终止。[健康检查](/zh/docs/configuration/reference#healthcheck)读取与守护进程相同的配置。
+
 ## 下一步
 
 - [配置参考](/zh/docs/configuration/reference) - 所有选项、默认值、已移除配置项和多凭据配置的完整列表

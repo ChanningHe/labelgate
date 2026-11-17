@@ -33,7 +33,7 @@ labelgate.access.<policy_name>.<property>=<value>
 | Property | Default | Description |
 |----------|---------|-------------|
 | `app_name` | `labelgate-<name>` | Cloudflare Access application name |
-| `session_duration` | `24h` | Session duration (e.g., `1h`, `24h`, `720h`) |
+| `session_duration` | `24h` | Session duration as a positive Go duration (`30m`, `12h`, `720h`). Days (`7d`) are not accepted |
 | `policy.decision` | `allow` | Policy action: `allow`, `block`, `bypass`, `service_auth` |
 | `policy.name` | - | Policy display name in CF dashboard |
 | `policy.include.<selector>` | - | Include rules (OR logic) |
@@ -50,8 +50,10 @@ labelgate.access.<policy_name>.<property>=<value>
 | `service_auth` | `non_identity` | Require service token or mTLS certificate |
 
 <Callout type="warn">
-`allow` and `block` decisions require at least one `include` rule.
+`allow` and `block` decisions require at least one `include` rule; otherwise the definition is dropped with an error.
 </Callout>
+
+A definition describes exactly one policy: its `policy.*` labels build a single Cloudflare policy (decisions are not stacked). The policy name (`<policy_name>` in the label key) follows the service name rules, and `default` is ignored. An unknown selector (`policy.include.foo`) or a selector that needs values but has none is an error that drops the definition.
 
 ### Rule Selectors
 
@@ -67,7 +69,7 @@ labelgate.access.<policy_name>.<property>=<value>
 | `certificate` | Valid Certificate | (no value needed) |
 | `login_methods` | Login Methods | `<method-id>` |
 
-Multiple values are comma-separated. Selectors like `everyone` and `certificate` don't require values.
+Multiple values are comma-separated. `everyone` and `certificate` take no values (the label value is ignored; use `""`); every other selector needs at least one value.
 
 ## Rule Logic
 
@@ -179,7 +181,7 @@ Access applications created by Labelgate carry the Access tag `labelgate-<instan
 - A policy or application that Labelgate did not create is never adopted, updated or deleted, even if its name matches. If an application with the hostname's domain exists without Labelgate's tag, the service reports `conflict: existing record not owned by labelgate`.
 - If updating an application fails, the service goes to the error state. Labelgate never creates a second application as a workaround.
 
-Policy definitions are resolved within the **same source**: first the same container, then the other containers of the same host or agent. Two different definitions with the same name in one source are rejected as ambiguous, and an agent can never bind or alter definitions on the main host. See [Ownership & Conflicts](/docs/ownership#access-applications-and-policies).
+Policy definitions are resolved within the **same source**: first the same container, then the other containers of the same host or agent. A reference to a name that no definition provides is rejected with `access policy definition "<name>" not found`. Two different definitions with the same name in one source are rejected as ambiguous (`ambiguous access policy definition "<name>"`), and an agent can never bind or alter definitions on the main host. See [Ownership & Conflicts](/docs/ownership#access-applications-and-policies).
 
 ## Cleanup Behavior
 

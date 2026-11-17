@@ -25,8 +25,9 @@ v0.3 重写了整个后端。标签语法和 HTTP API 保持兼容，但有若�
 |------|------|
 | `v0.3.0` | 精确版本 |
 | `v0.3` | 0.3.x 的最新补丁版本（推荐） |
+| `v0.3.0-full`、`v0.3-full` | 同一版本，但基于 debug 版 distroless 基础镜像，额外包含 busybox shell（`docker exec -it ... sh`） |
 
-浮动标签 `v0` **不会**移动到 0.3，仍停留在 0.1.x。如果你现在使用 `ghcr.io/channinghe/labelgate:v0`，必须显式改成 `v0.3` 才能升级。
+`v0.3.0-rc1` 这样的预发布标签只会发布该精确标签（及其 `-full` 变体），不会发布 `v0.3`。浮动标签 `v0` **不会**移动到 0.3，它停留在 0.2.x 系列（最后一次发布时所在的位置）。如果你现在使用 `ghcr.io/channinghe/labelgate:v0`，必须显式改成 `v0.3` 才能升级。
 
 ### 必须设置 API token [#api-token-required]
 
@@ -41,7 +42,7 @@ Agent 协议已变更（双向 HMAC 认证、校验 TLS）。**v0.2 的 agent �
 - WebSocket 地址必须包含 **`/ws` 路径**（`wss://main.example.com:8081/ws`）；
 - TLS 证书**默认会被校验**。如果你的 agent 使用自签名证书，请配置 `connect.tls.ca` / `agent.tls.ca`，或者（不推荐）显式开启 `insecure_skip_verify`；
 - `connect.tls.cert` / `key` 不再表示“客户端证书”，而是 inbound agent 监听端的服务端证书；
-- Agent ID 必须匹配 `^[a-z0-9][a-z0-9._-]{0,62}$`（允许包含点；迁移时旧的 ID 会被转为小写，因此 `NAS.lan` 变为 `nas.lan`）；
+- Agent ID 必须匹配 `^[a-z0-9][a-z0-9._-]{0,62}$`（允许包含点；迁移时旧的 ID 会被转为小写，因此 `NAS.lan` 变为 `nas.lan`）。在 v0.3.0 中，带点的 ID 不能用作 `agent.agents` 下的键（配置加载器会把点当作路径分隔符，见[配置参考](/zh/docs/configuration/reference#per-agent-entries)），因此这样的 agent 需要通过 `connect.agent_id` 改名，或者改用 `agent.accept_token` 连接；
 - 每个命名 agent 需要有自己的 `token`，且所有 agent token（`agent.agents.<id>.token`、`agent.accept_token`、`connect.token`）都必须至少 32 个字符。请用 `openssl rand -hex 32` 生成；高熵很重要，因为截获的握手可以被离线攻击。
 
 在 v0.2 的 agent 无法连接期间，它的资源**不会**立刻被移除。迁移完成后，main 实例会保留每个 agent 最后已知的资源，直到该 agent 再次上报，最长保留 `sync.agent_grace`（默认 **24h**）。超过之后，这些资源变为孤立状态，由于 `cleanup` 默认为 `true`，会在 `sync.remove_delay`（默认 30m）之后被删除。请在宽限期内完成 agent 升级。
@@ -92,10 +93,10 @@ Labelgate 现在只删除和修改自己拥有的资源，并且**绝不收编**
 
 v0.2 的数据库会在首次启动时自动迁移，无需手动执行任何操作。
 
-1. 在改动 v0.2 数据库之前，Labelgate 会使用 `VACUUM INTO` 在旁边写一份一致性备份：`<db.path>.v0.2.bak`（默认是 `/app/config/labelgate.db.v0.2.bak`）。**如果无法写入备份，迁移不会执行**，Labelgate 会报错停止。请确保该目录可写且有剩余空间。
+1. 在改动 v0.2 数据库之前，Labelgate 会使用 `VACUUM INTO` 在旁边写一份一致性备份：`<db.path>.v0.2.bak`（默认是 `/app/config/labelgate.db.v0.2.bak`）。已有的备份绝不会被覆盖：如果 `.v0.2.bak` 已经存在，新备份会命名为 `.v0.2.bak.<unix 时间戳>`。**如果无法写入备份，迁移不会执行**，Labelgate 会报错停止。请确保该目录可写且有剩余空间。
 2. 随后迁移在单个事务中完成：已删除的记录被丢弃，重复项被合并（保留最近更新的一条），主机名被规范化，时间戳被转换。
-3. 生成并保存一个随机的**实例 ID**。
-4. v0.2 跟踪的所有资源都被视为**由本实例拥有**，因为它们就是 Labelgate 创建的。下一次更新时，每条 DNS 记录会被写入备注标记，每个 Access 应用会被打上标签。v0.2 创建但没有跟踪的 tunnel CNAME 记录也会补上跟踪记录。
+3. 生成并保存一个随机的**实例 ID**（8 位十六进制字符），启动时也会写入日志。
+4. v0.2 跟踪的所有资源都被视为**由本实例拥有**，因为它们就是 Labelgate 创建的。下一次更新时，每条 DNS 记录会被写入备注标记，每个 Access 应用会被打上标签。v0.2 创建但没有跟踪的 tunnel CNAME 记录也会补上跟踪记录。v0.2 中已经标记为孤立的资源会保留原来的孤立时间，因此其中 `remove_delay` 早已过期的资源会在升级后的最初几个周期内被删除。Agent 会被迁移过来，其 last-seen 时间被设为迁移时刻、且没有容器快照，所以它们的资源会被保留，直到 agent 再次上报（或 `sync.agent_grace` 结束）。
 5. v0.2 创建的 Access 可复用策略在新模型中不属于任何人：它们不会被收编，也不会被删除。Labelgate 会创建新的按主机名划分的策略，旧策略你可以在 Cloudflare 控制台中自行删除。
 
 不支持降级：v0.3 会拒绝由更新的 schema 写入的数据库，而 v0.2 也无法读取新数据库。如需回滚，请停止 Labelgate，把 `labelgate.db.v0.2.bak`（或你自己的备份）恢复为数据库文件，再启动旧版镜像。

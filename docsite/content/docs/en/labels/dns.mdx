@@ -16,19 +16,19 @@ Invalid values and unknown properties are errors; see [Strict Validation](/docs/
 | Property | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `hostname` | Yes | - | Full domain name for the DNS record (normalised to lower-case) |
-| `type` | No | `A` | Record type: `A`, `AAAA`, `CNAME`, `TXT`, `MX`, `SRV`, `CAA` |
-| `target` | No | `auto` | Record value. `auto` = detect public IP, `container` = container IP, or a literal value |
-| `proxied` | No | `true` | Enable Cloudflare proxy (orange cloud). Only effective for `A`, `AAAA`, `CNAME` |
-| `ttl` | No | automatic | TTL in seconds. Omitted, `0` or `1` = automatic. Always automatic when proxied |
+| `type` | No | `A` | Record type: `A`, `AAAA`, `CNAME`, `TXT`, `MX`, `SRV`, `CAA` (case-insensitive) |
+| `target` | `A`/`AAAA`: No. Other types: Yes | `auto` for `A`/`AAAA` | Record value. `auto` = detect public IP, `container` = container IP (both only for `A` and `AAAA`), or a literal value. `CNAME`, `MX`, `SRV`, `TXT` and `CAA` have no default and fail with `target is required for <type> records` when it is missing |
+| `proxied` | No | `true` | Enable Cloudflare proxy (orange cloud). Only effective for `A`, `AAAA`, `CNAME`; other types are never proxied. Accepts `true`/`false`, `1`/`0`, `yes`/`no`, `on`/`off` (case-insensitive); anything else is an error |
+| `ttl` | No | automatic | TTL in seconds, 0-86400. Omitted, `0` or `1` = automatic. Always automatic when proxied |
 | `credential` | No | automatic | Credential name. Empty = pick by zone match, then the root credential |
 | `cleanup` | No | `true` | Delete the record after the container is gone and `sync.remove_delay` has passed. Only ever deletes records Labelgate owns |
-| `comment` | No | - | Free text appended **after** the ownership marker in the record comment |
-| `priority` | No | `0` | Priority for `MX` and `SRV` |
-| `weight` | No | `0` | Weight for `SRV` |
+| `comment` | No | - | Free text appended **after** the ownership marker in the record comment (the whole comment is cut at Cloudflare's 100-character limit) |
+| `priority` | No | `0` | Priority for `MX` and `SRV` (0-65535) |
+| `weight` | No | `0` | Weight for `SRV` (0-65535) |
 | `port` | No | `0` | Port for `SRV` (0-65535) |
 | `flags` | No | `0` | Flags for `CAA` (0-255) |
 | `tag` | No | `issue` | Tag for `CAA`: `issue`, `issuewild`, `iodef` |
-| `access` | No | - | Access policy name to apply |
+| `access` | No | - | Name of an [Access policy definition](/docs/labels/access) to apply (lowercase letters, digits and hyphens). A name that no definition provides is rejected with `access policy definition "<name>" not found` |
 
 <Callout type="info">
 `priority` is **not enforced**: if you omit it for an `MX` or `SRV` record, it is `0`. Set it explicitly (MX `10`, `20`, ...) whenever the value matters. `weight`, `port`, `flags` and `tag` only apply to the record types listed above.
@@ -59,6 +59,8 @@ labels:
 - `container` - Use the container's IP address (the first network by name with an address of the right family)
 - Any valid IPv4 (`A`) or IPv6 (`AAAA`) address. An address of the wrong family is an error.
 
+If `auto` or `container` cannot be resolved (no public IP of the right family, or the container has no address of that family), the service goes to the error state and is retried every cycle. Only one service can own the `A` (or `AAAA`) record of a hostname, so DNS round-robin through several services is not possible.
+
 ### CNAME Records
 
 Create an alias pointing to another hostname.
@@ -70,7 +72,7 @@ labels:
   labelgate.dns.www.target: "example.com"
 ```
 
-A hostname can have only one CNAME and cannot have other records next to it. Conflicts are reported, not worked around.
+The target is normalised like a hostname (lower-case, no trailing dot) and must be a valid hostname; `MX` and `SRV` targets follow the same rule, while `TXT` and `CAA` values are kept verbatim. A hostname can have only one CNAME and cannot have other records next to it. Conflicts are reported, not worked around.
 
 ### TXT Records
 
@@ -174,7 +176,7 @@ services:
 
 ### Per-container defaults
 
-`labelgate.dns.default.<property>` sets defaults for `type`, `target`, `proxied`, `ttl`, `credential` and `cleanup` for every DNS service of the container:
+`labelgate.dns.default.<property>` sets defaults for `type`, `target`, `proxied`, `ttl`, `credential` and `cleanup` for every DNS service of the container. Any other property in a `default` block is reported as unknown, and an invalid value skips every DNS service of the container:
 
 ```yaml
 labels:

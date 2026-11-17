@@ -9,7 +9,7 @@ Labelgate 遵循一条铁律：**绝不修改或删除不属于自己的 Cloudfl
 
 每个 Labelgate 安装都有一个简短的随机**实例 ID**（例如 `a1b2c3d4`），首次启动时生成并保存在 SQLite 数据库中。Labelgate 创建的每个对象都会带上这个 ID，因此共用同一个 Cloudflare 账户的两个 Labelgate 实例不会互相干扰。
 
-通常你不需要设置它。如果数据库丢失，可以用 `instance_id` / `LABELGATE_INSTANCE_ID` 固定为之前的 ID（参见[数据库丢失后的恢复](#recovering-from-database-loss)）。
+启动时日志里会输出该 ID（`Storage ready ... instance_id=a1b2c3d4`），Labelgate 创建的每条 DNS 记录的备注里也能看到它。通常你不需要设置它。如果数据库丢失，可以用 `instance_id` / `LABELGATE_INSTANCE_ID` 固定为之前的 ID（参见[数据库丢失后的恢复](#recovering-from-database-loss)）。
 
 ## 所有权标记 [#ownership-markers]
 
@@ -32,7 +32,7 @@ labels:
 # Cloudflare 上最终的备注："labelgate:a1b2c3d4 main website"
 ```
 
-用户部分会被截断，以保证完整备注不超过 Cloudflare 的 100 字符限制。如果有人手动删掉了标记，Labelgate 会认为该记录不再属于自己：对应资源报错，并且不会再碰这条记录。
+用户部分会被截断，以保证完整备注不超过 Cloudflare 的 100 字符限制。只有当备注恰好等于 `labelgate:<instance_id>`，或以 `labelgate:<instance_id>` 加一个空格开头时，标记才算数；`labelgate:a1b2c3d45` 不匹配 `a1b2c3d4`。如果有人手动删掉了标记，Labelgate 会认为该记录不再属于自己：对应资源报 `conflict: existing record not owned by labelgate (ownership marker removed)`，并且不会再碰这条记录。
 
 ## 已存在的资源绝不会被“收编” [#pre-existing-resources-are-never-adopted]
 
@@ -42,6 +42,8 @@ labels:
 conflict: existing record not owned by labelgate
 ```
 
+某些情况下消息末尾会带有后缀：`(ownership marker removed)` 表示记录的标记被手工删除，`(ownership tag removed)` 表示 Access 应用的标签被移除，`(unmanaged ingress rule uses this hostname)` 表示 tunnel 主机名上有手工规则。
+
 这适用于手工创建的 DNS 记录、没有 Labelgate 标签的 Access 应用，以及已经有非托管 ingress 规则的 tunnel 主机名。该冲突会显示在 dashboard 和 `GET /api/resources/*` 中（`status: error`，原因在 `last_error`），并且每个周期都会重试，所以问题修复后会自动恢复。
 
 ### 解决冲突 [#resolving-a-conflict]
@@ -50,10 +52,10 @@ conflict: existing record not owned by labelgate
 
 1. **交给 Labelgate 管理。** 在 Cloudflare 控制台删除已有的记录、应用或 ingress 规则。下一次同步时，Labelgate 会创建自己的、带标记的版本。
 2. **保持由你手工管理。** 移除对应标签，或把标签中的主机名改成一个空闲的主机名。
-3. **有意将某条 DNS 记录移交给 Labelgate。** 自己在备注里加上标记（`labelgate:<instance_id> ...`）。之后这条记录会被识别为自己拥有，并按标签更新。这是一个需要你主动执行的手工操作，Labelgate 不会替你做。
+3. **有意将某条 DNS 记录移交给 Labelgate。** 在 Cloudflare 控制台中编辑该记录，把备注设为 `labelgate:<instance_id>`（ID 见启动日志）。下一个周期，Labelgate 会发现名称和类型相同、且带有它的标记的记录，把它关联过来，并按标签更新。对于 `MX`、`SRV`、`TXT` 和 `CAA` 记录，内容也必须一致，因为内容是记录标识的一部分。这是一个需要你主动执行的手工操作，Labelgate 不会替你做。
 
 <Callout type="info">
-带有**你自己实例标记**的对象会被自动恢复。如果 Labelgate 在创建记录之后、保存之前崩溃，下一个周期会发现这条带标记的记录并重新关联，而不是报冲突。
+带有**你自己实例标记**的对象会被自动恢复。如果 Labelgate 在创建记录之后、保存之前崩溃，下一个周期会发现这条带标记的记录（或该域名上带有你的标签的 Access 应用）并重新关联，而不是报冲突。上面的“移交”用的正是同一个机制。Tunnel ingress 规则没有标记，所以无法用这种方式移交。
 </Callout>
 
 ## 声明之间的冲突 [#conflicts-between-claims]
@@ -61,9 +63,9 @@ conflict: existing record not owned by labelgate
 两个服务可能声明同一个主机名：两个容器、容器与 agent，或者一个 DNS 服务与一个 tunnel 服务。Labelgate 以**先到先得（已有的拥有者胜出）**为规则，确定性地解决：
 
 - 第一个声明主机名的服务，只要持续声明就一直保有它。声明会被持久化，因此结果不会在同步周期之间或重启之后来回摇摆。
-- 后来者去声明一个已被占用的资源会被**拒绝**，拒绝原因会被保存，例如 `conflict: app.example.com|A already claimed by host-b/webapp/web`。
+- 后来者去声明一个已被占用的资源会被**拒绝**，拒绝原因会被保存，例如 `conflict: app.example.com|A already claimed by agent host-b container webapp service web`（主机本地的写作 `local container ...`）。
 - 如果主机名还没有主人，则按拥有者排序决定（本地容器优先，然后是按 ID 排序的 agent，再然后是容器名、服务名），所以每次运行的结果都一样。
-- 一个主机名同一时间只能属于一种*类别*：普通 DNS 记录、CNAME 或 tunnel。因此同一主机名同时出现 DNS 服务和 tunnel 服务属于冲突，而不仅仅是一行日志。
+- 一个主机名同一时间只能属于一种*类别*：普通 DNS 记录（`records`）、CNAME（`cname`）或某一个 tunnel（`tunnel:<tunnel-id>`）。因此同一主机名同时出现 DNS 服务和 tunnel 服务属于冲突（`conflict: hostname app.example.com is used by ... as tunnel:<tunnel-id>`），而不仅仅是一行日志。
 - 被拒绝的声明会在 dashboard 和 API 中以 `error` 状态的资源出现，它们不会在 Cloudflare 上创建或修改任何东西。
 
 要移交主机名，请先停止当前拥有者（或移除它的标签）。待它的资源变为孤立状态后，下一个周期中新的声明者就会胜出。如果同一个拥有者把主机名从 DNS 切换为 tunnel（或反过来），旧记录会被立即替换，无需等待 `remove_delay`。
@@ -109,7 +111,7 @@ Tunnel 的 CNAME 记录（`<tunnel-id>.cfargotunnel.com`）和其他 DNS 记录�
 
 数据库保存了实例 ID，以及 tunnel 规则和 Access 策略的所有权记录。如果丢失了数据库：
 
-- Labelgate 会生成一个**新的**实例 ID，于是旧的 DNS 记录（带着旧 ID 的标记）看起来像是别人的，会触发冲突。解决办法：从某条记录的备注里读出旧 ID（`labelgate:<old_id> ...`），启动前设置 `instance_id: <old_id>`（或 `LABELGATE_INSTANCE_ID`）。
+- Labelgate 会生成一个**新的**实例 ID，于是旧的 DNS 记录（带着旧 ID 的标记）看起来像是别人的，会触发冲突。解决办法：从某条记录的备注里（`labelgate:<old_id> ...`）或某个 Access 应用的标签名（`labelgate-<old_id>`）读出旧 ID，启动前设置 `instance_id: <old_id>`（或 `LABELGATE_INSTANCE_ID`）。之后 Labelgate 会重新关联带有该 ID 的记录和 Access 应用。
 - Tunnel 规则和 Access 策略在 Cloudflare 上没有标记，因此无法自动重新关联。请在 Cloudflare 控制台中清理遗留的规则或策略，也可以根据冲突报错找到它们。Labelgate 自己绝不会删除它们。
 
 从 v0.2 升级的处理方式不同，参见[升级到 v0.3](/zh/docs/upgrading#database-migration)。

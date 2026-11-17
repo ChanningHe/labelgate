@@ -33,7 +33,7 @@ labelgate.access.<policy_name>.<property>=<value>
 | Property | Default | Description |
 |----------|---------|-------------|
 | `app_name` | `labelgate-<name>` | Cloudflare Access application name |
-| `session_duration` | `24h` | Session duration (e.g., `1h`, `24h`, `720h`) |
+| `session_duration` | `24h` | 会话时长，必须是正的 Go 时长（`30m`、`12h`、`720h`），不支持以天为单位（`7d`） |
 | `policy.decision` | `allow` | Policy action: `allow`, `block`, `bypass`, `service_auth` |
 | `policy.name` | - | Policy display name in CF dashboard |
 | `policy.include.<selector>` | - | Include rules (OR logic) |
@@ -50,8 +50,10 @@ labelgate.access.<policy_name>.<property>=<value>
 | `service_auth` | `non_identity` | Require service token or mTLS certificate |
 
 <Callout type="warn">
-`allow` 和 `block` 决策需要至少一个 `include` 规则。
+`allow` 和 `block` 决策需要至少一个 `include` 规则，否则该定义会被丢弃并报错。
 </Callout>
+
+一个定义只描述一条策略：它的 `policy.*` 标签只会生成一条 Cloudflare 策略（决策不会叠加）。策略名（标签键中的 `<policy_name>`）遵循服务名规则，`default` 会被忽略。未知的选择器（`policy.include.foo`）或需要值却没有值的选择器都会报错，并丢弃该定义。
 
 ### Rule Selectors
 
@@ -67,7 +69,7 @@ labelgate.access.<policy_name>.<property>=<value>
 | `certificate` | Valid Certificate | (no value needed) |
 | `login_methods` | Login Methods | `<method-id>` |
 
-多个值用逗号分隔。像 `everyone` 和 `certificate` 这样的选择器不需要值。
+多个值用逗号分隔。`everyone` 和 `certificate` 不接受值（标签的值会被忽略，写 `""` 即可），其他选择器至少需要一个值。
 
 ## Rule Logic
 
@@ -179,7 +181,7 @@ Labelgate 创建的 Access 应用带有 Access 标签 `labelgate-<instance_id>`�
 - 不是 Labelgate 创建的策略或应用，即使名称相同，也不会被收编、更新或删除。如果主机名对应的域名上已有一个没有 Labelgate 标签的应用，该服务会报 `conflict: existing record not owned by labelgate`。
 - 如果更新应用失败，该服务进入错误状态。Labelgate 绝不会退而求其次去创建第二个应用。
 
-策略定义在**同一来源**内解析：先找同一容器，再找同一主机或 agent 的其他容器。同一来源内两个同名但内容不同的定义会被判定为有歧义而被拒绝，并且 agent 永远无法绑定或修改 main 主机上的定义。参见[所有权与冲突](/zh/docs/ownership#access-applications-and-policies)。
+策略定义在**同一来源**内解析：先找同一容器，再找同一主机或 agent 的其他容器。引用了没有任何定义提供的名称时，服务会以 `access policy definition "<name>" not found` 被拒绝。同一来源内两个同名但内容不同的定义会被判定为有歧义（`ambiguous access policy definition "<name>"`）而被拒绝，并且 agent 永远无法绑定或修改 main 主机上的定义。参见[所有权与冲突](/zh/docs/ownership#access-applications-and-policies)。
 
 ## 清理行为
 

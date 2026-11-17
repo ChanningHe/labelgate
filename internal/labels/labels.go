@@ -56,8 +56,9 @@ type parser struct {
 
 // Parse parses one container's labels into specs.
 //
-//   - Keys without the "<prefix>." prefix, with fewer than 3 dot-separated parts
-//     after it, or with an unknown type segment are ignored.
+//   - Keys without the "<prefix>." prefix are ignored. Keys with the prefix but
+//     an unknown type segment or fewer than 3 dot-separated parts after it
+//     produce a LabelError keyed by the full label key (never a service stem).
 //   - Invalid or reserved service names produce a LabelError and skip the service.
 //   - Hostnames are normalized (lower-case, trimmed, no trailing dot) and validated.
 //   - Invalid values drop the service; unknown properties are reported but keep it.
@@ -89,7 +90,12 @@ func (p *parser) group(labels map[string]string) map[string]map[string]props {
 			continue
 		}
 		parts := strings.SplitN(rest, ".", 3)
-		if len(parts) < 3 || !knownType(parts[0]) {
+		if !knownType(parts[0]) {
+			p.errs.add(key, "unknown label type %q (expected dns, tunnel or access)", parts[0])
+			continue
+		}
+		if len(parts) < 3 {
+			p.errs.add(key, "malformed label key (expected %s.%s.<service>.<property>)", p.prefix, parts[0])
 			continue
 		}
 		typ, service, prop := parts[0], parts[1], parts[2]

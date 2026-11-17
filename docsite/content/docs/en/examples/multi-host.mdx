@@ -36,7 +36,7 @@ Both modes use the **same handshake and the same security properties**.
 
 ## Transport and TLS
 
-- The endpoint is always a WebSocket URL with the **`/ws` path**: `wss://main.example.com:8081/ws`. Without `/ws` the connection fails with a 404.
+- The endpoint is always a WebSocket URL with the **`/ws` path**: `wss://main.example.com:8081/ws`. Without `/ws` the connection fails with a 404. The same listener also answers an unauthenticated `GET /health` with `{"status":"ok"}`.
 - **Use `wss://` everywhere except on a fully trusted network.** With plain `ws://` the handshake still authenticates both sides (the token is never sent), but the data that follows has no confidentiality or integrity protection. A passive observer would see your container names, labels and public IPs, and an active attacker could tamper with the stream.
 - **TLS verification is on by default**, using the system roots or the CA you configure. Agents never silently skip verification any more.
 - To trust a private CA, set `connect.tls.ca` (agent dialing the main) or `agent.tls.ca` (main dialing inbound agents).
@@ -68,19 +68,23 @@ agent:
   listen: :8081
   agents:
     docker-host-1:
-      token: ${AGENT_1_TOKEN}
+      token: "<output of: openssl rand -hex 32>"
       name: Docker host 1
       default_tunnel: default
       tunnels: [default]
       hostnames: ["*.host1.example.com"]
 ```
 
+<Callout type="warn">
+Labelgate does **not** expand `${VAR}` in config files: a literal `${AGENT_1_TOKEN}` is just a 14-character token and fails the 32-character minimum. Per-agent tokens exist only in the config file (map sections cannot be set through the environment), so write the generated token into the file and keep the file private, or let Docker Compose interpolate it as in the [outbound example](#outbound-mode-example) below. The shared `accept_token` can come from `LABELGATE_AGENT_ACCEPT_TOKEN`.
+</Callout>
+
 **Shared-token agents** use `agent.accept_token`: any agent ID that is not listed under `agent.agents` may connect with it. Because the token is a shared secret, anyone holding it can claim any unregistered agent ID, so restrict what such agents may do:
 
 ```yaml
 agent:
   enabled: true
-  accept_token: ${AGENT_SHARED_TOKEN}
+  # accept_token: set LABELGATE_AGENT_ACCEPT_TOKEN in the environment (>= 32 characters)
   accept_hostnames: ["*.agents.example.com"]
   accept_tunnels: [default]
 ```
@@ -95,7 +99,9 @@ agent:
 | `agent.accept_hostnames` | all `accept_token` agents | Same as `hostnames` |
 | `agent.accept_tunnels` | all `accept_token` agents | Same as `tunnels`. Empty = only the global default tunnel |
 
-Globs use `path.Match` syntax on lower-case hostnames (`*.example.com`). A claim that violates an allow-list is rejected with a reason, visible in the dashboard and API; it never reaches Cloudflare.
+Tunnels are referenced by `default` (the root tunnel), a key of `cloudflare.tunnels`, or a tunnel ID; an unknown reference makes the configuration invalid. A label that omits `tunnel` resolves to the agent's default tunnel (the global default for `accept_token` agents), and that tunnel must be in the allowed list, so an `accept_tunnels` that does not include the global default blocks tunnel labels without an explicit `tunnel`.
+
+Globs use `path.Match` syntax on lower-case hostnames (`*.example.com`). Note that `*` also matches dots: `*.example.com` matches `a.b.example.com`, but not `example.com` itself. A claim that violates an allow-list is rejected with a reason, visible in the dashboard and API; it never reaches Cloudflare.
 
 Tunnel resolution for an agent's service: the label's `tunnel` > the agent's `default_tunnel` > the global default tunnel, and the result **must be in the agent's allowed tunnels**.
 
@@ -104,10 +110,11 @@ Tunnel resolution for an agent's service: the label's `tunnel` > the agent's `de
 A tunnel service defined by an agent can point cloudflared anywhere, so agent-sourced tunnel services are checked. They are rejected when they target:
 
 - `localhost` or `*.localhost`,
-- loopback, link-local (`169.254.0.0/16`, `fe80::/10`), unspecified or multicast IP literals,
-- `unix:` / `unix+tls:` sockets.
+- loopback, link-local (`169.254.0.0/16`, `fe80::/10`), unspecified (`0.0.0.0`, `::`) or multicast IP literals,
+- `unix:` / `unix+tls:` sockets,
+- the `bastion` service.
 
-Local containers (labels on the main host itself) are trusted and are not subject to this guard.
+Only IP literals and the `localhost` names are checked: hostnames are not resolved, and private LAN addresses (`10.0.0.0/8`, `192.168.0.0/16`, ...) are allowed. `hello_world` and `http_status:<code>` are always allowed. Local containers (labels on the main host itself) are trusted and are not subject to this guard.
 
 ### Agents cannot change local Access policies
 
@@ -205,12 +212,16 @@ services:
 
 The agent's `connect.agent_id` must equal the key under `agent.agents` on the main instance.
 
+<Callout type="info">
+The `service` of a tunnel label is resolved by **cloudflared**, not by Labelgate. `http://webapp:80` only works if a cloudflared connector of that tunnel can resolve `webapp`, so run cloudflared on the agent host as well (with the tunnel the agent is allowed to use), or use an address that every connector of the tunnel can reach.
+</Callout>
+
 ## Inbound Mode Example
 
 ### Main Instance
 
 ```yaml
-# labelgate.yaml (main host)
+# labelgate.yaml (main host; /etc/labelgate/labelgate.yaml inside the container)
 agent:
   enabled: true
   tls:
@@ -218,9 +229,11 @@ agent:
   agents:
     docker-host-1:
       connect_to: wss://192.168.1.11:8082/ws
-      token: ${AGENT_1_TOKEN}
+      token: "<output of: openssl rand -hex 32>"   # same value as LABELGATE_CONNECT_TOKEN on the agent
       hostnames: ["*.host1.example.com"]
 ```
+
+The main verifies the agent's certificate against `agent.tls.ca`, so the certificate must be valid for the `connect_to` host (an IP address such as `192.168.1.11` needs an IP SAN).
 
 ### Agent Instance
 
@@ -245,7 +258,7 @@ services:
       - "8082:8082"
 ```
 
-Because authentication is mutual, a stranger who connects to port 8082 gets no token and no data; the agent only talks to a peer that proves it knows the token. Inbound dialers reconnect with backoff, and an agent accepts a newer authenticated main session by closing the older one. An agent's unauthenticated `/health` endpoint returns only `{"status":"ok"}`.
+Because authentication is mutual, a stranger who connects to port 8082 gets no token and no data; the agent only talks to a peer that proves it knows the token. Inbound dialers reconnect with backoff, and an agent accepts a newer authenticated main session by closing the older one. An agent's unauthenticated `/health` endpoint returns only `{"status":"ok"}`. With `agent.enabled: true` the main also starts its own `agent.listen` listener, even if all agents are inbound.
 
 ## Key Notes
 

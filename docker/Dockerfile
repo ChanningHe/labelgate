@@ -35,7 +35,9 @@ ARG BUILD_DATE=unknown
 WORKDIR /app
 
 # hadolint ignore=DL3018
-RUN apk add --no-cache git ca-certificates
+RUN apk add --no-cache git ca-certificates \
+    # Data directory skeleton (distroless has no shell to create it at runtime)
+    && mkdir -p /app/config-skel
 
 COPY go.mod go.sum ./
 RUN go mod download
@@ -54,6 +56,9 @@ FROM ${BASE_IMAGE}
 WORKDIR /app
 
 COPY --from=builder /app/labelgate /app/labelgate
+# Default db.path is /app/config/labelgate.db. Owning the directory as the
+# runtime user (65532) lets Docker named volumes inherit writable ownership.
+COPY --from=builder --chown=65532:65532 /app/config-skel /app/config
 
 USER nonroot
 

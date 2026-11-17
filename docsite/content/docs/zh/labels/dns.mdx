@@ -16,19 +16,19 @@ labelgate.dns.<service_name>.<property>=<value>
 | 属性 | 必填 | 默认值 | 说明 |
 |------|------|--------|------|
 | `hostname` | 是 | - | DNS 记录的完整域名（会规范化为小写） |
-| `type` | 否 | `A` | 记录类型：`A`、`AAAA`、`CNAME`、`TXT`、`MX`、`SRV`、`CAA` |
-| `target` | 否 | `auto` | 记录值。`auto` = 检测公网 IP，`container` = 容器 IP，也可以是字面值 |
-| `proxied` | 否 | `true` | 启用 Cloudflare 代理（橙色云朵）。仅对 `A`、`AAAA`、`CNAME` 有效 |
-| `ttl` | 否 | 自动 | TTL（秒）。省略、`0` 或 `1` 表示自动。启用代理时始终为自动 |
+| `type` | 否 | `A` | 记录类型：`A`、`AAAA`、`CNAME`、`TXT`、`MX`、`SRV`、`CAA`（不区分大小写） |
+| `target` | `A`/`AAAA`：否；其他类型：是 | `A`/`AAAA` 为 `auto` | 记录值。`auto` = 检测公网 IP，`container` = 容器 IP（两者都只适用于 `A` 和 `AAAA`），也可以是字面值。`CNAME`、`MX`、`SRV`、`TXT`、`CAA` 没有默认值，缺失时报 `target is required for <type> records` |
+| `proxied` | 否 | `true` | 启用 Cloudflare 代理（橙色云朵）。仅对 `A`、`AAAA`、`CNAME` 有效，其他类型永远不代理。接受 `true`/`false`、`1`/`0`、`yes`/`no`、`on`/`off`（不区分大小写），其他值会报错 |
+| `ttl` | 否 | 自动 | TTL（秒），范围 0-86400。省略、`0` 或 `1` 表示自动。启用代理时始终为自动 |
 | `credential` | 否 | 自动 | 凭据名称。为空表示先按 zone 匹配，再用根凭据 |
 | `cleanup` | 否 | `true` | 容器消失且超过 `sync.remove_delay` 后删除记录。只会删除 Labelgate 自己拥有的记录 |
-| `comment` | 否 | - | 追加在所有权标记**之后**的备注文字 |
-| `priority` | 否 | `0` | `MX` 和 `SRV` 的优先级 |
-| `weight` | 否 | `0` | `SRV` 的权重 |
+| `comment` | 否 | - | 追加在所有权标记**之后**的备注文字（整条备注会按 Cloudflare 的 100 字符上限截断） |
+| `priority` | 否 | `0` | `MX` 和 `SRV` 的优先级（0-65535） |
+| `weight` | 否 | `0` | `SRV` 的权重（0-65535） |
 | `port` | 否 | `0` | `SRV` 的端口（0-65535） |
 | `flags` | 否 | `0` | `CAA` 的 flags（0-255） |
 | `tag` | 否 | `issue` | `CAA` 的 tag：`issue`、`issuewild`、`iodef` |
-| `access` | 否 | - | 要应用的 Access 策略名称 |
+| `access` | 否 | - | 要应用的 [Access 策略定义](/zh/docs/labels/access)名称（小写字母、数字和连字符）。没有任何定义提供该名称时，服务会被拒绝，原因为 `access policy definition "<name>" not found` |
 
 <Callout type="info">
 `priority` **不做强制校验**：`MX` 或 `SRV` 记录省略它时，值为 `0`。只要这个值有意义，就请显式设置（MX 例如 `10`、`20`……）。`weight`、`port`、`flags` 和 `tag` 只对上表列出的记录类型生效。
@@ -59,6 +59,8 @@ labels:
 - `container` - 使用容器的 IP 地址（按名称排序的第一个、且地址族匹配的网络）
 - 任何合法的 IPv4（`A`）或 IPv6（`AAAA`）地址。地址族不匹配会报错。
 
+如果 `auto` 或 `container` 无法解析（没有对应地址族的公网 IP，或容器没有该地址族的地址），服务会进入错误状态，并在每个周期重试。同一主机名的 `A`（或 `AAAA`）记录只能由一个服务拥有，因此无法通过多个服务实现 DNS 轮询。
+
 ### CNAME 记录
 
 创建指向另一个主机名的别名。
@@ -70,7 +72,7 @@ labels:
   labelgate.dns.www.target: "example.com"
 ```
 
-一个主机名只能有一条 CNAME，并且不能与其他记录共存。出现冲突时会被如实报告，而不会被绕过。
+目标会像主机名一样被规范化（小写、去掉末尾的点），并且必须是合法的主机名；`MX` 和 `SRV` 的目标遵循同样的规则，而 `TXT` 和 `CAA` 的值则原样保留。一个主机名只能有一条 CNAME，并且不能与其他记录共存。出现冲突时会被如实报告，而不会被绕过。
 
 ### TXT 记录
 
@@ -172,9 +174,9 @@ services:
       # （sync.remove_delay）后，记录会被删除
 ```
 
-### 容器级默认值
+### 容器级默认值 [#per-container-defaults]
 
-`labelgate.dns.default.<property>` 可以为该容器的所有 DNS 服务设置 `type`、`target`、`proxied`、`ttl`、`credential` 和 `cleanup` 的默认值：
+`labelgate.dns.default.<property>` 可以为该容器的所有 DNS 服务设置 `type`、`target`、`proxied`、`ttl`、`credential` 和 `cleanup` 的默认值。`default` 块中的其他属性会被报告为未知属性，非法的值会使该容器的所有 DNS 服务被跳过：
 
 ```yaml
 labels:
