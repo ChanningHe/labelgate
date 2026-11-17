@@ -19,7 +19,7 @@ Every config file key maps directly to an environment variable:
 | `sync.remove_delay` | `LABELGATE_SYNC_REMOVE_DELAY` |
 | `api.base_path` | `LABELGATE_API_BASE_PATH` |
 
-Priority: **environment variables > config file > defaults**. Map-valued sections (`cloudflare.credentials`, `cloudflare.tunnels`, `agent.agents`) are config-file only. An environment variable that is set but empty is ignored (it does not blank a value from the config file). Map keys are case-insensitive and lower-cased.
+Priority: **environment variables > config file > defaults**. Map-valued sections (`cloudflare.credentials`, `cloudflare.tunnels`, `agent.agents`) are config-file only. An environment variable that is set but empty is ignored (it does not blank a value from the config file). Map keys are case-insensitive and lower-cased. Config files are not templated: `${VAR}` is not expanded, so pass secrets through the environment (for the scalar keys) or write them into the file.
 
 **Durations** are strings with a unit: `30s`, `5m`, `24h`. A bare number is an error everywhere: `sync.interval: 30` and `LABELGATE_SYNC_INTERVAL=30` fail with `invalid duration` (and a YAML `orphan_ttl: 0` fails with `duration must be a string`). Write `0s` for zero.
 

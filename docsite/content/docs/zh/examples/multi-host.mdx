@@ -36,7 +36,7 @@ Agent 不持有任何 Cloudflare 凭据。它们只发送容器和公网 IP 的�
 
 ## 传输与 TLS
 
-- 端点始终是带有 **`/ws` 路径**的 WebSocket 地址：`wss://main.example.com:8081/ws`。缺少 `/ws` 会得到 404。
+- 端点始终是带有 **`/ws` 路径**的 WebSocket 地址：`wss://main.example.com:8081/ws`。缺少 `/ws` 会得到 404。同一个监听端口还提供无需认证的 `GET /health`，返回 `{"status":"ok"}`。
 - **除非在完全可信的网络内，否则请一律使用 `wss://`。** 使用明文 `ws://` 时，握手仍会对双方进行认证（token 不会被发送），但之后的数据没有机密性和完整性保护。被动监听者能看到你的容器名、标签和公网 IP，主动攻击者还可以篡改数据流。
 - **默认启用 TLS 校验**，使用系统根证书或你配置的 CA。Agent 不会再静默跳过校验。
 - 如需信任私有 CA，请设置 `connect.tls.ca`（agent 拨号 main）或 `agent.tls.ca`（main 拨号 inbound agent）。
@@ -68,24 +68,28 @@ agent:
   listen: :8081
   agents:
     docker-host-1:
-      token: ${AGENT_1_TOKEN}
+      token: "<openssl rand -hex 32 的输出>"
       name: Docker host 1
       default_tunnel: default
       tunnels: [default]
       hostnames: ["*.host1.example.com"]
 ```
 
+<Callout type="warn">
+Labelgate **不会**展开配置文件中的 `${VAR}`：字面量 `${AGENT_1_TOKEN}` 只是一个 14 个字符的 token，通不过 32 个字符的最小长度要求。每个 agent 的 token 只能写在配置文件里（map 配置段无法通过环境变量设置），所以请把生成的 token 直接写进文件并保护好该文件，或者像下面的 [outbound 示例](#outbound-mode-example)那样让 Docker Compose 来做变量替换。共享的 `accept_token` 可以通过 `LABELGATE_AGENT_ACCEPT_TOKEN` 传入。
+</Callout>
+
 **共享 token agent** 使用 `agent.accept_token`：任何没有列在 `agent.agents` 下的 agent ID 都可以用它连接。由于这个 token 是共享密钥，持有它的人可以冒用任何未注册的 agent ID，所以请限制这类 agent 能做的事：
 
 ```yaml
 agent:
   enabled: true
-  accept_token: ${AGENT_SHARED_TOKEN}
+  # accept_token：通过环境变量 LABELGATE_AGENT_ACCEPT_TOKEN 设置（至少 32 个字符）
   accept_hostnames: ["*.agents.example.com"]
   accept_tunnels: [default]
 ```
 
-### 允许列表
+### 允许列表 [#allow-lists]
 
 | 设置 | 作用对象 | 效果 |
 |------|----------|------|
@@ -95,18 +99,22 @@ agent:
 | `agent.accept_hostnames` | 所有 `accept_token` agent | 与 `hostnames` 相同 |
 | `agent.accept_tunnels` | 所有 `accept_token` agent | 与 `tunnels` 相同。为空表示只能用全局默认 tunnel |
 
-glob 使用 `path.Match` 语法，作用于小写主机名（`*.example.com`）。违反允许列表的声明会被拒绝并附带原因，在 dashboard 和 API 中可见，并且不会到达 Cloudflare。
+tunnel 通过 `default`（根 tunnel）、`cloudflare.tunnels` 中的键或 tunnel ID 引用；引用未知的 tunnel 会使配置无效。省略 `tunnel` 的标签会解析为该 agent 的默认 tunnel（`accept_token` agent 则是全局默认 tunnel），而这个 tunnel 必须在允许列表中，所以如果 `accept_tunnels` 不包含全局默认 tunnel，没有显式写 `tunnel` 的 tunnel 标签会被拒绝。
+
+glob 使用 `path.Match` 语法，作用于小写主机名（`*.example.com`）。注意 `*` 也能匹配点号：`*.example.com` 会匹配 `a.b.example.com`，但不匹配 `example.com` 本身。违反允许列表的声明会被拒绝并附带原因，在 dashboard 和 API 中可见，并且不会到达 Cloudflare。
 
 对 agent 的服务做 tunnel 解析的顺序：标签中的 `tunnel` > agent 的 `default_tunnel` > 全局默认 tunnel，且结果**必须在该 agent 允许的 tunnel 之内**。
 
-### SSRF 防护
+### SSRF 防护 [#ssrf-guard]
 
 由 agent 定义的 tunnel 服务可以让 cloudflared 访问任意地址，所以来自 agent 的 tunnel 服务会被检查。以下目标会被拒绝：
 
 - `localhost` 或 `*.localhost`，
-- 回环地址、链路本地地址（`169.254.0.0/16`、`fe80::/10`）、未指定地址或组播地址的 IP 字面量，
-- `unix:` / `unix+tls:` socket。
+- 回环地址、链路本地地址（`169.254.0.0/16`、`fe80::/10`）、未指定地址（`0.0.0.0`、`::`）或组播地址的 IP 字面量，
+- `unix:` / `unix+tls:` socket，
+- `bastion` 服务。
 
+只检查 IP 字面量和 `localhost` 名称：不会解析主机名，局域网私有地址（`10.0.0.0/8`、`192.168.0.0/16` 等）是允许的。`hello_world` 和 `http_status:<code>` 始终允许。
 本地容器（main 主机自己的标签）是受信任的，不受此防护限制。
 
 ### Agent 无法修改本地的 Access 策略
@@ -119,7 +127,7 @@ Agent 的资源与 `last_seen` 绑定，而 `last_seen` 由 **main 实例**在�
 
 宽限期结束后，agent 的资源变为孤立状态，如果它们的 `cleanup` 是 `true`（默认），会在 `sync.remove_delay` 之后被删除。在 dashboard 中，agent 的状态是 `active`（已连接）、`disconnected`（宽限期内）或 `removed`。如果某个 agent 报告它的 Docker 守护进程不可达，它最后一份有效快照会被保留，资源保持被持有状态。
 
-## Outbound 模式示例
+## Outbound 模式示例 [#outbound-mode-example]
 
 ### Main 实例
 
@@ -205,12 +213,16 @@ services:
 
 Agent 的 `connect.agent_id` 必须与 main 实例上 `agent.agents` 下的键一致。
 
+<Callout type="info">
+tunnel 标签中的 `service` 由 **cloudflared** 解析，而不是由 Labelgate 解析。只有该 tunnel 的某个 cloudflared 连接器能解析 `webapp` 时，`http://webapp:80` 才有效，所以请在 agent 主机上也运行 cloudflared（使用该 agent 被允许使用的 tunnel），或者改用该 tunnel 所有连接器都能访问的地址。
+</Callout>
+
 ## Inbound 模式示例 [#inbound-mode-example]
 
 ### Main 实例
 
 ```yaml
-# labelgate.yaml（main 主机）
+# labelgate.yaml（main 主机；容器内为 /etc/labelgate/labelgate.yaml）
 agent:
   enabled: true
   tls:
@@ -218,9 +230,11 @@ agent:
   agents:
     docker-host-1:
       connect_to: wss://192.168.1.11:8082/ws
-      token: ${AGENT_1_TOKEN}
+      token: "<openssl rand -hex 32 的输出>"   # 与 agent 上的 LABELGATE_CONNECT_TOKEN 相同
       hostnames: ["*.host1.example.com"]
 ```
+
+Main 会用 `agent.tls.ca` 校验 agent 的证书，所以证书必须对 `connect_to` 中的主机有效（像 `192.168.1.11` 这样的 IP 地址需要 IP SAN）。
 
 ### Agent 实例
 
@@ -245,7 +259,7 @@ services:
       - "8082:8082"
 ```
 
-由于认证是双向的，陌生人连上 8082 端口既拿不到 token，也拿不到任何数据；agent 只会和能证明自己知道 token 的对端通信。Inbound 拨号方会带退避地重连，agent 在接受一个更新的、已认证的 main 会话时，会关闭旧会话。Agent 上无需认证的 `/health` 端点只返回 `{"status":"ok"}`。
+由于认证是双向的，陌生人连上 8082 端口既拿不到 token，也拿不到任何数据；agent 只会和能证明自己知道 token 的对端通信。Inbound 拨号方会带退避地重连，agent 在接受一个更新的、已认证的 main 会话时，会关闭旧会话。Agent 上无需认证的 `/health` 端点只返回 `{"status":"ok"}`。设置 `agent.enabled: true` 后，即使所有 agent 都是 inbound，main 也会启动自己的 `agent.listen` 监听。
 
 ## 要点
 

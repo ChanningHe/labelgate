@@ -19,7 +19,7 @@ description: Labelgate 所有配置项、默认值与已移除配置项的完整
 | `sync.remove_delay` | `LABELGATE_SYNC_REMOVE_DELAY` |
 | `api.base_path` | `LABELGATE_API_BASE_PATH` |
 
-优先级：**环境变量 > 配置文件 > 默认值**。map 类型的配置段（`cloudflare.credentials`、`cloudflare.tunnels`、`agent.agents`）只能写在配置文件中。已设置但为空的环境变量会被忽略（不会把配置文件里的值清空）。map 的键不区分大小写，并会被转为小写。
+优先级：**环境变量 > 配置文件 > 默认值**。map 类型的配置段（`cloudflare.credentials`、`cloudflare.tunnels`、`agent.agents`）只能写在配置文件中。已设置但为空的环境变量会被忽略（不会把配置文件里的值清空）。map 的键不区分大小写，并会被转为小写。配置文件不是模板：不会展开 `${VAR}`，所以请通过环境变量传入密钥（适用于标量配置项），或者直接写进文件。
 
 **时长**必须是带单位的字符串：`30s`、`5m`、`24h`。任何地方写裸数字都会报错：`sync.interval: 30` 和 `LABELGATE_SYNC_INTERVAL=30` 会以 `invalid duration` 失败（YAML 里的 `orphan_ttl: 0` 会以 `duration must be a string` 失败）。表示零请写 `0s`。
 
