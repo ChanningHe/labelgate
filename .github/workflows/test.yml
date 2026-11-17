@@ -10,6 +10,12 @@ on:
 permissions:
   contents: read
 
+env:
+  # renovate: datasource=go depName=honnef.co/go/tools
+  STATICCHECK_VERSION: v0.8.2
+  # renovate: datasource=go depName=golang.org/x/vuln
+  GOVULNCHECK_VERSION: v1.9.0
+
 jobs:
   dashboard:
     name: Dashboard lint, tests and type check
@@ -67,7 +73,7 @@ jobs:
         run: yarn build
 
   go:
-    name: Go vet and tests
+    name: Go lint, vulncheck and tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -77,6 +83,7 @@ jobs:
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
+          check-latest: false
 
       # dashboard/embed.go embeds dashboard/static, which only exists after a
       # frontend build. Tests don't use the assets, so a placeholder is enough.
@@ -99,6 +106,13 @@ jobs:
 
       - name: Vet
         run: go vet ./...
+
+      # Tool versions are pinned; Renovate bumps them via the env block below.
+      - name: Staticcheck
+        run: go run "honnef.co/go/tools/cmd/staticcheck@${STATICCHECK_VERSION}" ./...
+
+      - name: Govulncheck
+        run: go run "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}" ./...
 
       - name: Test
         run: go test -race ./...
