@@ -171,9 +171,19 @@ labels:
   labelgate.tunnel.admin.access: "internal"
 ```
 
+## 所有权
+
+Labelgate 创建的 Access 应用带有 Access 标签 `labelgate-<instance_id>`。可复用策略按**主机名**创建（命名为 `<policy.name 或应用名称> (<hostname>)`），其 ID 记录在 Labelgate 的数据库中。只有这些对象才会被修改或删除：
+
+- 只要 include、require、exclude、decision 或 name 有差异，策略就会在**每次协调时更新**。从标签中删掉 `bob@example.com`，下一次同步就会撤销 Bob 的访问权限。
+- 不是 Labelgate 创建的策略或应用，即使名称相同，也不会被收编、更新或删除。如果主机名对应的域名上已有一个没有 Labelgate 标签的应用，该服务会报 `conflict: existing record not owned by labelgate`。
+- 如果更新应用失败，该服务进入错误状态。Labelgate 绝不会退而求其次去创建第二个应用。
+
+策略定义在**同一来源**内解析：先找同一容器，再找同一主机或 agent 的其他容器。同一来源内两个同名但内容不同的定义会被判定为有歧义而被拒绝，并且 agent 永远无法绑定或修改 main 主机上的定义。参见[所有权与冲突](/zh/docs/ownership#access-applications-and-policies)。
+
 ## 清理行为
 
-Access 策略没有独立的 `cleanup` 标签。清理行为**继承自引用该策略的 tunnel 或 DNS 服务**。
+Access 策略没有独立的 `cleanup` 标签。清理行为**继承自引用该策略的 tunnel 或 DNS 服务**，`cleanup` 默认为 `true`。
 
 ```yaml
 labels:
@@ -183,13 +193,13 @@ labels:
   labelgate.tunnel.web.hostname: "app.company.io"
   labelgate.tunnel.web.service: "http://app:80"
   labelgate.tunnel.web.access: "team"
-  labelgate.tunnel.web.cleanup: "true"  # 同时控制 access 的清理行为
+  labelgate.tunnel.web.cleanup: "false"  # 同时控制 access 的清理行为
 ```
 
-当引用服务启用了 `cleanup` 时：
-- 容器停止后，Cloudflare 上的 Access Application 将在配置的 `sync.remove_delay`（默认 30 分钟）后被删除
-- 关联的可复用策略如果没有被其他应用引用，也会被一并清理
+当引用服务启用了 `cleanup` 时（默认）：
+- 容器停止后，Cloudflare 上的 Access 应用将在配置的 `sync.remove_delay`（默认 30 分钟）后被删除
+- Labelgate 为它创建的可复用策略也会一并删除
 
-当 `cleanup` 未启用时（默认）：
-- Access Application 在 labelgate 中标记为 **orphaned**，但在 Cloudflare 上保留
+当 `cleanup` 被关闭时：
+- Access 应用在 Labelgate 中标记为 **orphaned**，但在 Cloudflare 上保留
 - 容器重启后会自动重新激活

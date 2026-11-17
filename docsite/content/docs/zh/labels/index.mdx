@@ -11,20 +11,20 @@ Labelgate 读取 Docker 容器标签来确定需要管理的 Cloudflare 资源�
 labelgate.<type>.<service_name>.<property>=<value>
 ```
 
-| Segment | Description | Example |
-|---------|-------------|---------|
-| `labelgate` | Prefix (configurable via `LABELGATE_LABEL_PREFIX`) | `labelgate` |
-| `type` | Resource type | `dns`, `tunnel`, `access` |
-| `service_name` | Unique service identifier | `web`, `api`, `mail` |
-| `property` | Setting name | `hostname`, `service`, `type` |
+| 部分 | 说明 | 示例 |
+|------|------|------|
+| `labelgate` | 前缀（可通过 `LABELGATE_LABEL_PREFIX` 配置） | `labelgate` |
+| `type` | 资源类型 | `dns`、`tunnel`、`access` |
+| `service_name` | 服务的唯一标识 | `web`、`api`、`mail` |
+| `property` | 设置项名称 | `hostname`、`service`、`type` |
 
 ## Service Name Rules
 
 `service_name` 是容器内每个服务的唯一标识符。它允许你在同一个容器上定义多个服务。
 
-**Allowed characters:** lowercase letters, digits, and hyphens: `[a-z0-9]([a-z0-9-]*[a-z0-9])?`
+**允许的字符：** 小写字母、数字和连字符：`[a-z0-9]([a-z0-9-]*[a-z0-9])?`
 
-**Reserved words** (cannot be used as service names): `hostname`, `service`, `type`, `target`, `proxied`, `ttl`, `cleanup`, `credential`, `tunnel`, `path`, `origin`, `access`, `default`, `priority`, `weight`, `port`, `flags`, `tag`, `comment`
+**保留字**（不能用作服务名）：`hostname`、`service`、`type`、`target`、`proxied`、`ttl`、`cleanup`、`credential`、`tunnel`、`path`、`origin`、`access`、`default`、`priority`、`weight`、`port`、`flags`、`tag`、`comment`
 
 ## Multiple Services
 
@@ -40,11 +40,25 @@ labels:
   labelgate.tunnel.api.service: "http://app:3000"
 ```
 
-## Hostname Constraints
+## 严格校验 [#strict-validation]
 
-### DNS and Tunnel Conflict
+标签在解析时就会被校验。自 v0.3 起，错误会被如实报告，而不是被悄悄替换成默认值：
 
-同一个 hostname **不能**同时拥有 DNS 记录和 Tunnel ingress 规则。Cloudflare Tunnel 会自动为 tunnel hostname 创建 CNAME 记录，因此添加手动 DNS 记录会产生冲突。
+- **非法的值**（不是 `true`/`false` 的布尔值、非数字的 `ttl`、未知的记录类型、不在 `issue`/`issuewild`/`iodef` 范围内的 CAA `tag`、超出 0-65535 的端口、格式错误的主机名等）会**丢弃整个服务**。
+- **未知的属性**（例如 `labelgate.dns.web.hostnme`）会作为错误报告，服务的其余部分仍保留。
+- 违反上述规则或使用了保留字的服务名会被跳过并报错。
+
+每个标签错误都会连同容器名和标签键写入日志，并把同步状态置为 `error`，在 dashboard 和 `GET /api/overview` 中可见。修改标签之后请留意检查。
+
+## 主机名 [#hostnames]
+
+主机名会被规范化（去除首尾空白、转为小写、去掉末尾的点）并校验。`App.Example.com.` 与 `app.example.com` 是同一个主机名。
+
+## 主机名冲突 [#hostname-conflicts]
+
+### 同一主机名上的 DNS 与 Tunnel [#dns-and-tunnel-on-the-same-hostname]
+
+同一个主机名不能既是 DNS 记录又是 Tunnel ingress 规则：tunnel 主机名通过它自己的 CNAME 记录提供服务。无论这两个服务在同一个容器、不同容器还是不同主机上，后到的那个服务都会收到**冲突错误**。
 
 ```yaml
 # WRONG - hostname conflict
@@ -60,12 +74,16 @@ labels:
   labelgate.tunnel.web.hostname: "app.example.com"
 ```
 
-### First Container Wins
+### 先到者胜出 [#existing-owner-wins]
 
-当多个容器声明相同的 hostname 时，第一个注册的容器获胜。后续容器将记录错误并跳过该 hostname。
+当多个服务声明同一个主机名时，已经拥有它的服务继续保有。后来者会被**拒绝**，并保存一条错误，例如 `conflict: app.example.com|A already claimed by ...`，在 dashboard 和 API 中可见。这个裁决是确定性的，不会在同步周期之间来回变化。参见[所有权与冲突](/zh/docs/ownership#conflicts-between-claims)。
+
+### Cloudflare 上已有的记录
+
+如果 Cloudflare 上已经存在该主机名的记录、Access 应用或 tunnel 规则，而且不是 Labelgate 创建的，该服务会报 `conflict: existing record not owned by labelgate`，并且不会修改任何东西。解决方法参见[所有权与冲突](/zh/docs/ownership#pre-existing-resources-are-never-adopted)。
 
 ## Label Types
 
-- [DNS Labels](/zh/docs/labels/dns) - Manage Cloudflare DNS records
-- [Tunnel Labels](/zh/docs/labels/tunnel) - Manage Cloudflare Tunnel ingress rules
-- [Access Policy Labels](/zh/docs/labels/access) - Manage Zero Trust Access policies
+- [DNS Labels](/zh/docs/labels/dns) - 管理 Cloudflare DNS 记录
+- [Tunnel Labels](/zh/docs/labels/tunnel) - 管理 Cloudflare Tunnel ingress 规则
+- [Access Policy Labels](/zh/docs/labels/access) - 管理 Zero Trust Access 策略
