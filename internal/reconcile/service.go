@@ -20,10 +20,13 @@ var (
 	serviceLabelPattern = regexp.MustCompile(`^[a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?$`)
 	allDigits           = regexp.MustCompile(`^[0-9]+$`)
 	ipv4Zero            = netip.MustParsePrefix("0.0.0.0/8")
+	ipv4CGNAT           = netip.MustParsePrefix("100.64.0.0/10") // incl. 100.100.100.200 metadata
 	ipv4Broadcast       = netip.MustParseAddr("255.255.255.255")
 	ipv6SiteLocal       = netip.MustParsePrefix("fec0::/10")
 	ipv6Compat          = netip.MustParsePrefix("::/96")
+	ipv6Translated      = netip.MustParsePrefix("::ffff:0:0:0/96") // SIIT, RFC 2765
 	ipv6NAT64           = netip.MustParsePrefix("64:ff9b::/96")
+	ipv6NAT64Local      = netip.MustParsePrefix("64:ff9b:1::/48") // RFC 8215: any embedding layout
 )
 
 // checkAgentService is the SSRF guard for agent-sourced tunnel services
@@ -31,8 +34,9 @@ var (
 //   - explicitly allowed by the agent's services allow-list (hostname globs,
 //     IP addresses, CIDRs), or
 //   - a strictly parsed IP literal that is not loopback, unspecified,
-//     link-local, multicast, 0.0.0.0/8, broadcast, IPv6 site-local, zoned,
-//     or an IPv4-mapped/compatible/NAT64 embedding of such an address.
+//     link-local, multicast, 0.0.0.0/8, CGNAT 100.64.0.0/10, broadcast,
+//     IPv6 site-local, NAT64 local-use 64:ff9b:1::/48, zoned, or an
+//     IPv4-mapped/compatible/translated/NAT64 embedding of such an address.
 //
 // Host names (which the agent host resolves, e.g. to 127.0.0.1 or a cloud
 // metadata service) are refused unless allow-listed; inet_aton forms such
@@ -46,6 +50,9 @@ func checkAgentService(service string, allow []string) error {
 	u, err := url.Parse(s)
 	if err != nil || !agentNetworkSchemes[strings.ToLower(u.Scheme)] {
 		return fmt.Errorf("service %q is not allowed for agents (use http, https, tcp, ssh or rdp)", s)
+	}
+	if u.User != nil {
+		return fmt.Errorf("service URL %q must not contain user info", s)
 	}
 	host := strings.ToLower(u.Hostname())
 	if host == "" {
@@ -130,16 +137,17 @@ func forbiddenAddr(a netip.Addr) bool {
 	if a.Is4() {
 		return forbiddenV4(a)
 	}
-	if ipv6Compat.Contains(a) || ipv6NAT64.Contains(a) {
+	if ipv6Compat.Contains(a) || ipv6Translated.Contains(a) || ipv6NAT64.Contains(a) {
 		b := a.As16()
 		if forbiddenV4(netip.AddrFrom4([4]byte{b[12], b[13], b[14], b[15]})) {
 			return true
 		}
 	}
-	return a.IsLoopback() || a.IsUnspecified() || a.IsLinkLocalUnicast() || a.IsMulticast() || ipv6SiteLocal.Contains(a)
+	return a.IsLoopback() || a.IsUnspecified() || a.IsLinkLocalUnicast() || a.IsMulticast() ||
+		ipv6SiteLocal.Contains(a) || ipv6NAT64Local.Contains(a)
 }
 
 func forbiddenV4(a netip.Addr) bool {
 	return a.IsLoopback() || a.IsUnspecified() || a.IsLinkLocalUnicast() || a.IsMulticast() ||
-		ipv4Zero.Contains(a) || a == ipv4Broadcast
+		ipv4Zero.Contains(a) || ipv4CGNAT.Contains(a) || a == ipv4Broadcast
 }

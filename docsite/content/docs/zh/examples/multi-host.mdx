@@ -115,9 +115,9 @@ glob 使用 `path.Match` 语法，作用于小写主机名（`*.example.com`）�
 
 ### SSRF 防护 [#ssrf-guard]
 
-由 agent 定义的 tunnel 服务可以让 cloudflared 访问任意地址，所以来自 agent 的 tunnel 服务会被检查。只接受 `http`、`https`、`tcp`、`ssh` 和 `rdp` 服务（以及 `hello_world` 和 `http_status:<code>`）；`unix:` / `unix+tls:` socket、`bastion` 和其他 scheme 都会被拒绝。源站主机必须是以下之一：
+由 agent 定义的 tunnel 服务可以让 cloudflared 访问任意地址，所以来自 agent 的 tunnel 服务会被检查。只接受 `http`、`https`、`tcp`、`ssh` 和 `rdp` 服务（以及 `hello_world` 和 `http_status:<code>`）；`unix:` / `unix+tls:` socket、`bastion` 和其他 scheme 都会被拒绝；带用户信息的服务 URL（`http://user@host`）同样会被拒绝。源站主机必须是以下之一：
 
-- **IP 字面量**，规范写法，且不是回环、未指定（`0.0.0.0/8`、`::`）、链路本地（`169.254.0.0/16`、`fe80::/10`）、组播、广播、IPv6 站点本地（`fec0::/10`）、带 zone 的地址，也不是这些地址的 IPv4 映射、IPv4 兼容或 NAT64（`64:ff9b::/96`）形式。局域网私有地址（`10.0.0.0/8`、`192.168.0.0/16` 等）是允许的。`127.1`、`2130706433`、`0x7f000001`、`0177.0.0.1` 这类 IPv4 简写形式一律拒绝；
+- **IP 字面量**，规范写法，且不是回环、未指定（`0.0.0.0/8`、`::`）、链路本地（`169.254.0.0/16`、`fe80::/10`）、组播、广播、运营商级 NAT（`100.64.0.0/10`，包含部分云厂商的元数据服务 `100.100.100.200`）、IPv6 站点本地（`fec0::/10`）、NAT64 本地用途前缀（`64:ff9b:1::/48`）、带 zone 的地址，也不是这些地址的 IPv4 映射、IPv4 兼容、IPv4 转换（`::ffff:0:0:0/96`）或 NAT64（`64:ff9b::/96`）形式。局域网私有地址（`10.0.0.0/8`、`192.168.0.0/16` 等）是允许的。`127.1`、`2130706433`、`0x7f000001`、`0177.0.0.1` 这类 IPv4 简写形式一律拒绝；
 - **agent 的 `services` 允许列表中的条目**（`accept_token` agent 使用 `agent.accept_services`）：主机名 glob（`web`、`*.svc.internal`）、IP 地址或 CIDR（`172.20.0.0/16`）。允许列表中的条目即使是本地地址也会被接受。
 
 主机名除非在允许列表中，否则会被拒绝，因为解析它的是 agent 主机：`127.0.0.1.nip.io`、`host.docker.internal` 或 `metadata.google.internal` 否则就能访问到 agent 主机本身或云元数据服务。要使用 `http://web:80` 这样的 Compose 服务名，请把 `web` 加入该 agent 的 `services`：

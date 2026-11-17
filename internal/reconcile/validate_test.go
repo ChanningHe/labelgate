@@ -20,6 +20,12 @@ var ssrfBypasses = []string{
 	"http://127.0.0.1:80", "http://[::1]:80", "http://169.254.169.254/latest", "https://[fe80::1]:443",
 	"http://0.0.0.0:80", "http://localhost:8080", "http://a.localhost", "tcp://224.0.0.1:9",
 	"unix:/var/run/docker.sock", "unix+tls:/tmp/x.sock", "bastion", "http://",
+	// CGNAT (100.64.0.0/10, incl. the 100.100.100.200 metadata service) and
+	// NAT64 local-use (64:ff9b:1::/48), plain and embedded.
+	"http://100.100.100.200", "http://100.64.0.1", "http://100.127.255.254", "http://[::ffff:100.100.100.200]",
+	"http://[::6464:64c8]", "http://[64:ff9b::6464:64c8]", "http://[64:ff9b:1::cb00:7105]",
+	"http://[64:ff9b:1:cb00:71:500::]", "http://[64:ff9b:1:ffff::1]",
+	"http://[::ffff:0:a9fe:a9fe]", "http://[::ffff:0:6464:64c8]", "http://127.0.0.1:80@203.0.113.5",
 }
 
 func TestAgentServiceRejectsSSRFBypasses(t *testing.T) {
@@ -34,7 +40,8 @@ func TestAgentServiceDefaultAllows(t *testing.T) {
 	for _, u := range []string{
 		"https://203.0.113.5", "http://198.51.100.4:8080/x", "http://[2001:db8::1]:8080", "hello_world",
 		"http_status:404", "tcp://198.51.100.4:22", "ssh://203.0.113.9:22", "rdp://203.0.113.9:3389",
-		"http://10.0.0.5", "http://172.17.0.5:80",
+		"http://10.0.0.5", "http://172.17.0.5:80", "http://100.63.255.255", "http://100.128.0.1",
+		"http://[64:ff9b::cb00:7105]", "http://[64:ff9b:2::1]",
 	} {
 		if err := checkAgentService(u, nil); err != nil {
 			t.Errorf("%s: %v", u, err)
@@ -43,10 +50,10 @@ func TestAgentServiceDefaultAllows(t *testing.T) {
 }
 
 func TestAgentServiceAllowList(t *testing.T) {
-	allow := []string{"web", "*.svc.internal", "10.0.0.0/8", "127.0.0.1", "fd00::/8", "*"}
+	allow := []string{"web", "*.svc.internal", "10.0.0.0/8", "127.0.0.1", "fd00::/8", "*", "100.64.0.0/10", "64:ff9b:1::/48"}
 	for _, u := range []string{
 		"http://web:80", "http://a.svc.internal", "http://10.1.2.3", "http://127.0.0.1:8080",
-		"http://[fd00::5]:80", "http://metadata.google.internal",
+		"http://[fd00::5]:80", "http://metadata.google.internal", "http://100.100.100.200", "http://[64:ff9b:1::a00:1]",
 	} {
 		if err := checkAgentService(u, allow); err != nil {
 			t.Errorf("%s: %v", u, err)
