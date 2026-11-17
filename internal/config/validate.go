@@ -531,7 +531,13 @@ func checkConnect(cfg Config) error {
 	if c.Endpoint == "" {
 		return fail("connect.endpoint", "required in outbound mode")
 	}
-	return checkWebSocketURL("connect.endpoint", c.Endpoint)
+	if err := checkWebSocketURL("connect.endpoint", c.Endpoint); err != nil {
+		return err
+	}
+	if u, _ := url.Parse(c.Endpoint); strings.Trim(u.Path, "/") == "" {
+		return fail("connect.endpoint", "%q has no path (did you mean %s/ws?)", c.Endpoint, strings.TrimRight(c.Endpoint, "/"))
+	}
+	return nil
 }
 
 func sortedKeys[V any](m map[string]V) []string {

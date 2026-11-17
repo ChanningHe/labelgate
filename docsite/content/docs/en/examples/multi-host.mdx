@@ -36,7 +36,7 @@ Both modes use the **same handshake and the same security properties**.
 
 ## Transport and TLS
 
-- The endpoint is always a WebSocket URL with the **`/ws` path**: `wss://main.example.com:8081/ws`. Without `/ws` the connection fails with a 404. The same listener also answers an unauthenticated `GET /health` with `{"status":"ok"}`.
+- The endpoint is always a WebSocket URL with the **`/ws` path**: `wss://main.example.com:8081/ws`. An endpoint without a path fails config validation with a hint to append `/ws`. The same listener also answers an unauthenticated `GET /health` with `{"status":"ok"}`.
 - **Use `wss://` everywhere except on a fully trusted network.** With plain `ws://` the handshake still authenticates both sides (the token is never sent), but the data that follows has no confidentiality or integrity protection. A passive observer would see your container names, labels and public IPs, and an active attacker could tamper with the stream.
 - **TLS verification is on by default**, using the system roots or the CA you configure. Agents never silently skip verification any more.
 - To trust a private CA, set `connect.tls.ca` (agent dialing the main) or `agent.tls.ca` (main dialing inbound agents).

@@ -195,7 +195,7 @@ openssl rand -hex 32
 | Environment Variable | Config File Path | Default | Description |
 |---------------------|------------------|---------|-------------|
 | `LABELGATE_CONNECT_MODE` | `connect.mode` | `outbound` | `outbound` (agent dials main) or `inbound` (main dials agent) |
-| `LABELGATE_CONNECT_ENDPOINT` | `connect.endpoint` | - | Main instance URL, e.g. `wss://main.example.com:8081/ws`. Required for outbound; must be a `ws://` or `wss://` URL. **The `/ws` path is required** (it is not checked at startup, but without it the main answers 404) |
+| `LABELGATE_CONNECT_ENDPOINT` | `connect.endpoint` | - | Main instance URL, e.g. `wss://main.example.com:8081/ws`. Required for outbound; must be a `ws://` or `wss://` URL. **A path is required**: an endpoint without one (e.g. `wss://main:8081`) fails validation with a hint to append `/ws` |
 | `LABELGATE_CONNECT_LISTEN` | `connect.listen` | - | Listen address (`[host]:port`). Required for inbound. Serves `/ws` and an unauthenticated `/health` |
 | `LABELGATE_CONNECT_TOKEN` | `connect.token` | - | Authentication token, at least 32 characters **(required)** |
 | `LABELGATE_CONNECT_AGENT_ID` | `connect.agent_id` | First 12 hex chars of `/etc/machine-id`, else the hostname lower-cased and sanitized | Agent identifier, `^[a-z0-9][a-z0-9._-]{0,62}$`. Dots are allowed; upper-case is not, and an explicit value is never rewritten. The derived default is the first 12 characters of `/etc/machine-id` when they are hex, else the hostname with invalid characters replaced by `-` and truncated to 63 characters |

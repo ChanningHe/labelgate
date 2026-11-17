@@ -36,7 +36,7 @@ Agent 不持有任何 Cloudflare 凭据。它们只发送容器和公网 IP 的�
 
 ## 传输与 TLS
 
-- 端点始终是带有 **`/ws` 路径**的 WebSocket 地址：`wss://main.example.com:8081/ws`。缺少 `/ws` 会得到 404。同一个监听端口还提供无需认证的 `GET /health`，返回 `{"status":"ok"}`。
+- 端点始终是带有 **`/ws` 路径**的 WebSocket 地址：`wss://main.example.com:8081/ws`。没有路径的地址会在配置校验时被拒绝，并提示补上 `/ws`。同一个监听端口还提供无需认证的 `GET /health`，返回 `{"status":"ok"}`。
 - **除非在完全可信的网络内，否则请一律使用 `wss://`。** 使用明文 `ws://` 时，握手仍会对双方进行认证（token 不会被发送），但之后的数据没有机密性和完整性保护。被动监听者能看到你的容器名、标签和公网 IP，主动攻击者还可以篡改数据流。
 - **默认启用 TLS 校验**，使用系统根证书或你配置的 CA。Agent 不会再静默跳过校验。
 - 如需信任私有 CA，请设置 `connect.tls.ca`（agent 拨号 main）或 `agent.tls.ca`（main 拨号 inbound agent）。
