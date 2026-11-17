@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/channinghe/labelgate/internal/config"
+	"github.com/channinghe/labelgate/internal/store"
 )
 
 // runMainAsync starts execute in the background and returns a stop function
@@ -134,6 +136,39 @@ func TestRunSignalsAndExitCodes(t *testing.T) {
 			t.Fatalf("log:\n%s", errOut.String())
 		}
 	})
+}
+
+func TestServeSetsConfiguredLoggerAsDefaultBeforeStoreOpen(t *testing.T) {
+	prev := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	h := newHarness(t)
+	cfg := mainConfig()
+	cfg.LogFormat = "json"
+	cfg.LogLevel = "warn"
+	h.app.load = func(string) (config.Config, error) { return cfg, nil }
+	open := h.app.b.openStore
+	h.app.b.openStore = func(ctx context.Context, path string) (store.Store, error) {
+		slog.Info("below-level-line")
+		slog.Warn("migration-line")
+		return open(ctx, path)
+	}
+	var errOut syncBuffer
+	code := make(chan int, 1)
+	go func() { code <- h.app.run(nil, &bytes.Buffer{}, &errOut) }()
+
+	h.ev.waitFor(t, "reconciler started")
+	_ = syscall.Kill(syscall.Getpid(), syscall.SIGTERM)
+	if got := <-code; got != exitOK {
+		t.Fatalf("exit = %d; log:\n%s", got, errOut.String())
+	}
+	out := errOut.String()
+	if !strings.Contains(out, `"msg":"migration-line"`) {
+		t.Errorf("default logger must use log_format=json; log:\n%s", out)
+	}
+	if strings.Contains(out, "below-level-line") {
+		t.Errorf("default logger must honour log_level=warn; log:\n%s", out)
+	}
 }
 
 func waitForLog(t *testing.T, b *syncBuffer, want string) {
