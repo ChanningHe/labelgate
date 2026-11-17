@@ -104,6 +104,10 @@ jobs:
             exit 1
           fi
 
+      # Fails (and prints the diff) if go.mod/go.sum are not tidy.
+      - name: Check go.mod tidy
+        run: go mod tidy -diff
+
       - name: Vet
         run: go vet ./...
 

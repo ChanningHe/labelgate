@@ -98,11 +98,33 @@ func TestMergeIngress(t *testing.T) {
 			want:  []string{"a.example.com=>http://a", "=>http_status:404"},
 		},
 		{
-			name:      "conflicting owned rule already live is kept verbatim",
+			name:      "conflicting owned rule already live is kept verbatim, path rules first",
 			live:      `{"ingress":[{"hostname":"a.example.com","service":"http://old"},{"hostname":"a.example.com","path":"/m","service":"http://h"},{"service":"http_status:404"}]}`,
 			owned:     ids("a.example.com", ""),
 			keep:      []keepRule{keep("a.example.com", "", "http://new")},
-			want:      []string{"a.example.com=>http://old", "a.example.com/m=>http://h", "=>http_status:404"},
+			want:      []string{"a.example.com/m=>http://h", "a.example.com=>http://old", "=>http_status:404"},
+			changed:   true,
+			conflicts: 1,
+		},
+		{
+			name: "owned pathless rule never shadows unmanaged path rules of its hostname",
+			live: `{"ingress":[{"hostname":"b.example.com","service":"http://b"},{"hostname":"a.example.com","service":"http://old"},` +
+				`{"hostname":"z.example.com","service":"http://z"},{"hostname":"a.example.com","path":"/m","service":"http://h"},` +
+				`{"hostname":"a.example.com","path":"/n","service":"http://n"},` +
+				`{"hostname":"*.example.com","service":"http://w"},{"hostname":"*.example.com","path":"/p","service":"http://p"},{"service":"http_status:404"}]}`,
+			owned: ids("a.example.com", "", "b.example.com", "", "*.example.com", ""),
+			keep:  []keepRule{keep("a.example.com", "", "http://new"), keep("b.example.com", "", "http://b"), keep("*.example.com", "", "http://new")},
+			want: []string{"a.example.com/m=>http://h", "b.example.com=>http://b", "z.example.com=>http://z", "a.example.com/n=>http://n",
+				"a.example.com=>http://old", "*.example.com/p=>http://p", "*.example.com=>http://w", "=>http_status:404"},
+			changed:   true,
+			conflicts: 2,
+		},
+		{
+			name:      "unmanaged pathless rule stays after an owned path rule",
+			live:      `{"ingress":[{"hostname":"a.example.com","path":"/x","service":"http://x"},{"hostname":"a.example.com","service":"http://u"},{"service":"http_status:404"}]}`,
+			owned:     ids("a.example.com", "/x"),
+			keep:      []keepRule{keep("a.example.com", "/x", "http://x")},
+			want:      []string{"a.example.com/x=>http://x", "a.example.com=>http://u", "=>http_status:404"},
 			conflicts: 1,
 		},
 		{

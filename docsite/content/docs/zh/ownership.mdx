@@ -69,9 +69,11 @@ conflict: existing record not owned by labelgate
 - 一个主机名同一时间只能属于一种*类别*：普通 DNS 记录（`records`）、CNAME（`cname`）或某一个 tunnel（`tunnel:<tunnel-id>`）。因此同一主机名同时出现 DNS 服务和 tunnel 服务属于冲突（`conflict: hostname app.example.com is used by ... as tunnel:<tunnel-id>`），而不仅仅是一行日志。
 - 被拒绝的声明会在 dashboard 和 API 中以 `error` 状态的资源出现，它们不会在 Cloudflare 上创建或修改任何东西。
 
-孤立的资源会在 `sync.remove_delay` 时长内继续保留它的主机名、类别和键，因此短暂消失的容器（例如 `docker compose up` 重建容器时）回来后会原样拿回一切，期间其他服务或来源都无法接管。`cleanup: true` 的资源在延迟结束时被删除；`cleanup: "false"` 的资源会留在 Cloudflare 上，并且不再保留该主机名。如果某个主机名上已经有多个来源的资源（只可能出现在旧版本写入的数据库中），由最早资源所属的来源保有它。
+**主机名的归属由 Labelgate 跟踪的资源决定。**只要某个来源在某主机名上还有至少一条被跟踪的资源，无论状态如何（active、出错、held，或处于孤立状态，不论是否已超过 `sync.remove_delay`），该主机名就属于这个来源。只有当最后一条这样的资源消失后，归属才会转给其他来源：从 Cloudflare 删除（`cleanup: true`，在 `sync.remove_delay` 之后），或从数据库中移除（`cleanup: "false"`，在 `sync.orphan_ttl` 之后；默认 `orphan_ttl: 0s` 时，主机名会一直属于该来源，直到你手动移除该资源）。因此来源短暂消失、容器改名或切换类别，都不会把主机名交给其他来源。如果某个主机名上已经有多个来源的资源（只可能出现在旧版本写入的数据库中），由最早资源所属的来源保有它。
 
-要移交主机名，请先停止当前拥有者（或移除它的标签）。`sync.remove_delay` 过后下一个声明者胜出；如果记录身份相同，它会接管已有的记录。如果**同一个容器**把主机名从 DNS 切换为 tunnel（或反过来），旧记录会被立即替换，无需等待 `remove_delay`。其他拥有者永远不会触发这种替换：以 `cleanup: "false"` 留下的记录会阻止该主机名上的其他类别（新资源报告冲突），直到你在 Cloudflare 上删除这条记录。
+**在拥有主机名的来源内部，移交是立即的。**短暂消失的容器（例如 `docker compose up` 重建容器时），只要期间同一来源没有其他服务声明该资源，回来后会原样拿回一切。但同一来源的任何其他容器或服务都可以立即接管某个资源或切换主机名的类别，无需等待 `sync.remove_delay`：改名后的容器或服务标签会接管已有记录；当旧的声明消失后，另一个容器可以立刻把 DNS 主机名改为 tunnel 主机名。当前拥有者只要仍在声明，就会保有它的资源和类别。
+
+当某个来源把主机名切换到另一种类别（DNS 切换为 tunnel 或反过来）时，它在旧类别下的资源会被立即替换：`cleanup: true` 的资源会被立即删除；`cleanup: "false"` 的资源只会从 Labelgate 的数据库中移除并留在 Cloudflare 上，因此与新类别冲突的记录会阻止新类别（新资源报告冲突），直到你在 Cloudflare 上删除这条记录。其他来源的资源永远不会以这种方式被替换。要把主机名移交给**其他来源**，请停止当前来源在该主机名上的所有服务（或移除它们的标签），并按上文所述等待其资源消失。
 
 ## 与手工管理的 tunnel ingress 共存 [#coexisting-with-manually-managed-tunnel-ingress]
 
@@ -83,7 +85,7 @@ Cloudflare 把 tunnel 的 ingress 存成一份整体配置文档，所以 Labelg
 4. 其余一切保持原样：你手工创建的规则、catch-all 规则、全局 `originRequest`、`warp-routing`，以及 Labelgate 没有建模的规则级字段（例如 Access 校验设置）。
 5. 只有内容确实发生变化时才写回。
 
-结果中的顺序：Labelgate 的精确主机名规则在最前（同一主机名下，更具体的 path 在前），然后是你的非托管规则，再然后是 Labelgate 的通配符规则，最后是 catch-all。如果 tunnel 没有 catch-all 规则，会补上一条 `http_status:404`。
+结果中的顺序：Labelgate 的精确主机名规则在最前（同一主机名下，更具体的 path 在前），然后是你的非托管规则，再然后是 Labelgate 的通配符规则，最后是 catch-all。如果 tunnel 没有 catch-all 规则，会补上一条 `http_status:404`。如果同一主机名同时存在 Labelgate 规则和非托管规则（属于冲突，见下文），该主机名的规则会在各自位置之间重新排序，带 path 的规则排在不带 path 的规则之前，不带 path 的规则不会遮蔽同一主机名下的 path 规则。
 
 如果 Labelgate 想写入的规则与你的某条非托管规则主机名相同，该服务会报 `conflict: existing record not owned by labelgate`，而你的非托管规则保持不变。Labelgate 已经写入的规则会原样留在配置中（流量不会中断），所有受影响的资源都会报告该冲突，直到你删除两条规则之一。
 

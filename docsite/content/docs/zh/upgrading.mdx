@@ -78,7 +78,7 @@ Labelgate 现在只删除和修改自己拥有的资源，并且**绝不收编**
 
 | 已移除 | 替代方案 |
 |--------|----------|
-| `docker.ssh.key`、`docker.ssh.key_passphrase`、`docker.ssh.known_hosts` 以及 `ssh://` Docker 地址 | 本地 socket、带 `docker.tls.*` 的 `tcp://`，或在远程主机上运行 Labelgate agent |
+| `docker.ssh.host`、`docker.ssh.key`、`docker.ssh.key_passphrase`、`docker.ssh.known_hosts` 以及 `ssh://` Docker 地址 | 本地 socket、带 `docker.tls.*` 的 `tcp://`，或在远程主机上运行 Labelgate agent |
 | `db.retention` | 无（直接删除该键） |
 | `db.vacuum_interval` | 无（直接删除该键） |
 
