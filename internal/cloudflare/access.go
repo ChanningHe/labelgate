@@ -120,7 +120,7 @@ func fromAppWire(w appWire) AccessApp {
 		Name:            w.Name,
 		Domain:          strings.ToLower(w.Domain),
 		SessionDuration: w.SessionDuration,
-		Tags:            w.Tags,
+		Tags:            append([]string(nil), w.Tags...), // nil when empty
 		PolicyIDs:       ids,
 	}
 }

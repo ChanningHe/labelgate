@@ -279,3 +279,25 @@ func TestAccessListPagingAcrossManyPages(t *testing.T) {
 		t.Fatalf("pages = %d, want 4", n)
 	}
 }
+
+func TestNormalizeAccessRules(t *testing.T) {
+	in := []model.AccessRule{
+		{Selector: model.SelectorEmails, Values: []string{"a@x.com"}},
+		{Selector: model.SelectorEmails, Values: []string{"b@x.com"}},
+		{Selector: model.SelectorEveryone, Values: []string{"ignored"}},
+	}
+	got, err := NormalizeAccessRules(in)
+	want := []model.AccessRule{
+		{Selector: model.SelectorEmails, Values: []string{"a@x.com", "b@x.com"}},
+		{Selector: model.SelectorEveryone},
+	}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %+v %v", got, err)
+	}
+	if got, err := NormalizeAccessRules([]model.AccessRule{}); err != nil || got != nil {
+		t.Fatalf("empty: %+v %v", got, err)
+	}
+	if _, err := NormalizeAccessRules([]model.AccessRule{{Selector: "bogus"}}); !errors.Is(err, model.ErrInvalid) {
+		t.Fatalf("invalid: %v", err)
+	}
+}

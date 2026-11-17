@@ -42,6 +42,18 @@ var selectorByKey = func() map[string]string {
 	return m
 }()
 
+// NormalizeAccessRules returns rules as Cloudflare stores and returns them:
+// consecutive rules of one selector merged, valueless selectors without
+// values, nil when empty. ErrInvalid for unknown selectors or invalid
+// "unsupported:" JSON. Compare normalized desired rules with live ones.
+func NormalizeAccessRules(rules []model.AccessRule) ([]model.AccessRule, error) {
+	raws, err := rulesToAPI(rules)
+	if err != nil {
+		return nil, err
+	}
+	return rulesFromAPI(raws), nil
+}
+
 // rulesToAPI expands model rules into Cloudflare rule objects, one per value.
 // The result is never nil (Cloudflare PUT semantics: [] clears a list).
 func rulesToAPI(rules []model.AccessRule) ([]json.RawMessage, error) {
