@@ -5,6 +5,10 @@ description: Learn about the different ways to configure Labelgate.
 
 Labelgate supports three configuration modes. All options follow the same naming convention — see the [Configuration Reference](/docs/configuration/reference) for the complete list.
 
+<Callout type="warn">
+Configuration is strict: unknown keys and invalid values stop Labelgate at startup with a message naming the offending key. Keys removed in v0.3 are rejected too; see [Removed Keys](/docs/configuration/reference#removed-keys).
+</Callout>
+
 ## Configuration Modes
 
 ### 1. Environment Variables Only (Recommended for Simple Setups)
@@ -15,13 +19,14 @@ No config file needed. Set environment variables with the `LABELGATE_` prefix:
 LABELGATE_CLOUDFLARE_API_TOKEN=your-token
 LABELGATE_CLOUDFLARE_ACCOUNT_ID=your-account-id
 LABELGATE_CLOUDFLARE_TUNNEL_ID=your-tunnel-id
+LABELGATE_API_TOKEN=a-long-random-string
 ```
 
 This is the simplest approach and is used in the [Getting Started](/docs/getting-started) guide.
 
 ### 2. Config File
 
-Use a YAML config file for more complex setups (e.g., multi-credential, multi-tunnel).
+Use a config file for more complex setups (e.g., multi-credential, multi-tunnel, named agents). YAML, JSON and TOML are supported; ready-made examples live in the repository's `configs/` directory.
 
 ```yaml
 # labelgate.yaml
@@ -31,13 +36,14 @@ cloudflare:
   tunnel_id: your-tunnel-id
 ```
 
-Specify the config file path via the `LABELGATE_CONFIG` environment variable:
+The config file is located in this order:
 
-```bash
-LABELGATE_CONFIG=/path/to/labelgate.yaml
-```
+1. The `-c` / `--config` command-line flag (`labelgate -c /path/to/labelgate.yaml`)
+2. The `LABELGATE_CONFIG` environment variable
+3. `./labelgate.{yaml,yml,json,toml}`
+4. `/etc/labelgate/labelgate.{yaml,yml,json,toml}`
 
-If `LABELGATE_CONFIG` is not set, Labelgate also checks `./labelgate.yaml` and `/etc/labelgate/labelgate.yaml`.
+A missing file in the default search paths is fine; a missing file that you named explicitly (flag or `LABELGATE_CONFIG`) is an error.
 
 ### 3. Hybrid Mode
 
@@ -55,8 +61,11 @@ cloudflare:
 ```bash
 # Secrets via environment variables (override config file values)
 LABELGATE_CLOUDFLARE_API_TOKEN=your-token
+LABELGATE_API_TOKEN=a-long-random-string
 ```
 
 ## Next Steps
 
-- [Configuration Reference](/docs/configuration/reference) - Complete list of all options, naming convention, and multi-credential setup
+- [Configuration Reference](/docs/configuration/reference) - Complete list of all options, defaults, removed keys and multi-credential setup
+- [Ownership & Conflicts](/docs/ownership) - What Labelgate will and will not touch on Cloudflare
+- [Upgrading to v0.3](/docs/upgrading) - Breaking changes since v0.2

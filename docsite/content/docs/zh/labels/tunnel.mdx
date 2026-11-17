@@ -9,39 +9,53 @@ description: Labelgate Tunnel 标签属性的完整参考。
 labelgate.tunnel.<service_name>.<property>=<value>
 ```
 
+非法的值和未知的属性都会报错，参见[严格校验](/zh/docs/labels#strict-validation)。
+
 ## Properties
 
-| Property | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `hostname` | Yes | - | Public hostname for the service |
-| `service` | Yes | - | Backend service URL: `protocol://host:port` |
-| `tunnel` | No | `default` | Tunnel name to use |
-| `path` | No | - | Path regex to match (e.g., `\.(jpg\|png)$`) |
-| `credential` | No | `default` | Credential name to use |
-| `cleanup` | No | `false` | Delete ingress rule when container stops |
-| `access` | No | - | Access policy name to apply |
+| 属性 | 必填 | 默认值 | 说明 |
+|------|------|--------|------|
+| `hostname` | 是 | - | 服务的公开主机名（会规范化为小写） |
+| `service` | 是 | - | 后端服务地址：`protocol://host:port` |
+| `tunnel` | 否 | 默认 tunnel | Tunnel 名称（`cloudflare.tunnels` 的键）或 Tunnel ID。为空表示 `default_tunnel` / 根 tunnel。未知的 tunnel 会报错 |
+| `path` | 否 | - | 要匹配的路径正则（例如 `\.(jpg\|png)$`） |
+| `credential` | 否 | 自动 | 用于 tunnel 的 CNAME 记录和 Access 的凭据。为空表示先按 zone 匹配，再用根凭据 |
+| `cleanup` | 否 | `true` | 容器消失且超过 `sync.remove_delay` 后，移除 ingress 规则（及其 CNAME）。只会移除自己拥有的规则 |
+| `access` | 否 | - | 要应用的 Access 策略名称 |
 
 ## Service Protocols
 
-| Protocol | Format | Description |
-|----------|--------|-------------|
-| HTTP | `http://host:port` | HTTP service |
-| HTTPS | `https://host:port` | HTTPS service |
-| SSH | `ssh://host:port` | SSH access |
-| RDP | `rdp://host:port` | Remote Desktop |
-| TCP | `tcp://host:port` | Raw TCP |
-| UDP | `udp://host:port` | UDP (requires WARP) |
+`service` 的协议必须是以下之一：
+
+| 协议 | 格式 | 说明 |
+|------|------|------|
+| HTTP | `http://host:port` | HTTP 服务 |
+| HTTPS | `https://host:port` | HTTPS 服务 |
+| SSH | `ssh://host:port` | SSH 访问 |
+| RDP | `rdp://host:port` | 远程桌面 |
+| TCP | `tcp://host:port` | 原始 TCP |
+| UDP | `udp://host:port` | UDP（需要 WARP） |
 | Unix | `unix:/path/to/socket` | Unix socket |
-| Hello World | `hello_world` | Test endpoint |
-| HTTP Status | `http_status:404` | Return a fixed status code |
+| Unix + TLS | `unix+tls:/path/to/socket` | 带 TLS 的 Unix socket |
+| Hello World | `hello_world` | 测试端点 |
+| HTTP Status | `http_status:404` | 返回固定状态码 |
+| Bastion | `bastion` | 浏览器渲染的堡垒机 |
 
 <Callout type="info">
-使用 tunnel 模式时，Cloudflare 会自动为 hostname 创建一个指向你的 tunnel 的 CNAME DNS 记录。你不需要创建单独的 DNS 记录。
+对于每个 tunnel 主机名，Labelgate 会创建一条指向 `<tunnel-id>.cfargotunnel.com` 的 CNAME 记录，并像其他 DNS 记录一样标记为自己拥有。不要再为同一个主机名另外添加 DNS 服务，那会造成[冲突](/zh/docs/labels#dns-and-tunnel-on-the-same-hostname)。
 </Callout>
+
+<Callout type="warn">
+由 [agent](/zh/docs/examples/multi-host) 上报的服务会经过 SSRF 防护检查：`localhost`、回环地址、链路本地地址、未指定地址、组播地址以及 `unix:` 服务都会被拒绝，并且 tunnel 必须在该 agent 的允许列表中。
+</Callout>
+
+## Ingress 规则的所有权
+
+Labelgate 只管理自己创建的 ingress 规则，规则以（tunnel、hostname、path）标识。你手工创建的规则、catch-all 规则、全局 `originRequest` 和 `warp-routing` 设置都会原样保留。如果你给一个已有手工规则的主机名加了标签，该服务会报 `conflict: existing record not owned by labelgate`，手工规则保持不动。参见[所有权与冲突](/zh/docs/ownership#coexisting-with-manually-managed-tunnel-ingress)。
 
 ## Origin Request Configuration
 
-微调 cloudflared 和你的源服务之间的连接：
+微调 cloudflared 和你的源服务之间的连接。时长类的值既可以写 `30s` 这样的形式，也可以直接写秒数（`30`）。未设置或为空的设置项会从规则中移除；Labelgate 没有建模的设置项则会被保留。
 
 ### Connection Settings
 
@@ -98,7 +112,7 @@ services:
 ```yaml
 services:
   app:
-    image: myapp:latest
+    image: myapp:1.0
     labels:
       labelgate.tunnel.web.hostname: "www.example.com"
       labelgate.tunnel.web.service: "http://app:80"
@@ -133,6 +147,8 @@ services:
 
 ### Path-based routing
 
+基于路径的规则是一等公民：规则的标识是（tunnel、hostname、path），因此多个服务可以用不同的 path 共用同一个主机名。同一主机名下，更具体的 path 会写在不太具体的前面。
+
 ```yaml
 services:
   static:
@@ -141,4 +157,7 @@ services:
       labelgate.tunnel.static.hostname: "example.com"
       labelgate.tunnel.static.service: "http://static:80"
       labelgate.tunnel.static.path: "\\.(jpg|png|css|js)$"
+      labelgate.tunnel.api.hostname: "example.com"
+      labelgate.tunnel.api.service: "http://api:3000"
+      labelgate.tunnel.api.path: "^/api/"
 ```

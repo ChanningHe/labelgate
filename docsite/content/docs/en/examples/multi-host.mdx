@@ -1,9 +1,9 @@
 ---
 title: Multi-Host (Agent Mode)
-description: Deploy Labelgate across multiple Docker hosts using Agent mode.
+description: Deploy Labelgate across multiple Docker hosts using Agent mode, with authentication, TLS and per-agent allow-lists.
 ---
 
-Agent mode lets you monitor Docker containers across multiple hosts. A central **Main** instance handles all Cloudflare API calls, while lightweight **Agent** instances on remote hosts collect container labels and report back.
+Agent mode lets you manage containers across multiple hosts. A central **Main** instance handles all Cloudflare API calls, while lightweight **Agent** instances on remote hosts collect container labels and report back.
 
 ## Architecture
 
@@ -20,15 +20,102 @@ Agent mode lets you monitor Docker containers across multiple hosts. A central *
 └──────────────┘
 ```
 
+Agents hold no Cloudflare credentials. They send a full snapshot of their containers and public IP; the main instance validates it against that agent's allow-lists and reconciles it exactly like local containers.
+
 ## Connection Modes
 
 ### Outbound (Agent connects to Main)
 
-Best for agents behind NAT or firewalls. The agent initiates the connection.
+Best for agents behind NAT or firewalls. The agent dials the main instance's `agent.listen` port.
 
 ### Inbound (Main connects to Agent)
 
-Best for agents on internal networks where the main instance can reach them directly.
+Best for agents on networks the main instance can reach directly. The agent listens on `connect.listen`, and the main instance dials the agent's `connect_to` URL.
+
+Both modes use the **same handshake and the same security properties**.
+
+## Transport and TLS
+
+- The endpoint is always a WebSocket URL with the **`/ws` path**: `wss://main.example.com:8081/ws`. Without `/ws` the connection fails with a 404.
+- **Use `wss://` everywhere except on a fully trusted network.** With plain `ws://` the handshake still authenticates both sides (the token is never sent), but the data that follows has no confidentiality or integrity protection. A passive observer would see your container names, labels and public IPs, and an active attacker could tamper with the stream.
+- **TLS verification is on by default**, using the system roots or the CA you configure. Agents never silently skip verification any more.
+- To trust a private CA, set `connect.tls.ca` (agent dialing the main) or `agent.tls.ca` (main dialing inbound agents).
+- `insecure_skip_verify: true` (`connect.tls.insecure_skip_verify` / `agent.tls.insecure_skip_verify`) disables certificate verification. It is an explicit opt-in for testing, logs a loud warning at startup, and should not be used in production.
+- Server certificates: set `agent.tls.cert` / `key` on the main instance for outbound agents, or `connect.tls.cert` / `key` on an inbound agent. Alternatively terminate TLS in a reverse proxy that forwards the WebSocket.
+
+## Authentication
+
+Authentication is a mutual challenge-response over the shared token, identical in both modes:
+
+1. The agent sends `hello` with its agent ID and a random nonce.
+2. The main instance answers with its own nonce and an HMAC proving it knows the token.
+3. The agent verifies that HMAC **before sending anything else**, then replies with its own HMAC.
+4. The main instance verifies it and sends `welcome`.
+
+The token itself **never travels on the wire**, so someone who connects to an inbound agent's port learns nothing and receives no data. The connection direction (outbound or inbound) is bound into the HMAC, so a session cannot be relayed from one direction to the other. Tokens are compared in constant time and never logged. An unknown agent ID and a wrong token produce the same `unauthorized` error.
+
+If an agent with the same ID is already connected, the new connection is rejected (`duplicate_agent`) after authenticating, and the existing session stays untouched. Agent IDs must match `^[a-z0-9][a-z0-9_-]{0,62}$`. If you do not set `connect.agent_id`, it is derived from `/etc/machine-id` (first 12 hex characters), falling back to the sanitized hostname.
+
+## Named agents and shared-token agents
+
+**Named agents** are listed under `agent.agents.<id>` and each has its **own token** (recommended):
+
+```yaml
+agent:
+  enabled: true
+  listen: :8081
+  agents:
+    docker-host-1:
+      token: ${AGENT_1_TOKEN}
+      name: Docker host 1
+      default_tunnel: default
+      tunnels: [default]
+      hostnames: ["*.host1.example.com"]
+```
+
+**Shared-token agents** use `agent.accept_token`: any agent ID that is not listed under `agent.agents` may connect with it. Because the token is a shared secret, anyone holding it can claim any unregistered agent ID, so restrict what such agents may do:
+
+```yaml
+agent:
+  enabled: true
+  accept_token: ${AGENT_SHARED_TOKEN}
+  accept_hostnames: ["*.agents.example.com"]
+  accept_tunnels: [default]
+```
+
+### Allow-lists
+
+| Setting | Applies to | Effect |
+|---------|-----------|--------|
+| `agent.agents.<id>.hostnames` | one named agent | Glob list of hostnames this agent may claim. Empty = unrestricted |
+| `agent.agents.<id>.tunnels` | one named agent | Tunnels this agent may target. Empty = only its default tunnel |
+| `agent.agents.<id>.default_tunnel` | one named agent | Tunnel used when its labels omit `tunnel` |
+| `agent.accept_hostnames` | all `accept_token` agents | Same as `hostnames` |
+| `agent.accept_tunnels` | all `accept_token` agents | Same as `tunnels`. Empty = only the global default tunnel |
+
+Globs use `path.Match` syntax on lower-case hostnames (`*.example.com`). A claim that violates an allow-list is rejected with a reason, visible in the dashboard and API; it never reaches Cloudflare.
+
+Tunnel resolution for an agent's service: the label's `tunnel` > the agent's `default_tunnel` > the global default tunnel, and the result **must be in the agent's allowed tunnels**.
+
+### SSRF guard
+
+A tunnel service defined by an agent can point cloudflared anywhere, so agent-sourced tunnel services are checked. They are rejected when they target:
+
+- `localhost` or `*.localhost`,
+- loopback, link-local (`169.254.0.0/16`, `fe80::/10`), unspecified or multicast IP literals,
+- `unix:` / `unix+tls:` sockets.
+
+Local containers (labels on the main host itself) are trusted and are not subject to this guard.
+
+### Agents cannot change local Access policies
+
+Access policy definitions are resolved **within the source of the claimant**: an agent can only reference definitions from its own containers, and can never bind or alter a definition on the main host.
+
+## Agent grace
+
+Agent resources are tied to `last_seen`, which the **main instance** records with its own clock whenever it accepts a report. A disconnect on its own never orphans anything: as long as `last_seen` is within `sync.agent_grace` (default **24h**), the agent's last reported containers stay desired. The last state of every agent is stored in the database, so restarting the main instance does not orphan agents either.
+
+After the grace period the agent's resources become orphaned and are deleted after `sync.remove_delay` if their `cleanup` is `true` (the default). In the dashboard an agent is `active` (connected), `disconnected` (within grace) or `removed`. If an agent reports that its Docker daemon is unreachable, its last good snapshot is kept and its resources are held.
 
 ## Outbound Mode Example
 
@@ -38,7 +125,7 @@ Best for agents on internal networks where the main instance can reach them dire
 # docker-compose.yaml (main host)
 services:
   labelgate:
-    image: labelgate:latest
+    image: ghcr.io/channinghe/labelgate:v0.3
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -47,10 +134,10 @@ services:
       - LABELGATE_CLOUDFLARE_API_TOKEN
       - LABELGATE_CLOUDFLARE_ACCOUNT_ID
       - LABELGATE_CLOUDFLARE_TUNNEL_ID
-      - LABELGATE_AGENT_ENABLED=true
-      - LABELGATE_AGENT_LISTEN=:8081
+      - LABELGATE_API_TOKEN
+      - LABELGATE_CONFIG=/etc/labelgate/labelgate.yaml
     ports:
-      - "8081:8081"
+      - "8081:8081"   # agent listener
     configs:
       - source: labelgate-config
         target: /etc/labelgate/labelgate.yaml
@@ -69,13 +156,68 @@ configs:
       agent:
         enabled: true
         listen: :8081
+        tls:
+          cert: /app/config/tls/server.crt
+          key: /app/config/tls/server.key
         agents:
           docker-host-1:
             token: ${AGENT_1_TOKEN}
             default_tunnel: default
+            hostnames: ["*.host1.example.com"]
           docker-host-2:
             token: ${AGENT_2_TOKEN}
             default_tunnel: default
+            hostnames: ["*.host2.example.com"]
+```
+
+<Callout type="info">
+Docker Compose interpolates `${AGENT_1_TOKEN}` inside `configs.content` when you run `docker compose up`, so the tokens come from your `.env` file. Put the TLS certificate and key in the `labelgate-data` volume (`/app/config/tls/`), or mount them from the host.
+</Callout>
+
+### Agent Instance
+
+```yaml
+# docker-compose.yaml (remote host)
+services:
+  labelgate-agent:
+    image: ghcr.io/channinghe/labelgate:v0.3
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - LABELGATE_MODE=agent
+      - LABELGATE_CONNECT_MODE=outbound
+      - LABELGATE_CONNECT_ENDPOINT=wss://main-host.example.com:8081/ws
+      - LABELGATE_CONNECT_AGENT_ID=docker-host-1
+      - LABELGATE_CONNECT_TOKEN=${AGENT_1_TOKEN}
+      # Private CA for the main's certificate (default: system roots)
+      # - LABELGATE_CONNECT_TLS_CA=/certs/ca.pem
+
+  # Your services with labels (same as single-host)
+  webapp:
+    image: nginx:alpine
+    labels:
+      labelgate.tunnel.web.hostname: "web.host1.example.com"
+      labelgate.tunnel.web.service: "http://webapp:80"
+```
+
+The agent's `connect.agent_id` must equal the key under `agent.agents` on the main instance.
+
+## Inbound Mode Example
+
+### Main Instance
+
+```yaml
+# labelgate.yaml (main host)
+agent:
+  enabled: true
+  tls:
+    ca: /app/config/tls/ca.pem   # CA that signed the agent's certificate
+  agents:
+    docker-host-1:
+      connect_to: wss://192.168.1.11:8082/ws
+      token: ${AGENT_1_TOKEN}
+      hostnames: ["*.host1.example.com"]
 ```
 
 ### Agent Instance
@@ -84,83 +226,29 @@ configs:
 # docker-compose.yaml (remote host)
 services:
   labelgate-agent:
-    image: labelgate:latest
+    image: ghcr.io/channinghe/labelgate:v0.3
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    environment:
-      - LABELGATE_MODE=agent
-      - LABELGATE_CONNECT_MODE=outbound
-      - LABELGATE_CONNECT_ENDPOINT=wss://main-host.example.com:8081
-      - LABELGATE_CONNECT_TOKEN=${AGENT_TOKEN}
-      - LABELGATE_DEFAULT_TUNNEL=default
-
-  # Your services with labels (same as single-host)
-  webapp:
-    image: nginx:alpine
-    labels:
-      labelgate.tunnel.web.hostname: "remote-app.example.com"
-      labelgate.tunnel.web.service: "http://webapp:80"
-```
-
-## Inbound Mode Example
-
-### Main Instance
-
-```yaml
-# docker-compose.yaml (main host)
-services:
-  labelgate:
-    image: labelgate:latest
-    restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - labelgate-data:/app/config
-    environment:
-      - LABELGATE_CLOUDFLARE_API_TOKEN
-      - LABELGATE_CLOUDFLARE_ACCOUNT_ID
-      - LABELGATE_CLOUDFLARE_TUNNEL_ID
-    configs:
-      - source: labelgate-config
-        target: /etc/labelgate/labelgate.yaml
-
-volumes:
-  labelgate-data:
-
-configs:
-  labelgate-config:
-    content: |
-      agent:
-        enabled: true
-        agents:
-          docker-host-1:
-            connect_to: wss://192.168.1.11:8082
-            token: ${AGENT_1_TOKEN}
-```
-
-### Agent Instance (Inbound)
-
-```yaml
-# docker-compose.yaml (remote host)
-services:
-  labelgate-agent:
-    image: labelgate:latest
-    restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./tls:/certs:ro
     environment:
       - LABELGATE_MODE=agent
       - LABELGATE_CONNECT_MODE=inbound
       - LABELGATE_CONNECT_LISTEN=:8082
-      - LABELGATE_CONNECT_TOKEN=${AGENT_TOKEN}
+      - LABELGATE_CONNECT_AGENT_ID=docker-host-1
+      - LABELGATE_CONNECT_TOKEN=${AGENT_1_TOKEN}
+      - LABELGATE_CONNECT_TLS_CERT=/certs/server.crt
+      - LABELGATE_CONNECT_TLS_KEY=/certs/server.key
     ports:
       - "8082:8082"
 ```
 
+Because authentication is mutual, a stranger who connects to port 8082 gets no token and no data; the agent only talks to a peer that proves it knows the token. Inbound dialers reconnect with backoff, and an agent accepts a newer authenticated main session by closing the older one. An agent's unauthenticated `/health` endpoint returns only `{"status":"ok"}`.
+
 ## Key Notes
 
 - **Agents are lightweight**: They only collect container labels and report to the main instance. All Cloudflare API calls happen on the main instance.
-- **Hostname conflicts**: Cross-host hostname conflicts are detected. First container to register a hostname wins, regardless of which host it's on.
-- **Tunnel assignment**: Container label > Agent default tunnel > Global default tunnel.
-- **Reconnection**: Agents automatically reconnect with exponential backoff if the connection drops.
-- **TLS**: For production, always use TLS for agent connections. Configure certificates on the server side (main for outbound, agent for inbound).
+- **Conflicts**: Cross-host hostname conflicts are detected. The **existing owner wins**, regardless of which host it is on; a newcomer is rejected with a visible error. See [Ownership & Conflicts](/docs/ownership#conflicts-between-claims).
+- **Tunnel assignment**: Container label > agent `default_tunnel` > global default tunnel, limited to the agent's allowed tunnels.
+- **Reconnection**: Agents automatically reconnect with exponential backoff if the connection drops, and resources are held for `sync.agent_grace` meanwhile.
+- **Upgrades**: v0.2 agents cannot talk to a v0.3 main instance. Upgrade them together; see [Upgrading to v0.3](/docs/upgrading#agents).

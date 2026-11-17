@@ -3,6 +3,10 @@ title: Single Host
 description: Docker Compose examples for single-host deployments.
 ---
 
+<Callout type="info">
+All examples pass `LABELGATE_API_TOKEN`, which enables the dashboard and API. Without it they are disabled. No port is published here; add `ports: ["127.0.0.1:8080:8080"]` to reach the dashboard locally.
+</Callout>
+
 ## DNS-Only Setup
 
 The simplest setup - Labelgate manages DNS records only, no tunnels needed.
@@ -10,13 +14,14 @@ The simplest setup - Labelgate manages DNS records only, no tunnels needed.
 ```yaml
 services:
   labelgate:
-    image: labelgate:latest
+    image: ghcr.io/channinghe/labelgate:v0.3
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - labelgate-data:/app/config
     environment:
       - LABELGATE_CLOUDFLARE_API_TOKEN
+      - LABELGATE_API_TOKEN
 
   # Web server with auto DNS
   nginx:
@@ -38,13 +43,14 @@ Expose services through Cloudflare Tunnel - no public ports needed.
 ```yaml
 services:
   labelgate:
-    image: labelgate:latest
+    image: ghcr.io/channinghe/labelgate:v0.3
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - labelgate-data:/app/config
     environment:
       - LABELGATE_CLOUDFLARE_API_TOKEN
+      - LABELGATE_API_TOKEN
       - LABELGATE_CLOUDFLARE_ACCOUNT_ID
       - LABELGATE_CLOUDFLARE_TUNNEL_ID
 
@@ -82,13 +88,14 @@ Combine DNS records and tunnel services on different hostnames.
 ```yaml
 services:
   labelgate:
-    image: labelgate:latest
+    image: ghcr.io/channinghe/labelgate:v0.3
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - labelgate-data:/app/config
     environment:
       - LABELGATE_CLOUDFLARE_API_TOKEN
+      - LABELGATE_API_TOKEN
       - LABELGATE_CLOUDFLARE_ACCOUNT_ID
       - LABELGATE_CLOUDFLARE_TUNNEL_ID
 
@@ -120,13 +127,14 @@ Protect services with Zero Trust Access.
 ```yaml
 services:
   labelgate:
-    image: labelgate:latest
+    image: ghcr.io/channinghe/labelgate:v0.3
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - labelgate-data:/app/config
     environment:
       - LABELGATE_CLOUDFLARE_API_TOKEN
+      - LABELGATE_API_TOKEN
       - LABELGATE_CLOUDFLARE_ACCOUNT_ID
       - LABELGATE_CLOUDFLARE_TUNNEL_ID
 
@@ -161,18 +169,19 @@ volumes:
 
 ## PR Preview Environment
 
-Automatic preview deployments with cleanup on container stop.
+Automatic preview deployments. `cleanup` defaults to `true`, so the tunnel rule and its CNAME are removed `sync.remove_delay` (30 minutes by default) after the container stops. Lower the delay (for example `LABELGATE_SYNC_REMOVE_DELAY=5m`) if previews should disappear sooner.
 
 ```yaml
 services:
   labelgate:
-    image: labelgate:latest
+    image: ghcr.io/channinghe/labelgate:v0.3
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - labelgate-data:/app/config
     environment:
       - LABELGATE_CLOUDFLARE_API_TOKEN
+      - LABELGATE_API_TOKEN
       - LABELGATE_CLOUDFLARE_ACCOUNT_ID
       - LABELGATE_CLOUDFLARE_TUNNEL_ID
 
@@ -186,6 +195,7 @@ services:
     labels:
       labelgate.tunnel.preview.hostname: "pr-${PR_NUMBER:-0}.preview.example.com"
       labelgate.tunnel.preview.service: "http://preview:3000"
+      # cleanup is "true" by default; set it explicitly if you like
       labelgate.tunnel.preview.cleanup: "true"
 
 volumes:

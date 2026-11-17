@@ -47,24 +47,25 @@ Labelgate 有三个操作器，每个操作器管理特定类型的 Cloudflare �
 
 Labelgate 使用事件驱动的协调模型：
 
-1. **Docker 事件**在容器启动、停止或死亡时触发即时协调
-2. **定期同步**每 2 分钟运行一次，作为后备机制以捕获任何遗漏的事件
-3. 协调器比较**期望状态**（来自容器标签）与**实际状态**（来自 Cloudflare API），并应用必要的更改
+1. **Docker 事件**和 **agent 上报**会在容器启动、停止或死亡时触发协调（带防抖）
+2. **定期同步**按 `sync.interval`（默认 5 分钟）运行，作为后备机制以捕获任何遗漏的事件
+3. 单个协调器收集**期望状态**（来自容器标签）、校验、解决主机名冲突，再对照**实际状态**（来自 Cloudflare API）制定变更计划并执行。所有 Cloudflare 变更都由它串行完成
 
 ### 提供者
 
-提供者是容器信息的来源。目前，Labelgate 支持 Docker 作为提供者，未来计划支持 Kubernetes。Docker 提供者支持三种连接方法：
+提供者是容器信息的来源。目前，Labelgate 支持 Docker 作为提供者，未来计划支持 Kubernetes。Docker 提供者支持两种连接方法：
 
 - **Unix socket** - 本地 Docker 守护进程（`unix:///var/run/docker.sock`）
-- **TCP** - 远程 Docker 守护进程（`tcp://host:2376`）
-- **SSH** - 通过 SSH 的远程 Docker（`ssh://user@host`）
+- **TCP** - 远程 Docker 守护进程（`tcp://host:2376`，请使用 TLS）
+
+v0.3 已移除 `ssh://` 地址。对于远程主机，请改为在那台主机上运行 Labelgate [agent](/zh/docs/examples/multi-host)。
 
 ### 状态持久化
 
 所有管理的资源都存储在本地 SQLite 数据库中。这实现了：
 
-- **所有权跟踪** - 了解哪个容器拥有哪个 Cloudflare 资源
-- **冲突检测** - 防止重复的主机名分配
+- **所有权跟踪** - 了解哪个容器拥有哪个 Cloudflare 资源，并标记 Labelgate 创建的内容，使其绝不触碰其他资源（参见[所有权与冲突](/zh/docs/ownership)）
+- **冲突检测** - 主机名的现有拥有者胜出；后来者会被拒绝并给出可见的错误
 - **优雅恢复** - 在重启后恢复操作，而不会创建重复资源
 
 ## 工作原理
@@ -110,3 +111,5 @@ Labelgate 使用事件驱动的协调模型：
 - [快速开始](/zh/docs/getting-started) - 几分钟内设置 Labelgate
 - [标签参考](/zh/docs/labels) - 完整的标签格式文档
 - [配置](/zh/docs/configuration) - 高级配置选项
+- [所有权与冲突](/zh/docs/ownership) - Labelgate 会动和不会动哪些资源
+- [升级到 v0.3](/zh/docs/upgrading) - 自 v0.2 以来的不兼容变更

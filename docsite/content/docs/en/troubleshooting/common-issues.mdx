@@ -3,15 +3,33 @@ title: Common Issues
 description: Solutions to frequently encountered problems with Labelgate.
 ---
 
-## Hostname Conflicts
+## Conflicts
+
+Conflicts are shown in the dashboard and in `GET /api/resources/*` as resources with status `error` and the reason in `last_error`. They are re-evaluated every cycle and clear on their own once the cause is gone.
+
+### `conflict: existing record not owned by labelgate`
+
+**Problem:** A service stays in the error state with this message.
+
+**Cause:** A DNS record, Access application or tunnel ingress rule with the same identity already exists on Cloudflare and Labelgate does not own it (it has no `labelgate:<instance_id>` comment marker, no `labelgate-<instance_id>` Access tag, and is not tracked as a tunnel rule). Labelgate never adopts or overwrites such resources.
+
+**Solution:** Either delete the existing record or rule in the Cloudflare dashboard so Labelgate can create its own, remove or change the label, or (for DNS records you really want to hand over) add the marker comment yourself. See [Ownership & Conflicts](/docs/ownership#resolving-a-conflict).
+
+### `conflict: ... already claimed by ...`
+
+**Problem:** A container's service is rejected because another one owns the hostname.
+
+**Cause:** The **existing owner wins**. Another container (or agent) already claims that hostname, or uses it as a different kind of record. The first claim stays in place for as long as its owner keeps claiming it.
+
+**Solution:** Use a different hostname, or stop the current owner (or remove its labels) and wait for the next sync. You can find the owner in the error message or in the dashboard.
 
 ### DNS and Tunnel on Same Hostname
 
-**Problem:** You see an error like `hostname conflict: app.example.com is already used by tunnel service`
+**Problem:** `conflict: hostname app.example.com is used by <owner> as tunnel:<id>` (or as `records` / `cname`).
 
-**Cause:** The same hostname cannot be used for both a DNS record and a Tunnel ingress rule. Cloudflare Tunnel automatically creates a CNAME record, so adding a manual DNS record would conflict.
+**Cause:** The same hostname cannot be used for both a DNS record and a Tunnel ingress rule: a tunnel hostname has its own CNAME record.
 
-**Solution:** Use different hostnames for DNS and Tunnel, or use only one type per hostname:
+**Solution:** Use different hostnames for DNS and Tunnel, or only one type per hostname:
 
 ```yaml
 # Use Tunnel only (recommended for most cases)
@@ -20,28 +38,21 @@ labels:
   labelgate.tunnel.web.service: "http://app:80"
 ```
 
-### Multiple Containers Claiming Same Hostname
+## Label Errors
 
-**Problem:** A container's labels are being ignored with a conflict error.
+**Problem:** The sync status is `error` and the logs contain a label error with a container name and key.
 
-**Cause:** Another container already registered that hostname. First container wins.
+**Cause:** Labels are strictly validated: invalid values (`proxied: "maybe"`, `ttl: "abc"`) drop the service, and unknown properties (`hostnme`) are errors.
 
-**Solution:** Check which container owns the hostname:
+**Solution:** Fix the label named in the log line; see [Strict Validation](/docs/labels#strict-validation).
 
-```bash
-# Check Labelgate logs for conflict details
-docker compose logs labelgate | grep "conflict"
-```
+## Dashboard or API Not Available
 
-Stop the conflicting container first, then start the new one.
+**Problem:** Connecting to port 8080 fails, or the logs say `api.token is empty: API and dashboard disabled`.
 
-## DNS Record Already Exists
+**Cause:** `api.token` is required. Without it the API and the dashboard are not started (reconciliation continues).
 
-**Problem:** `DNS record already exists and is not managed by Labelgate`
-
-**Cause:** A DNS record with the same hostname exists in Cloudflare but wasn't created by Labelgate (e.g., created manually via dashboard).
-
-**Solution:** Either delete the existing record from the Cloudflare dashboard, or let Labelgate overwrite it by creating the record with matching settings.
+**Solution:** Set `LABELGATE_API_TOKEN` to a long random value (`openssl rand -hex 32`), publish the port, and sign in with that token.
 
 ## Zone Not Found
 
@@ -100,30 +111,40 @@ Stop the conflicting container first, then start the new one.
 - Labelgate automatically retries with exponential backoff
 - Reduce the number of managed resources if limits are frequently hit
 - Avoid rapidly restarting many containers at once
-- Increase the polling interval to reduce reconciliation frequency:
+- Increase the intervals to reduce reconciliation frequency (every cycle lists the DNS records of each referenced zone, each tunnel configuration, and the Access apps and policies of each account):
   ```bash
   LABELGATE_DOCKER_POLL_INTERVAL=5m
+  LABELGATE_SYNC_INTERVAL=15m
   ```
 
 ## Resources Not Cleaned Up
 
 **Problem:** Cloudflare resources persist after containers are stopped.
 
-**Cause:** By default, Labelgate does **not** delete resources when containers stop (`cleanup=false`). This is a safety feature.
+**Possible causes:**
+- The `remove_delay` has not elapsed yet. Orphaned resources are deleted `sync.remove_delay` (default `30m`) after the container is gone. To change the delay:
+  ```bash
+  LABELGATE_SYNC_REMOVE_DELAY=5m
+  ```
+- The service has `cleanup: "false"`, so its resources are intentionally kept (they show as `orphaned`).
+- Labelgate does not own the resource. It only deletes records with its comment marker, apps with its tag, and rules it tracks. Resources you created by hand are never deleted.
+- The resource belongs to an agent that is offline. It is held for `sync.agent_grace` (default `24h`) first.
 
-**Solution:** Enable cleanup via the `cleanup` label on each service:
+`cleanup` defaults to **`true`**: if you want to keep resources, set it to `"false"` explicitly:
 
 ```yaml
 labels:
-  labelgate.dns.web.cleanup: "true"
-  labelgate.tunnel.web.cleanup: "true"
+  labelgate.dns.web.cleanup: "false"
+  labelgate.tunnel.web.cleanup: "false"
 ```
 
-Resources are deleted after the cleanup delay (default: `30m`). To change the delay:
+## Resources Deleted Unexpectedly
 
-```bash
-LABELGATE_SYNC_REMOVE_DELAY=5m
-```
+**Problem:** A record or rule disappeared after a container stopped or an agent went offline.
+
+**Cause:** `cleanup` defaults to `true`. Labelgate deleted a resource it owns after `sync.remove_delay`, or after `sync.agent_grace` plus `sync.remove_delay` for an offline agent. Check that your config does not set `remove_delay: 0s`.
+
+**Solution:** Set `cleanup: "false"` on services that must survive, and raise `sync.agent_grace` if agents are offline for long periods.
 
 ## Container Rebuild (Same Config, New ID)
 
@@ -131,26 +152,50 @@ LABELGATE_SYNC_REMOVE_DELAY=5m
 
 **Cause:** The new container has a different ID but the same hostname configuration.
 
-**Solution:** This is handled automatically. When the old container no longer exists and a new container claims the same hostname, Labelgate transfers ownership. No action needed - just make sure the old container is fully stopped before starting the new one.
+**Solution:** Ownership follows the owner key (host or agent, container name and service name), not the container ID, so a rebuilt container with the same name simply keeps its resources. If you renamed the container, the old name stays the owner until it is gone; stop the old container first and the new one takes over on the next sync.
 
 ## Agent Connection Issues
 
 ### Agent Can't Connect
 
-**Problem:** Agent logs show `connection refused` or `timeout`.
+**Problem:** Agent logs show `connection refused`, `timeout`, a 404, or `unauthorized`.
 
 **Solution:**
-1. Verify the main instance endpoint is reachable from the agent host
-2. Check the agent token matches what's configured on the main instance
-3. For outbound mode, ensure port 8081 (or your custom port) is open on the main host
-4. Check TLS certificates if using encrypted connections
+1. Make sure the endpoint includes the **`/ws` path**: `wss://main.example.com:8081/ws`. Without it the main returns 404.
+2. Verify the main instance is reachable from the agent host and that port 8081 (or your custom `agent.listen`) is open.
+3. Check that the agent ID and token match an entry under `agent.agents` on the main instance, or that the main has `agent.accept_token` set. An unknown ID and a wrong token give the same `unauthorized` error on purpose.
+4. Agents from v0.2 cannot connect to v0.3; upgrade them (see [Upgrading to v0.3](/docs/upgrading#agents)).
+
+### TLS Certificate Errors
+
+**Problem:** `x509: certificate signed by unknown authority`, or a hostname mismatch.
+
+**Cause:** Certificates are verified by default.
+
+**Solution:** Use a certificate from a trusted CA, or configure your private CA with `connect.tls.ca` (agent dialing the main) or `agent.tls.ca` (main dialing inbound agents). As a last resort for testing, `insecure_skip_verify: true` disables verification; do not use it in production.
+
+### `duplicate_agent`
+
+**Problem:** The agent is rejected after authenticating.
+
+**Cause:** Another agent is already connected with the same ID. The existing session is not disturbed.
+
+**Solution:** Give every agent a unique `connect.agent_id`.
+
+### Agent Services Rejected
+
+**Problem:** An agent's service shows an error such as a hostname or tunnel not allowed, or a service URL rejected.
+
+**Cause:** The claim violated the agent's allow-lists (`hostnames`, `tunnels`, or `accept_hostnames` / `accept_tunnels`), or the tunnel `service` points at `localhost`, a loopback or link-local address, or a unix socket (SSRF guard).
+
+**Solution:** Adjust the agent's entry on the main instance, or use a service address the agent host exposes on a routable address.
 
 ### Agent Keeps Reconnecting
 
 **Problem:** Agent logs show repeated connect/disconnect cycles.
 
 **Solution:**
-- This is normal during network instability - agents auto-reconnect with exponential backoff
+- This is normal during network instability - agents auto-reconnect with exponential backoff, and their resources are held for `sync.agent_grace` meanwhile
 - Check main instance logs for authentication errors
 - Verify the agent token hasn't been changed on the main instance
 
@@ -163,12 +208,27 @@ LABELGATE_SYNC_REMOVE_DELAY=5m
 ```yaml
 services:
   labelgate:
-    image: labelgate:latest
+    image: ghcr.io/channinghe/labelgate:v0.3
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    # Option 1: Run as root (simplest)
-    user: root
-    # Option 2: Add to docker group
-    # group_add:
-    #   - docker
+    # Recommended: add the group that owns the socket
+    # (stat -c '%g' /var/run/docker.sock)
+    group_add:
+      - "REPLACE_WITH_GROUP_ID"
+    # Or, if you accept the risk, run as root
+    # user: root
 ```
+
+## Startup Errors
+
+**Problem:** Labelgate exits immediately with a `config:` error.
+
+**Cause:** Configuration is validated strictly. Unknown keys, invalid values, and removed v0.2 keys (`docker.ssh.*`, `ssh://` endpoints, `db.retention`, `db.vacuum_interval`) fail at startup.
+
+**Solution:** Fix or delete the key named in the message; see [Removed Keys](/docs/configuration/reference#removed-keys). Fatal errors exit with a non-zero status.
+
+## Database Is Not Writable
+
+**Problem:** `unable to open database file` or a failed migration backup.
+
+**Solution:** The image runs as a non-root user (UID 65532). Make the data directory writable for it: `sudo chown -R 65532:65532 ./labelgate-data`. When upgrading from v0.2, the directory also needs free space for the `labelgate.db.v0.2.bak` backup.

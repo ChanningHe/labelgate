@@ -3,45 +3,56 @@ title: 常见问题
 description: Labelgate 常见问题的解决方案。
 ---
 
-## 主机名冲突
+## 冲突
+
+冲突会在 dashboard 和 `GET /api/resources/*` 中以 `error` 状态的资源出现，原因写在 `last_error` 里。每个周期都会重新评估，只要成因消失就会自行恢复。
+
+### `conflict: existing record not owned by labelgate`
+
+**问题：** 某个服务一直处于错误状态，并带有这条消息。
+
+**原因：** Cloudflare 上已存在标识相同的 DNS 记录、Access 应用或 tunnel ingress 规则，而 Labelgate 并不拥有它（它没有 `labelgate:<instance_id>` 备注标记，没有 `labelgate-<instance_id>` Access 标签，也不是被跟踪的 tunnel 规则）。Labelgate 绝不会收编或覆盖这类资源。
+
+**解决方案：** 要么在 Cloudflare 控制台删除已有的记录或规则，让 Labelgate 创建自己的；要么移除或修改标签；要么（对于确实想移交的 DNS 记录）自己加上标记备注。参见[所有权与冲突](/zh/docs/ownership#resolving-a-conflict)。
+
+### `conflict: ... already claimed by ...`
+
+**问题：** 某个容器的服务因为另一个服务已拥有该主机名而被拒绝。
+
+**原因：** **先到者胜出**。另一个容器（或 agent）已经声明了该主机名，或者把它用作了另一类记录。只要它的拥有者持续声明，第一个声明就一直有效。
+
+**解决方案：** 换一个主机名，或者停止当前的拥有者（或移除它的标签），然后等待下一次同步。你可以在错误消息或 dashboard 中找到拥有者。
 
 ### DNS 和 Tunnel 使用相同主机名
 
-**问题：** 您看到类似 `hostname conflict: app.example.com is already used by tunnel service` 的错误
+**问题：** `conflict: hostname app.example.com is used by <owner> as tunnel:<id>`（或者 as `records` / `cname`）。
 
-**原因：** 同一主机名不能同时用于 DNS 记录和 Tunnel ingress 规则。Cloudflare Tunnel 会自动创建 CNAME 记录，因此添加手动 DNS 记录会产生冲突。
+**原因：** 同一主机名不能同时用于 DNS 记录和 Tunnel ingress 规则：tunnel 主机名有自己的 CNAME 记录。
 
 **解决方案：** 为 DNS 和 Tunnel 使用不同的主机名，或每个主机名仅使用一种类型：
 
 ```yaml
-# Use Tunnel only (recommended for most cases)
+# 仅使用 Tunnel（大多数情况下推荐）
 labels:
   labelgate.tunnel.web.hostname: "app.example.com"
   labelgate.tunnel.web.service: "http://app:80"
 ```
 
-### 多个容器声明相同主机名
+## 标签错误
 
-**问题：** 容器的标签因冲突错误而被忽略。
+**问题：** 同步状态为 `error`，日志中带有容器名和键的标签错误。
 
-**原因：** 另一个容器已经注册了该主机名。第一个容器优先。
+**原因：** 标签会被严格校验：非法的值（`proxied: "maybe"`、`ttl: "abc"`）会丢弃服务，未知的属性（`hostnme`）会报错。
 
-**解决方案：** 检查哪个容器拥有该主机名：
+**解决方案：** 修正日志中指出的标签；参见[严格校验](/zh/docs/labels#strict-validation)。
 
-```bash
-# Check Labelgate logs for conflict details
-docker compose logs labelgate | grep "conflict"
-```
+## Dashboard 或 API 无法访问
 
-首先停止冲突的容器，然后启动新容器。
+**问题：** 连接 8080 端口失败，或日志中出现 `api.token is empty: API and dashboard disabled`。
 
-## DNS 记录已存在
+**原因：** `api.token` 是必填项。没有它，API 和 dashboard 都不会启动（协调仍会继续）。
 
-**问题：** `DNS record already exists and is not managed by Labelgate`
-
-**原因：** Cloudflare 中存在具有相同主机名的 DNS 记录，但不是由 Labelgate 创建的（例如，通过仪表板手动创建）。
-
-**解决方案：** 从 Cloudflare 仪表板删除现有记录，或通过创建具有匹配设置的记录让 Labelgate 覆盖它。
+**解决方案：** 把 `LABELGATE_API_TOKEN` 设置为足够长的随机值（`openssl rand -hex 32`），发布端口，并用该 token 登录。
 
 ## Zone 未找到
 
@@ -100,30 +111,40 @@ docker compose logs labelgate | grep "conflict"
 - Labelgate 会自动使用指数退避重试
 - 如果经常达到限制，减少托管资源的数量
 - 避免同时快速重启多个容器
-- 增加轮询间隔以减少协调频率：
+- 增大间隔以减少协调频率（每个周期都会列出每个被引用 zone 的 DNS 记录、每个 tunnel 的配置，以及每个账户的 Access 应用和策略）：
   ```bash
   LABELGATE_DOCKER_POLL_INTERVAL=5m
+  LABELGATE_SYNC_INTERVAL=15m
   ```
 
 ## 资源未清理
 
 **问题：** 容器停止后，Cloudflare 资源仍然存在。
 
-**原因：** 默认情况下，Labelgate **不会**在容器停止时删除资源（`cleanup=false`）。这是一项安全功能。
+**可能的原因：**
+- `remove_delay` 还没到。孤立资源会在容器消失 `sync.remove_delay`（默认 `30m`）之后被删除。修改延迟：
+  ```bash
+  LABELGATE_SYNC_REMOVE_DELAY=5m
+  ```
+- 该服务设置了 `cleanup: "false"`，因此资源被有意保留（它们会显示为 `orphaned`）。
+- 资源并不属于 Labelgate。它只会删除带有自己备注标记的记录、带有自己标签的应用，以及它跟踪的规则。你手工创建的资源永远不会被删除。
+- 资源属于一个离线的 agent。它会先被保留 `sync.agent_grace`（默认 `24h`）。
 
-**解决方案：** 在服务上设置 `cleanup` 标签：
+`cleanup` 默认为 **`true`**：如果想保留资源，请显式设置为 `"false"`：
 
 ```yaml
 labels:
-  labelgate.dns.web.cleanup: "true"
-  labelgate.tunnel.web.cleanup: "true"
+  labelgate.dns.web.cleanup: "false"
+  labelgate.tunnel.web.cleanup: "false"
 ```
 
-资源将在清理延迟后删除（默认：`30m`）。修改延迟：
+## 资源被意外删除
 
-```bash
-LABELGATE_SYNC_REMOVE_DELAY=5m
-```
+**问题：** 容器停止或 agent 离线后，一条记录或规则消失了。
+
+**原因：** `cleanup` 默认为 `true`。Labelgate 在 `sync.remove_delay` 之后删除了它拥有的资源；对于离线 agent，则是在 `sync.agent_grace` 加 `sync.remove_delay` 之后。请检查你的配置中是否设置了 `remove_delay: 0s`。
+
+**解决方案：** 对必须保留的服务设置 `cleanup: "false"`，如果 agent 会长时间离线，请调大 `sync.agent_grace`。
 
 ## 容器重建（相同配置，新 ID）
 
@@ -131,28 +152,52 @@ LABELGATE_SYNC_REMOVE_DELAY=5m
 
 **原因：** 新容器具有不同的 ID，但主机名配置相同。
 
-**解决方案：** 这是自动处理的。当旧容器不再存在且新容器声明相同主机名时，Labelgate 会转移所有权。无需操作 - 只需确保在启动新容器之前完全停止旧容器。
+**解决方案：** 所有权跟随拥有者标识（主机或 agent、容器名和服务名），而不是容器 ID，所以名称相同的重建容器会直接保留它的资源。如果你重命名了容器，旧名称在消失之前仍是拥有者；请先停止旧容器，新容器会在下一次同步时接手。
 
 ## Agent 连接问题
 
 ### Agent 无法连接
 
-**问题：** Agent 日志显示 `connection refused` 或 `timeout`。
+**问题：** Agent 日志显示 `connection refused`、`timeout`、404 或 `unauthorized`。
 
 **解决方案：**
-1. 验证主实例端点是否可以从 agent 主机访问
-2. 检查 agent token 是否与主实例上配置的匹配
-3. 对于出站模式，确保主主机上的端口 8081（或您的自定义端口）已打开
-4. 如果使用加密连接，检查 TLS 证书
+1. 确认端点包含 **`/ws` 路径**：`wss://main.example.com:8081/ws`。没有它，main 会返回 404。
+2. 确认从 agent 主机可以访问 main 实例，并且 8081 端口（或你自定义的 `agent.listen`）已开放。
+3. 检查 agent ID 和 token 是否与 main 实例上 `agent.agents` 下的某个条目匹配，或者 main 是否设置了 `agent.accept_token`。未知 ID 和错误 token 会返回相同的 `unauthorized` 错误，这是有意的设计。
+4. v0.2 的 agent 无法连接 v0.3，请升级它们（参见[升级到 v0.3](/zh/docs/upgrading#agents)）。
+
+### TLS 证书错误
+
+**问题：** `x509: certificate signed by unknown authority`，或主机名不匹配。
+
+**原因：** 证书默认会被校验。
+
+**解决方案：** 使用受信任 CA 签发的证书，或用 `connect.tls.ca`（agent 拨号 main）或 `agent.tls.ca`（main 拨号 inbound agent）配置你的私有 CA。仅在测试中作为最后手段，才可以用 `insecure_skip_verify: true` 关闭校验；请勿在生产环境使用。
+
+### `duplicate_agent`
+
+**问题：** Agent 在认证之后被拒绝。
+
+**原因：** 已经有另一个 agent 以相同的 ID 连接。已有会话不受影响。
+
+**解决方案：** 让每个 agent 使用唯一的 `connect.agent_id`。
+
+### Agent 的服务被拒绝
+
+**问题：** Agent 的某个服务显示错误，例如主机名或 tunnel 不被允许，或服务地址被拒绝。
+
+**原因：** 声明违反了该 agent 的允许列表（`hostnames`、`tunnels`，或 `accept_hostnames` / `accept_tunnels`），或者 tunnel 的 `service` 指向了 `localhost`、回环地址、链路本地地址或 unix socket（SSRF 防护）。
+
+**解决方案：** 在 main 实例上调整该 agent 的条目，或者使用 agent 主机上可路由地址对外暴露的服务地址。
 
 ### Agent 不断重连
 
-**问题：** Agent 日志显示重复的连接/断开循环。
+**问题：** Agent 日志显示反复的连接/断开循环。
 
 **解决方案：**
-- 这在网络不稳定期间是正常的 - agents 使用指数退避自动重连
-- 检查主实例日志中的认证错误
-- 验证主实例上的 agent token 是否未更改
+- 网络不稳定时这是正常的 - agent 会以指数退避自动重连，期间其资源会被保留 `sync.agent_grace` 的时长
+- 检查 main 实例日志中是否有认证错误
+- 确认 main 实例上的 agent token 没有被更改
 
 ## Docker Socket 权限被拒绝
 
@@ -163,12 +208,27 @@ LABELGATE_SYNC_REMOVE_DELAY=5m
 ```yaml
 services:
   labelgate:
-    image: labelgate:latest
+    image: ghcr.io/channinghe/labelgate:v0.3
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    # Option 1: Run as root (simplest)
-    user: root
-    # Option 2: Add to docker group
-    # group_add:
-    #   - docker
+    # 推荐：加入拥有该 socket 的用户组
+    # （stat -c '%g' /var/run/docker.sock）
+    group_add:
+      - "REPLACE_WITH_GROUP_ID"
+    # 或者，如果你接受其风险，以 root 运行
+    # user: root
 ```
+
+## 启动错误
+
+**问题：** Labelgate 启动后立刻退出，并输出 `config:` 错误。
+
+**原因：** 配置会被严格校验。未知的键、非法的值，以及 v0.2 中已移除的配置项（`docker.ssh.*`、`ssh://` 地址、`db.retention`、`db.vacuum_interval`）都会在启动时失败。
+
+**解决方案：** 修正或删除消息中指出的键；参见[已移除的配置项](/zh/docs/configuration/reference#removed-keys)。发生致命错误时进程以非零状态退出。
+
+## 数据库不可写
+
+**问题：** `unable to open database file`，或迁移备份失败。
+
+**解决方案：** 镜像以非 root 用户（UID 65532）运行。请让数据目录对它可写：`sudo chown -R 65532:65532 ./labelgate-data`。从 v0.2 升级时，目录还需要有足够空间存放 `labelgate.db.v0.2.bak` 备份。

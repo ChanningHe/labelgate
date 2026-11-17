@@ -1,6 +1,6 @@
 ---
 title: Configuration Reference
-description: Complete reference for all Labelgate configuration options.
+description: Complete reference for all Labelgate configuration options, defaults and removed keys.
 ---
 
 ## Naming Convention
@@ -10,6 +10,7 @@ Every config file key maps directly to an environment variable:
 - Replace dots (`.`) with underscores (`_`)
 - Uppercase all letters
 - Add the `LABELGATE_` prefix
+- Lists are comma-separated (`a.example.com,b.example.com`)
 
 | Config File | Environment Variable |
 |-------------|---------------------|
@@ -18,28 +19,32 @@ Every config file key maps directly to an environment variable:
 | `sync.remove_delay` | `LABELGATE_SYNC_REMOVE_DELAY` |
 | `api.base_path` | `LABELGATE_API_BASE_PATH` |
 
-Environment variables always take priority over config file values.
+Priority: **environment variables > config file > defaults**. Map-valued sections (`cloudflare.credentials`, `cloudflare.tunnels`, `agent.agents`) are config-file only.
+
+<Callout type="warn">
+Configuration is decoded strictly: an **unknown key is a startup error**, and so are invalid values (for example an unknown `mode`, `log_level` or `log_format`, or a zero `docker.poll_interval`). Labelgate never silently falls back to a default for a value you set.
+</Callout>
 
 ## Basic Settings
 
 | Environment Variable | Config File Path | Default | Description |
 |---------------------|------------------|---------|-------------|
-| `LABELGATE_LABEL_PREFIX` | `label_prefix` | `labelgate` | Label prefix for container labels |
-| `LABELGATE_LOG_LEVEL` | `log_level` | `info` | Log level: `debug`, `info`, `warn`, `error` |
-| `LABELGATE_LOG_FORMAT` | `log_format` | `text` | Log format: `json`, `text` |
+| `LABELGATE_LABEL_PREFIX` | `label_prefix` | `labelgate` | Label prefix for container labels (`^[a-z0-9][a-z0-9._-]*$`) |
+| `LABELGATE_LOG_LEVEL` | `log_level` | `info` | `debug`, `info`, `warn`, `error` |
+| `LABELGATE_LOG_FORMAT` | `log_format` | `text` | `text` or `json` |
 | `LABELGATE_MODE` | `mode` | `main` | Run mode: `main` or `agent` |
-| `LABELGATE_DEFAULT_TUNNEL` | `default_tunnel` | `default` | Default tunnel name |
+| `LABELGATE_INSTANCE_ID` | `instance_id` | - | Overrides the persisted [instance ID](/docs/ownership#instance-id). Only needed to recover after losing the database. 4-32 characters of `[a-z0-9]` |
+| `LABELGATE_DEFAULT_TUNNEL` | `default_tunnel` | - | Tunnel used when a label omits `tunnel`. Empty or `default` = the root tunnel (`cloudflare.tunnel_id`), otherwise a key of `cloudflare.tunnels` |
+| `LABELGATE_SKIP_CREDENTIAL_VALIDATION` | `skip_credential_validation` | `false` | Skip the Cloudflare credential check on startup and the "at least one credential" rule |
+| `LABELGATE_CONFIG` | - | - | Path to the config file (see [Configuration Overview](/docs/configuration)) |
 
 ## Docker Provider
 
 | Environment Variable | Config File Path | Default | Description |
 |---------------------|------------------|---------|-------------|
-| `LABELGATE_DOCKER_ENDPOINT` | `docker.endpoint` | `unix:///var/run/docker.sock` | Docker daemon endpoint |
-| `LABELGATE_DOCKER_POLL_INTERVAL` | `docker.poll_interval` | `2m` | Fallback polling interval |
-| `LABELGATE_DOCKER_FILTER_LABEL` | `docker.filter_label` | - | Only watch containers with this label |
-| `LABELGATE_DOCKER_SSH_KEY` | `docker.ssh.key` | - | SSH private key path (for `ssh://` endpoints) |
-| `LABELGATE_DOCKER_SSH_KEY_PASSPHRASE` | `docker.ssh.key_passphrase` | - | SSH key passphrase |
-| `LABELGATE_DOCKER_SSH_KNOWN_HOSTS` | `docker.ssh.known_hosts` | - | SSH known hosts file |
+| `LABELGATE_DOCKER_ENDPOINT` | `docker.endpoint` | `unix:///var/run/docker.sock` | Docker daemon endpoint. `unix://` and `tcp://` only |
+| `LABELGATE_DOCKER_POLL_INTERVAL` | `docker.poll_interval` | `2m` | Fallback polling interval (must be > 0) |
+| `LABELGATE_DOCKER_FILTER_LABEL` | `docker.filter_label` | - | Only watch containers with this label (`key` or `key=value`) |
 | `LABELGATE_DOCKER_TLS_CA` | `docker.tls.ca` | - | TLS CA certificate (for `tcp://` with TLS) |
 | `LABELGATE_DOCKER_TLS_CERT` | `docker.tls.cert` | - | TLS client certificate |
 | `LABELGATE_DOCKER_TLS_KEY` | `docker.tls.key` | - | TLS client key |
@@ -48,9 +53,16 @@ Environment variables always take priority over config file values.
 
 | Environment Variable | Config File Path | Default | Description |
 |---------------------|------------------|---------|-------------|
-| `LABELGATE_CLOUDFLARE_API_TOKEN` | `cloudflare.api_token` | - | Default API token **(required)** |
-| `LABELGATE_CLOUDFLARE_ACCOUNT_ID` | `cloudflare.account_id` | - | Cloudflare Account ID |
-| `LABELGATE_CLOUDFLARE_TUNNEL_ID` | `cloudflare.tunnel_id` | - | Default Tunnel ID |
+| `LABELGATE_CLOUDFLARE_API_TOKEN` | `cloudflare.api_token` | - | Root ("default") API token **(required in main mode)** |
+| `LABELGATE_CLOUDFLARE_ACCOUNT_ID` | `cloudflare.account_id` | - | Account that owns the root tunnel |
+| `LABELGATE_CLOUDFLARE_TUNNEL_ID` | `cloudflare.tunnel_id` | - | Root ("default") tunnel ID. Requires `account_id` |
+| - | `cloudflare.credentials.<name>.api_token` | - | Additional named credential (config file only) |
+| - | `cloudflare.credentials.<name>.zones` | - | Optional zone patterns this credential is used for (empty = every zone the token can list) |
+| - | `cloudflare.tunnels.<name>.account_id` | - | Additional named tunnel: account (config file only) |
+| - | `cloudflare.tunnels.<name>.tunnel_id` | - | Additional named tunnel: tunnel ID |
+| - | `cloudflare.tunnels.<name>.credential` | root credential | Which named credential manages this tunnel |
+
+Credential and tunnel names use lowercase letters, digits, `-` and `_`. The name `default` is reserved for the root credential/tunnel.
 
 <Callout type="info">
 The `TUNNEL_TOKEN` used by cloudflared to establish the tunnel connection is **not** a Labelgate configuration. It is configured directly on the cloudflared service. See [cloudflared Setup](/docs/examples/cloudflared) for details.
@@ -58,13 +70,18 @@ The `TUNNEL_TOKEN` used by cloudflared to establish the tunnel connection is **n
 
 ## Sync & Lifecycle
 
-By default, Labelgate **does not** delete Cloudflare resources when a container stops. To enable deletion, set `cleanup: "true"` on each service label (see [DNS Labels](/docs/labels/dns), [Tunnel Labels](/docs/labels/tunnel)). Resources are then scheduled for deletion after `remove_delay`.
+Labelgate only ever deletes Cloudflare resources **that it owns** (see [Ownership & Conflicts](/docs/ownership)). The `cleanup` label **defaults to `true`**: when a container stops (or its labels are removed), the resources it owned become *orphaned* and are deleted after `sync.remove_delay`. Set `cleanup: "false"` on a service to keep its resources on Cloudflare; they are then marked `orphaned` but never deleted.
 
 | Environment Variable | Config File Path | Default | Description |
 |---------------------|------------------|---------|-------------|
-| `LABELGATE_SYNC_INTERVAL` | `sync.interval` | `1h` | Periodic reconciliation interval |
-| `LABELGATE_SYNC_REMOVE_DELAY` | `sync.remove_delay` | `30m` | Delay before deleting resources when `cleanup=true` |
-| `LABELGATE_SYNC_ORPHAN_TTL` | `sync.orphan_ttl` | `0` | Auto-remove DB records for orphaned resources (0 = never) |
+| `LABELGATE_SYNC_INTERVAL` | `sync.interval` | `5m` | Periodic full reconciliation (in addition to Docker events and agent reports). Minimum `10s` |
+| `LABELGATE_SYNC_REMOVE_DELAY` | `sync.remove_delay` | `30m` | Delay before an orphaned resource with `cleanup=true` is deleted. `0` deletes on the next cycle |
+| `LABELGATE_SYNC_ORPHAN_TTL` | `sync.orphan_ttl` | `0` | Drop the database row (never the Cloudflare object) of orphaned resources with `cleanup=false` after this long. `0` = never |
+| `LABELGATE_SYNC_AGENT_GRACE` | `sync.agent_grace` | `24h` | How long an agent's last reported containers stay desired after the agent was last seen. See [Multi-Host](/docs/examples/multi-host#agent-grace) |
+
+<Callout type="warn">
+A `remove_delay` of `0` means "delete as soon as a resource is no longer desired". Do not copy `0s` from old example files; keep the `30m` default unless you have a reason.
+</Callout>
 
 ## Database
 
@@ -72,55 +89,120 @@ By default, Labelgate **does not** delete Cloudflare resources when a container 
 |---------------------|------------------|---------|-------------|
 | `LABELGATE_DB_PATH` | `db.path` | `/app/config/labelgate.db` | SQLite database path |
 
-## API Server
+The database stores the instance ID, ownership records and agent state. Back it up, and persist `/app/config` on a volume.
+
+## API Server & Dashboard
 
 | Environment Variable | Config File Path | Default | Description |
 |---------------------|------------------|---------|-------------|
-| `LABELGATE_API_ENABLED` | `api.enabled` | `true` | Enable HTTP API server |
+| `LABELGATE_API_ENABLED` | `api.enabled` | `true` | Enable the HTTP API and dashboard |
 | `LABELGATE_API_ADDRESS` | `api.address` | `:8080` | Listen address |
-| `LABELGATE_API_BASE_PATH` | `api.base_path` | `/api` | API base path |
-| `LABELGATE_API_TOKEN` | `api.token` | - | Bearer token for API authentication (disabled if empty) |
+| `LABELGATE_API_BASE_PATH` | `api.base_path` | `/api` | API base path. Must start with `/`, no trailing `/`, and must not be `/dashboard` |
+| `LABELGATE_API_TOKEN` | `api.token` | - | Bearer token. **Required**: if empty, the API **and** the dashboard are disabled |
+
+<Callout type="warn">
+**`api.token` is mandatory.** Without it Labelgate logs a loud error, keeps reconciling, and serves **neither** the API **nor** the dashboard. There is no unauthenticated mode. Use a long random value (`openssl rand -hex 32`) and prefer passing it through `LABELGATE_API_TOKEN`.
+</Callout>
+
+All endpoints except `GET {base_path}/health` require `Authorization: Bearer <token>`. The dashboard is served at `/dashboard/` and reads the API base path from the server, so a custom `api.base_path` works. Even with a token, do not expose the port to the public internet; put it behind a VPN, a reverse proxy with TLS, or a Cloudflare Access application.
+
+### Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET {base}/health` | Liveness, no auth, returns `{"status":"ok"}` |
+| `GET {base}/overview` | Resource counts, sync status, agent summary |
+| `GET {base}/resources/dns` | DNS records |
+| `GET {base}/resources/tunnels` | Tunnel ingress rules |
+| `GET {base}/resources/access` | Access applications |
+| `GET {base}/agents` | Agents (`active`, `disconnected` within grace, `removed`) |
+| `GET {base}/version` | Version information |
+
+Resource lists accept `status`, `agent_id`, `hostname`, `limit` (default `500`, max `1000`) and `offset`. `total` is the true filtered count. Invalid parameters return `400`. Rejected [conflicting claims](/docs/ownership#conflicts-between-claims) appear in the resource lists with status `error` and the conflict reason in `last_error`.
+
+### Healthcheck
+
+The container image runs `labelgate healthcheck` as its `HEALTHCHECK`. It reads the same configuration as the daemon:
+
+- **Main mode, API enabled with a token:** requests `GET http://127.0.0.1:<port>{base_path}/health` (wildcard listen addresses such as `:8080` or `0.0.0.0` are mapped to loopback) with a 2s timeout. HTTP 200 = healthy.
+- **Main mode, API disabled or no token:** reports healthy (exit 0). Process liveness is Docker's job, so the container is not marked unhealthy just because the API is off.
+- **Agent mode, inbound:** healthy if a TCP connection to `connect.listen` succeeds.
+- **Agent mode, outbound:** healthy (exit 0).
+
+Custom `api.address` and `api.base_path` values are honoured automatically.
 
 ## Retry Settings
 
 | Environment Variable | Config File Path | Default | Description |
 |---------------------|------------------|---------|-------------|
-| `LABELGATE_RETRY_ATTEMPTS` | `retry.attempts` | `3` | Maximum retry attempts |
-| `LABELGATE_RETRY_DELAY` | `retry.delay` | `1s` | Initial retry delay |
-| `LABELGATE_RETRY_MAX_DELAY` | `retry.max_delay` | `30s` | Maximum retry delay |
-| `LABELGATE_RETRY_BACKOFF` | `retry.backoff` | `2` | Retry backoff multiplier |
+| `LABELGATE_RETRY_ATTEMPTS` | `retry.attempts` | `3` | Maximum attempts (>= 1) |
+| `LABELGATE_RETRY_DELAY` | `retry.delay` | `1s` | Initial retry delay (> 0) |
+| `LABELGATE_RETRY_MAX_DELAY` | `retry.max_delay` | `30s` | Maximum retry delay (>= `delay`) |
+| `LABELGATE_RETRY_BACKOFF` | `retry.backoff` | `2` | Backoff multiplier (>= 1) |
 
 ## Agent Server (Main Instance)
 
+See [Multi-Host](/docs/examples/multi-host) for how these fit together.
+
 | Environment Variable | Config File Path | Default | Description |
 |---------------------|------------------|---------|-------------|
-| `LABELGATE_AGENT_ENABLED` | `agent.enabled` | `false` | Enable agent WebSocket server |
-| `LABELGATE_AGENT_LISTEN` | `agent.listen` | `:8081` | Agent server listen address |
-| `LABELGATE_AGENT_ACCEPT_TOKEN` | `agent.accept_token` | - | Shared token to accept any agent |
-| `LABELGATE_AGENT_TLS_CA` | `agent.tls.ca` | - | TLS CA certificate |
-| `LABELGATE_AGENT_TLS_CERT` | `agent.tls.cert` | - | TLS certificate for agent server |
-| `LABELGATE_AGENT_TLS_KEY` | `agent.tls.key` | - | TLS key for agent server |
+| `LABELGATE_AGENT_ENABLED` | `agent.enabled` | `false` | Start the agent WebSocket listener and dial inbound agents |
+| `LABELGATE_AGENT_LISTEN` | `agent.listen` | `:8081` | Listen address. Agents connect to `<scheme>://<host>:8081/ws` |
+| `LABELGATE_AGENT_ACCEPT_TOKEN` | `agent.accept_token` | - | Shared token accepted from agents that are **not** listed under `agent.agents` |
+| `LABELGATE_AGENT_ACCEPT_HOSTNAMES` | `agent.accept_hostnames` | - | Glob list limiting the hostnames `accept_token` agents may claim. Empty = unrestricted |
+| `LABELGATE_AGENT_ACCEPT_TUNNELS` | `agent.accept_tunnels` | - | Tunnels `accept_token` agents may target. Empty = only the default tunnel |
+| `LABELGATE_AGENT_TLS_CERT` | `agent.tls.cert` | - | Server certificate of the agent listener (enables `wss://`) |
+| `LABELGATE_AGENT_TLS_KEY` | `agent.tls.key` | - | Server key (must be set together with `cert`) |
+| `LABELGATE_AGENT_TLS_CA` | `agent.tls.ca` | system roots | CA used to verify inbound agents when the main dials them |
+| `LABELGATE_AGENT_TLS_INSECURE_SKIP_VERIFY` | `agent.tls.insecure_skip_verify` | `false` | Skip certificate verification when dialing inbound agents. **Not recommended**; logs a warning at startup |
+
+### Per-agent entries (`agent.agents.<id>`, config file only)
+
+The map key is the agent ID and must match `^[a-z0-9][a-z0-9_-]{0,62}$`.
+
+| Key | Required | Description |
+|-----|----------|-------------|
+| `token` | Yes | Per-agent shared secret (non-empty) |
+| `name` | No | Display name shown in the dashboard |
+| `default_tunnel` | No | Tunnel used when this agent's labels omit `tunnel`. Empty = global default |
+| `tunnels` | No | Tunnels this agent may target. Empty = only its default tunnel |
+| `hostnames` | No | Glob list of hostnames this agent may claim. Empty = unrestricted |
+| `connect_to` | No | `ws://` or `wss://` URL, including `/ws`. Enables [inbound mode](/docs/examples/multi-host#inbound-mode-example) for this agent |
 
 ## Agent Connection (Agent Instance)
 
 | Environment Variable | Config File Path | Default | Description |
 |---------------------|------------------|---------|-------------|
-| `LABELGATE_CONNECT_MODE` | `connect.mode` | `outbound` | Connection mode: `outbound` or `inbound` |
-| `LABELGATE_CONNECT_ENDPOINT` | `connect.endpoint` | - | Main instance WebSocket URL (outbound) |
-| `LABELGATE_CONNECT_LISTEN` | `connect.listen` | - | Listen address (inbound) |
-| `LABELGATE_CONNECT_TOKEN` | `connect.token` | - | Authentication token |
-| `LABELGATE_CONNECT_AGENT_ID` | `connect.agent_id` | Auto from `/etc/machine-id` | Agent identifier |
-| `LABELGATE_CONNECT_HEARTBEAT_INTERVAL` | `connect.heartbeat_interval` | `30s` | Heartbeat interval |
-| `LABELGATE_CONNECT_TLS_CA` | `connect.tls.ca` | - | TLS CA certificate |
-| `LABELGATE_CONNECT_TLS_CERT` | `connect.tls.cert` | - | TLS client certificate |
-| `LABELGATE_CONNECT_TLS_KEY` | `connect.tls.key` | - | TLS client key |
+| `LABELGATE_CONNECT_MODE` | `connect.mode` | `outbound` | `outbound` (agent dials main) or `inbound` (main dials agent) |
+| `LABELGATE_CONNECT_ENDPOINT` | `connect.endpoint` | - | Main instance URL, e.g. `wss://main.example.com:8081/ws`. Required for outbound. **The `/ws` path is required** |
+| `LABELGATE_CONNECT_LISTEN` | `connect.listen` | - | Listen address. Required for inbound |
+| `LABELGATE_CONNECT_TOKEN` | `connect.token` | - | Authentication token **(required)** |
+| `LABELGATE_CONNECT_AGENT_ID` | `connect.agent_id` | First 12 hex chars of `/etc/machine-id`, else sanitized hostname | Agent identifier, `^[a-z0-9][a-z0-9_-]{0,62}$` |
+| `LABELGATE_CONNECT_HEARTBEAT_INTERVAL` | `connect.heartbeat_interval` | `30s` | Period of full state reports (>= 1s) |
+| `LABELGATE_CONNECT_TLS_CA` | `connect.tls.ca` | system roots | CA used to verify the main instance when dialing it |
+| `LABELGATE_CONNECT_TLS_CERT` | `connect.tls.cert` | - | Server certificate of the agent's inbound listener |
+| `LABELGATE_CONNECT_TLS_KEY` | `connect.tls.key` | - | Server key of the inbound listener |
+| `LABELGATE_CONNECT_TLS_INSECURE_SKIP_VERIFY` | `connect.tls.insecure_skip_verify` | `false` | Skip certificate verification when dialing the main. **Not recommended**; logs a warning at startup |
 
-## Other
+<Callout type="info">
+`connect.tls.cert` / `key` no longer mean "client certificate". Agents authenticate with an HMAC handshake over the shared token (see [Multi-Host](/docs/examples/multi-host#authentication)); `cert` / `key` are only the server certificate of an inbound agent's listener.
+</Callout>
 
-| Environment Variable | Config File Path | Default | Description |
-|---------------------|------------------|---------|-------------|
-| `LABELGATE_CONFIG` | - | - | Path to YAML config file |
-| `LABELGATE_SKIP_CREDENTIAL_VALIDATION` | `skip_credential_validation` | `false` | Skip credential check on startup |
+## Removed Keys
+
+These v0.2 keys now fail validation with an explicit error. Delete them from your config and environment.
+
+| Key | Env variable | Why |
+|-----|--------------|-----|
+| `docker.ssh.key` | `LABELGATE_DOCKER_SSH_KEY` | `ssh://` Docker endpoints were removed |
+| `docker.ssh.key_passphrase` | `LABELGATE_DOCKER_SSH_KEY_PASSPHRASE` | `ssh://` Docker endpoints were removed |
+| `docker.ssh.known_hosts` | `LABELGATE_DOCKER_SSH_KNOWN_HOSTS` | `ssh://` Docker endpoints were removed |
+| `db.retention` | `LABELGATE_DB_RETENTION` | Was never implemented; deleted rows are no longer retained |
+| `db.vacuum_interval` | `LABELGATE_DB_VACUUM_INTERVAL` | Was never implemented |
+
+A `docker.endpoint` starting with `ssh://` is also rejected. Use the local unix socket, or `tcp://` with TLS (`docker.tls.*`), or run a Labelgate [agent](/docs/examples/multi-host) on the remote host.
+
+`sync.interval` still exists and is now actually used (default `5m`, previously documented as `1h` but ignored).
 
 ## Multi-Credential Setup
 
@@ -149,19 +231,27 @@ cloudflare:
       credential: company
 ```
 
-Secrets should still be passed via environment variables — see [Hybrid Mode](/docs/configuration#3-hybrid-mode).
+Secrets should still be passed via environment variables where possible; see [Hybrid Mode](/docs/configuration#3-hybrid-mode).
 
 ### Credential Resolution Order
 
-1. Container label specifies credential name (e.g., `labelgate.dns.web.credential=company`)
-2. Automatic zone matching against configured `zones` patterns
-3. Fall back to the default `api_token`
+1. A `credential` label names a credential: that one is used, or the service errors if it does not exist or cannot see the zone.
+2. Otherwise the **longest-suffix zone match** across all credentials (case-insensitive). `zones` patterns restrict which zones a named credential is considered for.
+3. Otherwise the root credential (`cloudflare.api_token`).
+4. Otherwise the service errors. There is no hidden fallback.
+
+Labels no longer default `credential` to `"default"`; leaving it empty means "automatic" as described above. Use `credential: default` to force the root token.
+
+### Tunnel Resolution
+
+A `tunnel` label (name or tunnel ID) is resolved to a tunnel ID. An **unknown tunnel is an error**; Labelgate never falls back to another tunnel. When the label is omitted, `default_tunnel` (or the root tunnel) is used. Rules are grouped by the *resolved* tunnel ID, so two names for the same tunnel are safe.
 
 ### Zone Matching Rules
 
 - **Exact match**: `example.com` matches `example.com`
-- **Wildcard match**: `*.example.com` matches `sub.example.com`, `api.example.com`
-- **Parent domain match**: `example.com` matches `www.example.com` (fallback)
+- **Suffix match**: `example.com` also matches `www.example.com` and `a.b.example.com`; the longest matching zone wins (so `badexample.com` never matches `example.com`)
+- **Wildcard patterns** in `zones`: `*.example.com` matches subdomains of `example.com`
+- Zones are discovered through the Cloudflare API with full pagination, cached per credential, and refreshed on a miss and periodically.
 
 ## Full YAML Config Example
 
@@ -169,7 +259,6 @@ Secrets should still be passed via environment variables — see [Hybrid Mode](/
 label_prefix: labelgate
 log_level: info
 log_format: text
-default_tunnel: default
 
 docker:
   endpoint: unix:///var/run/docker.sock
@@ -182,8 +271,10 @@ cloudflare:
   tunnel_id: ""
 
 sync:
-  interval: 1h
+  interval: 5m
   remove_delay: 30m
+  orphan_ttl: 0
+  agent_grace: 24h
 
 db:
   path: /app/config/labelgate.db
@@ -198,4 +289,6 @@ api:
   enabled: true
   address: :8080
   base_path: /api
+  # Set via LABELGATE_API_TOKEN environment variable (required)
+  token: ""
 ```

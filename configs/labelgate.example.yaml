@@ -1,50 +1,48 @@
-# Labelgate Example Configuration (YAML)
+# Labelgate Example Configuration (YAML) - v0.3
 # Copy this file to labelgate.yaml and customize as needed.
 # All values can be overridden by environment variables with LABELGATE_ prefix.
-# Naming rule: YAML path a.b.c -> ENV LABELGATE_A_B_C
+# Naming rule: YAML path a.b.c -> ENV LABELGATE_A_B_C (lists: comma-separated).
+# Priority: environment > config file > defaults.
+# Unknown keys are errors, so typos fail fast at startup.
 #
 # NOTE: You can run Labelgate without a config file by using only environment variables.
 # See .env.example for environment variable configuration.
+#
+# Values shown below are the defaults unless marked "required" or commented out.
 
 # Core configuration
 label_prefix: labelgate           # LABELGATE_LABEL_PREFIX
 log_level: info                   # LABELGATE_LOG_LEVEL  (debug, info, warn, error)
-log_format: text                  # LABELGATE_LOG_FORMAT (json, text)
+log_format: text                  # LABELGATE_LOG_FORMAT (text, json)
 mode: main                        # LABELGATE_MODE       (main, agent)
-default_tunnel: default           # LABELGATE_DEFAULT_TUNNEL
+# default_tunnel: ""              # LABELGATE_DEFAULT_TUNNEL ("" or "default" = cloudflare.tunnel_id, else a key of cloudflare.tunnels)
+# instance_id: ""                 # LABELGATE_INSTANCE_ID  Override the persisted instance ID (only for recovery after DB loss)
+# skip_credential_validation: false  # LABELGATE_SKIP_CREDENTIAL_VALIDATION
 
-# Docker Provider configuration
+# Docker Provider configuration (unix:// and tcp:// only; ssh:// was removed in v0.3)
 docker:
-  # Docker endpoint (supports unix://, tcp://, ssh://)
   endpoint: unix:///var/run/docker.sock   # LABELGATE_DOCKER_ENDPOINT
-  
-  # Polling interval (supplement to event watching)
-  poll_interval: 2m                       # LABELGATE_DOCKER_POLL_INTERVAL
-  
-  # Optional: filter containers by label
-  # filter_label: labelgate.enable=true    # LABELGATE_DOCKER_FILTER_LABEL
-  
-  # SSH configuration (when using ssh:// endpoint)
-  # ssh:
-  #   key: /path/to/id_rsa                 # LABELGATE_DOCKER_SSH_KEY
-  #   key_passphrase: ""                   # LABELGATE_DOCKER_SSH_KEY_PASSPHRASE
-  #   known_hosts: /path/to/known_hosts    # LABELGATE_DOCKER_SSH_KNOWN_HOSTS
-  
+  poll_interval: 2m                       # LABELGATE_DOCKER_POLL_INTERVAL (supplement to event watching, must be > 0)
+
+  # Optional: only watch containers with this label ("key" or "key=value")
+  # filter_label: labelgate.enable=true   # LABELGATE_DOCKER_FILTER_LABEL
+
   # TLS configuration (when using tcp:// with TLS)
   # tls:
-  #   ca: /path/to/ca.pem                  # LABELGATE_DOCKER_TLS_CA
+  #   ca: /path/to/ca.pem                 # LABELGATE_DOCKER_TLS_CA
   #   cert: /path/to/cert.pem             # LABELGATE_DOCKER_TLS_CERT
   #   key: /path/to/key.pem               # LABELGATE_DOCKER_TLS_KEY
 
-# Cloudflare configuration
+# Cloudflare configuration (main mode: required unless skip_credential_validation)
 # Default credential and tunnel are at root level for simple ENV mapping.
 cloudflare:
-  api_token: "your-api-token-here"        # LABELGATE_CLOUDFLARE_API_TOKEN
+  api_token: "your-api-token-here"        # required, LABELGATE_CLOUDFLARE_API_TOKEN
   account_id: "your-account-id"           # LABELGATE_CLOUDFLARE_ACCOUNT_ID
-  tunnel_id: "your-tunnel-id"             # LABELGATE_CLOUDFLARE_TUNNEL_ID
+  tunnel_id: "your-tunnel-id"             # LABELGATE_CLOUDFLARE_TUNNEL_ID (requires account_id)
 
   # Additional named credentials (config file only, for multi-account)
   # Label reference: labelgate.<type>.<svc>.credential=<name>
+  # Names: lowercase letters, digits, "-" and "_"; "default" is reserved.
   # credentials:
   #   personal:
   #     api_token: "personal-token"
@@ -56,63 +54,77 @@ cloudflare:
   #     zones:
   #       - company.io
 
-  # Additional named tunnels (config file only, beyond default)
+  # Additional named tunnels (config file only, beyond the root tunnel)
   # Label reference: labelgate.tunnel.<svc>.tunnel=<name>
   # tunnels:
   #   secondary:
   #     account_id: "account-id-2"
   #     tunnel_id: "tunnel-id-2"
-  #     credential: "company"   # which named credential to use
+  #     credential: "company"   # which named credential to use (empty = root credential)
 
 # Sync configuration (reconciliation + resource lifecycle)
 sync:
-  interval: 1h                            # LABELGATE_SYNC_INTERVAL
-  remove_delay: 0s                        # LABELGATE_SYNC_REMOVE_DELAY
-  orphan_ttl: 0                           # LABELGATE_SYNC_ORPHAN_TTL
+  interval: 5m                            # LABELGATE_SYNC_INTERVAL (>= 10s) periodic full reconcile
+  remove_delay: 30m                       # LABELGATE_SYNC_REMOVE_DELAY (>= 0) delay before deleting orphaned resources (cleanup=true)
+  orphan_ttl: 0                           # LABELGATE_SYNC_ORPHAN_TTL (>= 0) drop DB rows of orphaned resources with cleanup=false (0 = never)
+  agent_grace: 24h                        # LABELGATE_SYNC_AGENT_GRACE (>= 0) keep an offline agent's resources for this long
 
 # Retry configuration (general retry policy for API calls and reconnection)
 retry:
-  attempts: 3                              # LABELGATE_RETRY_ATTEMPTS
-  delay: 1s                                # LABELGATE_RETRY_DELAY
-  max_delay: 30s                           # LABELGATE_RETRY_MAX_DELAY
-  backoff: 2                               # LABELGATE_RETRY_BACKOFF
+  attempts: 3                             # LABELGATE_RETRY_ATTEMPTS (>= 1)
+  delay: 1s                               # LABELGATE_RETRY_DELAY (> 0)
+  max_delay: 30s                          # LABELGATE_RETRY_MAX_DELAY (>= delay)
+  backoff: 2                              # LABELGATE_RETRY_BACKOFF (>= 1)
 
 # Database configuration
+# (db.retention and db.vacuum_interval were removed in v0.3 and fail validation)
 db:
-  path: /app/config/labelgate.db   # LABELGATE_DB_PATH
-  retention: 168h                         # LABELGATE_DB_RETENTION  (7 days)
-  vacuum_interval: 24h                    # LABELGATE_DB_VACUUM_INTERVAL
+  path: /app/config/labelgate.db          # LABELGATE_DB_PATH
 
-# HTTP API configuration
+# HTTP API and dashboard configuration
+# api.token is REQUIRED: if it is empty, the API and the dashboard are disabled
+# (a loud error is logged; the reconciler keeps running).
 api:
   enabled: true                           # LABELGATE_API_ENABLED
   address: ":8080"                        # LABELGATE_API_ADDRESS
-  base_path: /api                         # LABELGATE_API_BASE_PATH
+  base_path: /api                         # LABELGATE_API_BASE_PATH (starts with "/", no trailing "/")
+  token: "change-me-to-a-long-random-string"   # LABELGATE_API_TOKEN (prefer the environment variable)
 
-# Agent management (for main instance)
+# Agent management (for the main instance)
 agent:
   enabled: false                          # LABELGATE_AGENT_ENABLED
-  listen: ":8081"                         # LABELGATE_AGENT_LISTEN
+  listen: ":8081"                         # LABELGATE_AGENT_LISTEN (agents connect to wss://<host>:8081/ws)
+  # Shared token for agents not listed under "agents". Prefer per-agent tokens.
   # accept_token: ""                      # LABELGATE_AGENT_ACCEPT_TOKEN
+  # Restrict what accept_token agents may claim (empty = unrestricted hostnames / only the default tunnel)
+  # accept_hostnames: ["*.remote.example.com"]   # LABELGATE_AGENT_ACCEPT_HOSTNAMES (comma-separated globs)
+  # accept_tunnels: []                    # LABELGATE_AGENT_ACCEPT_TUNNELS (comma-separated tunnel references)
   # tls:
-  #   cert: /path/to/cert.pem            # LABELGATE_AGENT_TLS_CERT
-  #   key: /path/to/key.pem              # LABELGATE_AGENT_TLS_KEY
-  
-  # Pre-configured agents (config file only)
+  #   cert: /path/to/cert.pem             # LABELGATE_AGENT_TLS_CERT  (server certificate of the agent listener)
+  #   key: /path/to/key.pem               # LABELGATE_AGENT_TLS_KEY
+  #   ca: /path/to/ca.pem                 # LABELGATE_AGENT_TLS_CA    (verifies inbound agents when the main dials them)
+  #   insecure_skip_verify: false         # LABELGATE_AGENT_TLS_INSECURE_SKIP_VERIFY (NOT recommended)
+
+  # Pre-configured agents (config file only). The key is the agent ID: ^[a-z0-9][a-z0-9_-]{0,62}$
   # agents:
   #   remote-host-1:
-  #     token: "agent-token-1"
-  #     default_tunnel: "default"
-  #     connect_to: "ws://remote-host-1:8082/ws"  # for inbound mode
+  #     token: "long-random-agent-token"  # required, one token per agent
+  #     name: "Remote host 1"             # optional display name
+  #     default_tunnel: "default"         # tunnel used when a label omits `tunnel`
+  #     tunnels: ["default"]              # tunnels this agent may target (empty = only its default tunnel)
+  #     hostnames: ["*.remote.example.com"]  # hostnames this agent may claim (empty = unrestricted)
+  #     connect_to: "wss://remote-host-1:8082/ws"  # inbound mode: the main dials the agent
 
 # Agent connection (when mode: agent)
 # connect:
 #   mode: outbound                        # LABELGATE_CONNECT_MODE  (outbound, inbound)
-#   endpoint: wss://main:8081/ws          # LABELGATE_CONNECT_ENDPOINT
-#   # listen: ":8082"                     # LABELGATE_CONNECT_LISTEN  (for inbound mode)
-#   token: "agent-token"                  # LABELGATE_CONNECT_TOKEN
-#   agent_id: ""                          # LABELGATE_CONNECT_AGENT_ID  (auto from /etc/machine-id)
-#   heartbeat_interval: 30s              # LABELGATE_CONNECT_HEARTBEAT_INTERVAL
-#   # tls:
-#   #   cert: /path/to/cert.pem          # LABELGATE_CONNECT_TLS_CERT
-#   #   key: /path/to/key.pem            # LABELGATE_CONNECT_TLS_KEY
+#   endpoint: wss://main.example.com:8081/ws   # LABELGATE_CONNECT_ENDPOINT (outbound; the /ws path is required)
+#   # listen: ":8082"                     # LABELGATE_CONNECT_LISTEN  (inbound)
+#   token: "long-random-agent-token"      # LABELGATE_CONNECT_TOKEN   (required)
+#   agent_id: ""                          # LABELGATE_CONNECT_AGENT_ID (default: first 12 hex chars of /etc/machine-id, else sanitized hostname)
+#   heartbeat_interval: 30s               # LABELGATE_CONNECT_HEARTBEAT_INTERVAL (>= 1s)
+#   tls:
+#     ca: /path/to/ca.pem                 # LABELGATE_CONNECT_TLS_CA    (verifies the main when dialing it; default: system roots)
+#     cert: /path/to/cert.pem             # LABELGATE_CONNECT_TLS_CERT  (server certificate of the inbound listener)
+#     key: /path/to/key.pem               # LABELGATE_CONNECT_TLS_KEY
+#     insecure_skip_verify: false         # LABELGATE_CONNECT_TLS_INSECURE_SKIP_VERIFY (NOT recommended)

@@ -4,6 +4,8 @@
   "pages": [
     "index",
     "getting-started",
+    "upgrading",
+    "ownership",
     "---配置---",
     "...configuration",
     "---Label 参考---",

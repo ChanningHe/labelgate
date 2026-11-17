@@ -3,6 +3,10 @@ title: 单主机部署
 description: 单主机部署的 Docker Compose 示例。
 ---
 
+<Callout type="info">
+所有示例都传入了 `LABELGATE_API_TOKEN`，它用于启用 dashboard 和 API，没有它这两者都会被禁用。这里没有发布任何端口；如需在本机访问 dashboard，请添加 `ports: ["127.0.0.1:8080:8080"]`。
+</Callout>
+
 ## 仅 DNS 配置
 
 最简单的配置 - Labelgate 仅管理 DNS 记录，无需隧道。
@@ -10,13 +14,14 @@ description: 单主机部署的 Docker Compose 示例。
 ```yaml
 services:
   labelgate:
-    image: labelgate:latest
+    image: ghcr.io/channinghe/labelgate:v0.3
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - labelgate-data:/app/config
     environment:
       - LABELGATE_CLOUDFLARE_API_TOKEN
+      - LABELGATE_API_TOKEN
 
   # Web server with auto DNS
   nginx:
@@ -38,13 +43,14 @@ volumes:
 ```yaml
 services:
   labelgate:
-    image: labelgate:latest
+    image: ghcr.io/channinghe/labelgate:v0.3
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - labelgate-data:/app/config
     environment:
       - LABELGATE_CLOUDFLARE_API_TOKEN
+      - LABELGATE_API_TOKEN
       - LABELGATE_CLOUDFLARE_ACCOUNT_ID
       - LABELGATE_CLOUDFLARE_TUNNEL_ID
 
@@ -82,13 +88,14 @@ volumes:
 ```yaml
 services:
   labelgate:
-    image: labelgate:latest
+    image: ghcr.io/channinghe/labelgate:v0.3
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - labelgate-data:/app/config
     environment:
       - LABELGATE_CLOUDFLARE_API_TOKEN
+      - LABELGATE_API_TOKEN
       - LABELGATE_CLOUDFLARE_ACCOUNT_ID
       - LABELGATE_CLOUDFLARE_TUNNEL_ID
 
@@ -120,13 +127,14 @@ volumes:
 ```yaml
 services:
   labelgate:
-    image: labelgate:latest
+    image: ghcr.io/channinghe/labelgate:v0.3
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - labelgate-data:/app/config
     environment:
       - LABELGATE_CLOUDFLARE_API_TOKEN
+      - LABELGATE_API_TOKEN
       - LABELGATE_CLOUDFLARE_ACCOUNT_ID
       - LABELGATE_CLOUDFLARE_TUNNEL_ID
 
@@ -161,18 +169,19 @@ volumes:
 
 ## PR 预览环境
 
-自动预览部署，容器停止时自动清理。
+自动预览部署。`cleanup` 默认为 `true`，所以容器停止 `sync.remove_delay`（默认 30 分钟）之后，tunnel 规则及其 CNAME 会被移除。如果希望预览环境更快消失，可以调低延迟（例如 `LABELGATE_SYNC_REMOVE_DELAY=5m`）。
 
 ```yaml
 services:
   labelgate:
-    image: labelgate:latest
+    image: ghcr.io/channinghe/labelgate:v0.3
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - labelgate-data:/app/config
     environment:
       - LABELGATE_CLOUDFLARE_API_TOKEN
+      - LABELGATE_API_TOKEN
       - LABELGATE_CLOUDFLARE_ACCOUNT_ID
       - LABELGATE_CLOUDFLARE_TUNNEL_ID
 
@@ -186,6 +195,7 @@ services:
     labels:
       labelgate.tunnel.preview.hostname: "pr-${PR_NUMBER:-0}.preview.example.com"
       labelgate.tunnel.preview.service: "http://preview:3000"
+      # cleanup 默认就是 "true"，也可以显式写出
       labelgate.tunnel.preview.cleanup: "true"
 
 volumes:

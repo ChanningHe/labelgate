@@ -1,25 +1,23 @@
-# Labelgate Example Configuration (TOML)
+# Labelgate Example Configuration (TOML) - v0.3
 # Copy this file to labelgate.toml and customize as needed.
 # All values can be overridden by environment variables with LABELGATE_ prefix.
-# Naming rule: TOML path a.b.c -> ENV LABELGATE_A_B_C
+# Naming rule: TOML path a.b.c -> ENV LABELGATE_A_B_C (lists: comma-separated).
+# Unknown keys are errors. Values shown are the defaults unless marked "required".
 
 # Core configuration
 label_prefix = "labelgate"
 log_level = "info"                # debug, info, warn, error
-log_format = "text"               # json, text
+log_format = "text"               # text, json
 mode = "main"                     # main, agent
-default_tunnel = "default"
+# default_tunnel = ""             # "" or "default" = cloudflare.tunnel_id, else a key of cloudflare.tunnels
+# instance_id = ""                # override the persisted instance ID (only for recovery after DB loss)
+# skip_credential_validation = false
 
-# Docker Provider configuration
+# Docker Provider configuration (unix:// and tcp:// only; ssh:// was removed in v0.3)
 [docker]
 endpoint = "unix:///var/run/docker.sock"
 poll_interval = "2m"
 # filter_label = "labelgate.enable=true"
-
-# [docker.ssh]
-# key = "/path/to/id_rsa"
-# key_passphrase = ""
-# known_hosts = "/path/to/known_hosts"
 
 # [docker.tls]
 # ca = "/path/to/ca.pem"
@@ -28,16 +26,16 @@ poll_interval = "2m"
 
 # Cloudflare configuration
 [cloudflare]
-api_token = "your-api-token-here"
+api_token = "your-api-token-here"   # required
 account_id = "your-account-id"
-tunnel_id = "your-tunnel-id"
+tunnel_id = "your-tunnel-id"        # requires account_id
 
 # Additional named credentials (for multi-account)
 # [cloudflare.credentials.personal]
 # api_token = "personal-token"
 # zones = ["example.com", "*.example.com"]
 
-# Additional named tunnels (beyond default)
+# Additional named tunnels (beyond the root tunnel)
 # [cloudflare.tunnels.secondary]
 # account_id = "account-id-2"
 # tunnel_id = "tunnel-id-2"
@@ -45,9 +43,10 @@ tunnel_id = "your-tunnel-id"
 
 # Sync configuration (reconciliation + resource lifecycle)
 [sync]
-interval = "1h"
-remove_delay = "0s"
-orphan_ttl = "0s"
+interval = "5m"            # >= 10s
+remove_delay = "30m"       # delay before deleting orphaned resources (cleanup=true)
+orphan_ttl = "0s"          # 0 = never drop DB rows of orphaned resources with cleanup=false
+agent_grace = "24h"        # keep an offline agent's resources for this long
 
 # Retry configuration (general retry policy for API calls and reconnection)
 [retry]
@@ -57,37 +56,52 @@ max_delay = "30s"
 backoff = 2.0
 
 # Database configuration
+# (db.retention and db.vacuum_interval were removed in v0.3 and fail validation)
 [db]
 path = "/app/config/labelgate.db"
-retention = "168h"                # 7 days
-vacuum_interval = "24h"
 
-# HTTP API configuration
+# HTTP API and dashboard configuration
+# token is REQUIRED: if it is empty, the API and the dashboard are disabled.
 [api]
 enabled = true
 address = ":8080"
 base_path = "/api"
+token = "change-me-to-a-long-random-string"   # prefer LABELGATE_API_TOKEN
 
-# Agent management (for main instance)
+# Agent management (for the main instance)
 [agent]
 enabled = false
-listen = ":8081"
-# accept_token = ""
+listen = ":8081"           # agents connect to wss://<host>:8081/ws
+# accept_token = ""        # shared token; prefer per-agent tokens
+# accept_hostnames = ["*.remote.example.com"]
+# accept_tunnels = []
 
 # [agent.tls]
-# cert = "/path/to/cert.pem"
+# cert = "/path/to/cert.pem"   # server certificate of the agent listener
 # key = "/path/to/key.pem"
+# ca = "/path/to/ca.pem"       # verifies inbound agents when the main dials them
+# insecure_skip_verify = false # NOT recommended
 
-# Pre-configured agents
+# Pre-configured agents. The key is the agent ID: ^[a-z0-9][a-z0-9_-]{0,62}$
 # [agent.agents.remote-host-1]
-# token = "agent-token-1"
+# token = "long-random-agent-token"
+# name = "Remote host 1"
 # default_tunnel = "default"
-# connect_to = "ws://remote-host-1:8082/ws"
+# tunnels = ["default"]
+# hostnames = ["*.remote.example.com"]
+# connect_to = "wss://remote-host-1:8082/ws"   # inbound mode
 
 # Agent connection (when mode = "agent")
 # [connect]
-# mode = "outbound"              # outbound, inbound
-# endpoint = "wss://main:8081/ws"
-# token = "agent-token"
-# agent_id = ""                  # auto from /etc/machine-id
+# mode = "outbound"                              # outbound, inbound
+# endpoint = "wss://main.example.com:8081/ws"    # outbound; the /ws path is required
+# listen = ":8082"                               # inbound
+# token = "long-random-agent-token"              # required
+# agent_id = ""                                  # default: first 12 hex chars of /etc/machine-id
 # heartbeat_interval = "30s"
+
+# [connect.tls]
+# ca = "/path/to/ca.pem"       # verifies the main when dialing it (default: system roots)
+# cert = "/path/to/cert.pem"   # server certificate of the inbound listener
+# key = "/path/to/key.pem"
+# insecure_skip_verify = false # NOT recommended
