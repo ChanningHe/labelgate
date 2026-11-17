@@ -1,10 +1,8 @@
 {
-  "_comment": "Labelgate Example Configuration (JSON). Copy to labelgate.json and customize.",
   "label_prefix": "labelgate",
   "log_level": "info",
   "log_format": "text",
   "mode": "main",
-  "default_tunnel": "default",
 
   "docker": {
     "endpoint": "unix:///var/run/docker.sock",
@@ -18,9 +16,10 @@
   },
 
   "sync": {
-    "interval": "1h",
-    "remove_delay": "0s",
-    "orphan_ttl": "0s"
+    "interval": "5m",
+    "remove_delay": "30m",
+    "orphan_ttl": "0s",
+    "agent_grace": "24h"
   },
 
   "retry": {
@@ -31,15 +30,14 @@
   },
 
   "db": {
-    "path": "/app/config/labelgate.db",
-    "retention": "168h",
-    "vacuum_interval": "24h"
+    "path": "/app/config/labelgate.db"
   },
 
   "api": {
     "enabled": true,
     "address": ":8080",
-    "base_path": "/api"
+    "base_path": "/api",
+    "token": "change-me-to-a-long-random-string"
   },
 
   "agent": {
