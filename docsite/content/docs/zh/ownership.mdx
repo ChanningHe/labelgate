@@ -83,7 +83,7 @@ Cloudflare 把 tunnel 的 ingress 存成一份整体配置文档，所以 Labelg
 4. 其余一切保持原样：你手工创建的规则、catch-all 规则、全局 `originRequest`、`warp-routing`，以及 Labelgate 没有建模的规则级字段（例如 Access 校验设置）。
 5. 只有内容确实发生变化时才写回。
 
-结果中的顺序：Labelgate 的精确主机名规则在最前（同一主机名下，更具体的 path 在前），然后是你的非托管规则，再然后是 Labelgate 的通配符规则，最后是 catch-all。如果 tunnel 没有 catch-all 规则，会补上一条 `http_status:404`。
+结果中的顺序：Labelgate 的精确主机名规则在最前（同一主机名下，更具体的 path 在前），然后是你的非托管规则，再然后是 Labelgate 的通配符规则，最后是 catch-all。如果 tunnel 没有 catch-all 规则，会补上一条 `http_status:404`。如果同一主机名同时存在 Labelgate 规则和非托管规则（属于冲突，见下文），该主机名的规则会在各自位置之间重新排序，带 path 的规则排在不带 path 的规则之前，不带 path 的规则不会遮蔽同一主机名下的 path 规则。
 
 如果 Labelgate 想写入的规则与你的某条非托管规则主机名相同，该服务会报 `conflict: existing record not owned by labelgate`，而你的非托管规则保持不变。Labelgate 已经写入的规则会原样留在配置中（流量不会中断），所有受影响的资源都会报告该冲突，直到你删除两条规则之一。
 

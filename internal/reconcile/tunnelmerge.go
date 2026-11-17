@@ -59,7 +59,9 @@ func mergeIngress(live cloudflare.TunnelConfig, owned map[ingressID]bool, keep [
 		return mergeResult{Config: live, Conflicts: conflicts}
 	}
 	var exact, wild []cloudflare.IngressRule
+	placedHosts := map[string]bool{}
 	for _, p := range placed {
+		placedHosts[p.keep.Host] = true
 		if isWildcard(p.keep.Host) {
 			wild = append(wild, p.rule)
 		} else {
@@ -67,9 +69,35 @@ func mergeIngress(live cloudflare.TunnelConfig, owned map[ingressID]bool, keep [
 		}
 	}
 	ingress := make([]cloudflare.IngressRule, 0, len(exact)+len(unmanaged)+len(wild)+1)
-	ingress = append(append(append(append(ingress, exact...), unmanaged...), wild...), catchAll)
+	ingress = append(append(append(ingress, exact...), unmanaged...), wild...)
+	ingress = append(orderSharedHosts(ingress, placedHosts, unmanagedHosts), catchAll)
 	cfg := cloudflare.TunnelConfig{Ingress: ingress, Extra: copyExtra(live.Extra)}
 	return mergeResult{Config: cfg, Conflicts: conflicts, Changed: canonicalJSON(cfg) != canonicalJSON(live)}
+}
+
+// orderSharedHosts reorders the rules of every hostname used by both owned
+// and unmanaged rules so that rules with a path precede pathless ones (a
+// pathless rule would shadow them); the order is stable otherwise and every
+// other rule keeps its position.
+func orderSharedHosts(rules []cloudflare.IngressRule, owned, unmanaged map[string]bool) []cloudflare.IngressRule {
+	slots := map[string][]int{}
+	for i, r := range rules {
+		if h := r.Hostname(); owned[h] && unmanaged[h] {
+			slots[h] = append(slots[h], i)
+		}
+	}
+	out := append([]cloudflare.IngressRule(nil), rules...)
+	for _, idx := range slots {
+		group := make([]cloudflare.IngressRule, len(idx))
+		for n, i := range idx {
+			group[n] = rules[i]
+		}
+		sort.SliceStable(group, func(a, b int) bool { return group[a].Path() != "" && group[b].Path() == "" })
+		for n, i := range idx {
+			out[i] = group[n]
+		}
+	}
+	return out
 }
 
 // placedRule is one owned rule of the merged configuration.

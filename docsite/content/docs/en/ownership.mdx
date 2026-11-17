@@ -83,7 +83,7 @@ Cloudflare stores a tunnel's ingress as a single configuration document, so Labe
 4. Keep everything else untouched: your manually created rules, the catch-all rule, the global `originRequest`, `warp-routing`, and any per-rule field Labelgate does not model (for example Access validation settings).
 5. Write the document back only if it actually changed.
 
-Ordering in the result: Labelgate's exact-hostname rules first (more specific paths before less specific ones), then your unmanaged rules, then Labelgate's wildcard rules, then the catch-all. If the tunnel has no catch-all rule, a `http_status:404` one is added.
+Ordering in the result: Labelgate's exact-hostname rules first (more specific paths before less specific ones), then your unmanaged rules, then Labelgate's wildcard rules, then the catch-all. If the tunnel has no catch-all rule, a `http_status:404` one is added. If one hostname has both a Labelgate rule and unmanaged rules (a conflict, see below), the rules of that hostname are reordered among their positions so that rules with a path come before rules without one; a pathless rule never shadows a path rule of the same hostname.
 
 If a rule Labelgate wants has the same hostname as one of your unmanaged rules, that service gets the `conflict: existing record not owned by labelgate` error and the unmanaged rule is left alone. A rule Labelgate already had in place stays unchanged in the configuration (so traffic keeps flowing), and every resource affected reports the conflict until you remove one of the two rules.
 
