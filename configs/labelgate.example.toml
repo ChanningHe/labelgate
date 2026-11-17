@@ -47,7 +47,7 @@ tunnel_id = "your-tunnel-id"        # requires account_id
 interval = "5m"            # >= 10s
 remove_delay = "30m"       # delay before deleting orphaned resources (cleanup=true)
 orphan_ttl = "0s"          # 0 = never drop DB rows of orphaned resources with cleanup=false
-agent_grace = "24h"        # keep an offline agent's resources for this long
+agent_grace = "24h"        # keep an offline agent's resources for this long (>= 5m)
 
 # Retry configuration (general retry policy for API calls and reconnection)
 [retry]
@@ -74,9 +74,10 @@ token = "change-me-to-a-long-random-string"   # prefer LABELGATE_API_TOKEN
 [agent]
 enabled = false
 listen = ":8081"           # agents connect to wss://<host>:8081/ws
-# accept_token = ""        # shared token, >= 32 characters; prefer per-agent tokens
+# accept_token = ""        # shared token, >= 32 characters, >= 12 distinct; prefer per-agent tokens
 # accept_hostnames = ["*.remote.example.com"]
 # accept_tunnels = []
+# accept_services = ["web", "172.20.0.0/16"]   # tunnel origins beyond IP literals
 
 # [agent.tls]
 # cert = "/path/to/cert.pem"   # server certificate of the agent listener
@@ -84,13 +85,14 @@ listen = ":8081"           # agents connect to wss://<host>:8081/ws
 # ca = "/path/to/ca.pem"       # verifies inbound agents when the main dials them
 # insecure_skip_verify = false # NOT recommended
 
-# Pre-configured agents (tokens >= 32 characters: openssl rand -hex 32). The key is the agent ID: ^[a-z0-9][a-z0-9._-]{0,62}$
+# Pre-configured agents (tokens >= 32 characters, >= 12 distinct: openssl rand -hex 32). The key is the agent ID: ^[a-z0-9][a-z0-9._-]{0,62}$
 # [agent.agents.remote-host-1]
 # token = "replace-with-openssl-rand-hex-32"
 # name = "Remote host 1"
 # default_tunnel = "default"
 # tunnels = ["default"]
 # hostnames = ["*.remote.example.com"]
+# services = ["web", "172.20.0.0/16"]        # tunnel origins beyond IP literals
 # connect_to = "wss://remote-host-1:8082/ws"   # inbound mode
 
 # Agent connection (when mode = "agent")

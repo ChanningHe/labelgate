@@ -42,6 +42,7 @@
 
   "agent": {
     "enabled": false,
-    "listen": ":8081"
+    "listen": ":8081",
+    "accept_services": []
   }
 }

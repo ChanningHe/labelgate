@@ -56,7 +56,9 @@ token 本身**永远不会在网络上传输**，所以即使有人连上 inboun
 
 如果已经有相同 ID 的 agent 在线，新的连接会在认证之后被拒绝（`duplicate_agent`），已有的会话不受影响。Agent ID 必须匹配 `^[a-z0-9][a-z0-9._-]{0,62}$`（小写，允许包含点）。如果没有设置 `connect.agent_id`，则取 `/etc/machine-id` 的前 12 位十六进制字符，再退而取转为小写并清洗后的主机名。
 
-token 必须至少 32 个字符（`openssl rand -hex 32`）。token 不会在网络上传输，但截获的握手可以被离线攻击，弱 token 是可以被猜出来的；高熵才是它的保护。
+token 必须至少 32 个字符，并且至少包含 12 个不同的字符（`openssl rand -hex 32` 生成的即符合要求）；重复或有规律的占位值无法通过校验。token 不会在网络上传输，但截获的握手可以被离线攻击，弱 token 是可以被猜出来的；高熵才是它的保护。
+
+认证之前，每个监听端口最多接受 64 个待认证连接，其中来自同一远端地址（一个 IPv4 地址或一个 IPv6 /64）的最多 4 个。请求头和握手各自必须在 5 秒内完成。
 
 ## 命名 agent 与共享 token agent
 
@@ -93,28 +95,42 @@ agent:
 
 | 设置 | 作用对象 | 效果 |
 |------|----------|------|
-| `agent.agents.<id>.hostnames` | 单个命名 agent | 该 agent 可声明的主机名 glob 列表。为空表示不限制 |
+| `agent.agents.<id>.hostnames` | 单个命名 agent | 该 agent 可声明的主机名 glob 列表。为空表示不限制（通配符主机名除外，见下文） |
 | `agent.agents.<id>.tunnels` | 单个命名 agent | 该 agent 可使用的 tunnel。为空表示只能用它的默认 tunnel |
 | `agent.agents.<id>.default_tunnel` | 单个命名 agent | 其标签省略 `tunnel` 时使用的 tunnel |
+| `agent.agents.<id>.services` | 单个命名 agent | 除 IP 字面量之外允许的 tunnel 源站：主机名 glob、IP 地址、CIDR。为空表示只允许 IP 字面量（见 [SSRF 防护](#ssrf-guard)） |
 | `agent.accept_hostnames` | 所有 `accept_token` agent | 与 `hostnames` 相同 |
 | `agent.accept_tunnels` | 所有 `accept_token` agent | 与 `tunnels` 相同。为空表示只能用全局默认 tunnel |
+| `agent.accept_services` | 所有 `accept_token` agent | 与 `services` 相同 |
 
 tunnel 通过 `default`（根 tunnel）、`cloudflare.tunnels` 中的键或 tunnel ID 引用；引用未知的 tunnel 会使配置无效。省略 `tunnel` 的标签会解析为该 agent 的默认 tunnel（`accept_token` agent 则是全局默认 tunnel），而这个 tunnel 必须在允许列表中，所以如果 `accept_tunnels` 不包含全局默认 tunnel，没有显式写 `tunnel` 的 tunnel 标签会被拒绝。
 
 glob 使用 `path.Match` 语法，作用于小写主机名（`*.example.com`）。注意 `*` 也能匹配点号：`*.example.com` 会匹配 `a.b.example.com`，但不匹配 `example.com` 本身。违反允许列表的声明会被拒绝并附带原因，在 dashboard 和 API 中可见，并且不会到达 Cloudflare。
 
+**通配符主机名**（主机名本身就是 `*.example.com`）只有在 agent 的列表中恰好包含这一项时才被允许。`*`、`*.com` 这类 glob 永远不会匹配通配符主机名，空（不限制）的列表也永远不允许。
+
+**Agent 不能把 CNAME 指向 tunnel。** agent 的 `CNAME` 类型 DNS 标签如果目标在 `cfargotunnel.com` 之下，会被拒绝：这样的记录会绕过 tunnel 允许列表，把主机名路由进某个 tunnel。请改用 tunnel 标签。
+
 对 agent 的服务做 tunnel 解析的顺序：标签中的 `tunnel` > agent 的 `default_tunnel` > 全局默认 tunnel，且结果**必须在该 agent 允许的 tunnel 之内**。
 
 ### SSRF 防护 [#ssrf-guard]
 
-由 agent 定义的 tunnel 服务可以让 cloudflared 访问任意地址，所以来自 agent 的 tunnel 服务会被检查。以下目标会被拒绝：
+由 agent 定义的 tunnel 服务可以让 cloudflared 访问任意地址，所以来自 agent 的 tunnel 服务会被检查。只接受 `http`、`https`、`tcp`、`ssh` 和 `rdp` 服务（以及 `hello_world` 和 `http_status:<code>`）；`unix:` / `unix+tls:` socket、`bastion` 和其他 scheme 都会被拒绝。源站主机必须是以下之一：
 
-- `localhost` 或 `*.localhost`，
-- 回环地址、链路本地地址（`169.254.0.0/16`、`fe80::/10`）、未指定地址（`0.0.0.0`、`::`）或组播地址的 IP 字面量，
-- `unix:` / `unix+tls:` socket，
-- `bastion` 服务。
+- **IP 字面量**，规范写法，且不是回环、未指定（`0.0.0.0/8`、`::`）、链路本地（`169.254.0.0/16`、`fe80::/10`）、组播、广播、IPv6 站点本地（`fec0::/10`）、带 zone 的地址，也不是这些地址的 IPv4 映射、IPv4 兼容或 NAT64（`64:ff9b::/96`）形式。局域网私有地址（`10.0.0.0/8`、`192.168.0.0/16` 等）是允许的。`127.1`、`2130706433`、`0x7f000001`、`0177.0.0.1` 这类 IPv4 简写形式一律拒绝；
+- **agent 的 `services` 允许列表中的条目**（`accept_token` agent 使用 `agent.accept_services`）：主机名 glob（`web`、`*.svc.internal`）、IP 地址或 CIDR（`172.20.0.0/16`）。允许列表中的条目即使是本地地址也会被接受。
 
-只检查 IP 字面量和 `localhost` 名称：不会解析主机名，局域网私有地址（`10.0.0.0/8`、`192.168.0.0/16` 等）是允许的。`hello_world` 和 `http_status:<code>` 始终允许。
+主机名除非在允许列表中，否则会被拒绝，因为解析它的是 agent 主机：`127.0.0.1.nip.io`、`host.docker.internal` 或 `metadata.google.internal` 否则就能访问到 agent 主机本身或云元数据服务。要使用 `http://web:80` 这样的 Compose 服务名，请把 `web` 加入该 agent 的 `services`：
+
+```yaml
+agent:
+  agents:
+    host1:
+      token: "<output of: openssl rand -hex 32>"
+      hostnames: ["*.host1.example.com"]
+      services: ["web", "api", "172.20.0.0/16"]
+```
+
 本地容器（main 主机自己的标签）是受信任的，不受此防护限制。
 
 ### Agent 无法修改本地的 Access 策略
@@ -123,7 +139,7 @@ Access 策略定义只在**声明者所在的来源**内解析：agent 只能引
 
 ## Agent 宽限期 [#agent-grace]
 
-Agent 的资源与 `last_seen` 绑定，而 `last_seen` 由 **main 实例**在接受上报时用它自己的时钟记录。单纯的断线不会让任何东西变成孤立：只要 `last_seen` 在 `sync.agent_grace`（默认 **24h**）之内，该 agent 最近上报的容器就仍然被视为期望状态。每个 agent 的最新状态都存放在数据库里，所以重启 main 实例同样不会使 agent 的资源变成孤立。
+Agent 的资源与 `last_seen` 绑定，而 `last_seen` 由 **main 实例**在接受上报时用它自己的时钟记录。单纯的断线不会让任何东西变成孤立：只要 `last_seen` 在 `sync.agent_grace`（默认 **24h**，至少 **5m**）之内，该 agent 最近上报的容器就仍然被视为期望状态。处于连接状态的 agent 即使最近一次上报早于宽限期，也视为在线。每个 agent 的最新状态都存放在数据库里，所以重启 main 实例同样不会使 agent 的资源变成孤立。
 
 宽限期结束后，agent 的资源变为孤立状态，如果它们的 `cleanup` 是 `true`（默认），会在 `sync.remove_delay` 之后被删除。在 dashboard 中，agent 的状态是 `active`（已连接）、`disconnected`（宽限期内）或 `removed`。如果某个 agent 报告它的 Docker 守护进程不可达，它最后一份有效快照会被保留，资源保持被持有状态。
 
@@ -264,7 +280,7 @@ services:
 ## 要点
 
 - **Agent 很轻量**：它们只收集容器标签并上报给 main 实例。所有 Cloudflare API 调用都发生在 main 实例上。
-- **冲突**：会检测跨主机的主机名冲突。**先到者胜出**，与它在哪台主机上无关；后来者会被拒绝并给出可见的错误。参见[所有权与冲突](/zh/docs/ownership#conflicts-between-claims)。
+- **冲突**：一个主机名只属于**一个来源**（main 主机或某一个 agent）。其他来源对该主机名的声明都会被拒绝，无论记录类型、路径或 tunnel 是什么；只要该来源在这个主机名上还有资源（包括容器重启期间），主机名就一直归它所有。参见[所有权与冲突](/zh/docs/ownership#conflicts-between-claims)。
 - **Tunnel 分配**：容器标签 > agent 的 `default_tunnel` > 全局默认 tunnel，并且限制在 agent 被允许的 tunnel 范围内。
 - **重连**：连接断开时，agent 会以指数退避自动重连，期间资源会被保留 `sync.agent_grace` 的时长。
 - **升级**：v0.2 的 agent 无法与 v0.3 的 main 实例通信，请一起升级，参见[升级到 v0.3](/zh/docs/upgrading#agents)。

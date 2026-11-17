@@ -86,7 +86,7 @@ Labelgate 只会删除**它自己拥有**的 Cloudflare 资源（参见[所有�
 | `LABELGATE_SYNC_INTERVAL` | `sync.interval` | `5m` | 周期性完整协调（与 Docker 事件、agent 上报并行触发），最小 `10s` |
 | `LABELGATE_SYNC_REMOVE_DELAY` | `sync.remove_delay` | `30m` | `cleanup=true` 的孤立资源被删除前的延迟。`0s` 表示资源变为孤立的那个周期就立即删除。必须 >= 0 |
 | `LABELGATE_SYNC_ORPHAN_TTL` | `sync.orphan_ttl` | `0` | `cleanup=false` 的孤立资源，超过此时间后仅删除数据库记录（绝不动 Cloudflare 对象）。`0s` 表示永不。必须 >= 0 |
-| `LABELGATE_SYNC_AGENT_GRACE` | `sync.agent_grace` | `24h` | agent 最后一次被看到之后，其最近上报的容器继续保持“期望”状态的时长。必须 >= 0。参见[多主机](/zh/docs/examples/multi-host#agent-grace) |
+| `LABELGATE_SYNC_AGENT_GRACE` | `sync.agent_grace` | `24h` | agent 最后一次被看到之后，其最近上报的容器继续保持“期望”状态的时长。必须 >= `5m`；处于连接状态的 agent 始终视为在线。参见[多主机](/zh/docs/examples/multi-host#agent-grace) |
 
 <Callout type="warn">
 `remove_delay` 为 `0` 表示“资源一旦不再被期望就立即删除”。不要照搬旧版示例文件里的 `0s`，除非有明确理由，否则请保持 `30m` 的默认值。
@@ -157,9 +157,10 @@ Labelgate 只会删除**它自己拥有**的 Cloudflare 资源（参见[所有�
 |----------|--------------|--------|------|
 | `LABELGATE_AGENT_ENABLED` | `agent.enabled` | `false` | 启动 agent WebSocket 监听，并拨号 inbound agent |
 | `LABELGATE_AGENT_LISTEN` | `agent.listen` | `:8081` | 监听地址。Agent 连接到 `<scheme>://<host>:8081/ws`；`GET /health` 无需认证，返回 `{"status":"ok"}` |
-| `LABELGATE_AGENT_ACCEPT_TOKEN` | `agent.accept_token` | - | 接受**未**在 `agent.agents` 中列出的 agent 所用的共享 token。设置后至少 32 个字符 |
-| `LABELGATE_AGENT_ACCEPT_HOSTNAMES` | `agent.accept_hostnames` | - | 限制 `accept_token` agent 可声明的主机名（glob 列表，参见[允许列表](/zh/docs/examples/multi-host#allow-lists)）。为空表示不限制 |
+| `LABELGATE_AGENT_ACCEPT_TOKEN` | `agent.accept_token` | - | 接受**未**在 `agent.agents` 中列出的 agent 所用的共享 token。设置后必须符合 [token 规则](#agent-tokens) |
+| `LABELGATE_AGENT_ACCEPT_HOSTNAMES` | `agent.accept_hostnames` | - | 限制 `accept_token` agent 可声明的主机名（glob 列表，参见[允许列表](/zh/docs/examples/multi-host#allow-lists)）。为空表示不限制，但通配符主机名需要完全相同的条目 |
 | `LABELGATE_AGENT_ACCEPT_TUNNELS` | `agent.accept_tunnels` | - | `accept_token` agent 可使用的 tunnel：`default`、`cloudflare.tunnels` 中的键或 tunnel ID。为空表示只能用默认 tunnel |
+| `LABELGATE_AGENT_ACCEPT_SERVICES` | `agent.accept_services` | - | 除 IP 字面量外，`accept_token` agent 可使用的 tunnel 源站：主机名 glob、IP 地址或 CIDR（参见 [SSRF 防护](/zh/docs/examples/multi-host#ssrf-guard)）。为空表示只允许 IP 字面量 |
 | `LABELGATE_AGENT_TLS_CERT` | `agent.tls.cert` | - | agent 监听端的服务端证书（启用 `wss://`） |
 | `LABELGATE_AGENT_TLS_KEY` | `agent.tls.key` | - | 服务端密钥（必须与 `cert` 同时设置） |
 | `LABELGATE_AGENT_TLS_CA` | `agent.tls.ca` | 系统根证书 | main 拨号 inbound agent 时用来校验对端的 CA |
@@ -175,16 +176,17 @@ map 的键就是 agent ID，必须匹配 `^[a-z0-9][a-z0-9._-]{0,62}$`（小写�
 
 | 键 | 必填 | 说明 |
 |----|------|------|
-| `token` | 是 | 该 agent 专属的共享密钥，至少 32 个字符（见 [Agent token](#agent-tokens)） |
+| `token` | 是 | 该 agent 专属的共享密钥（见 [Agent token](#agent-tokens)） |
 | `name` | 否 | 在 dashboard 中显示的名称 |
 | `default_tunnel` | 否 | 该 agent 的标签省略 `tunnel` 时使用的 tunnel。为空表示全局默认 |
 | `tunnels` | 否 | 该 agent 可使用的 tunnel。为空表示只能用它的默认 tunnel |
-| `hostnames` | 否 | 该 agent 可声明的主机名 glob 列表。为空表示不限制 |
+| `hostnames` | 否 | 该 agent 可声明的主机名 glob 列表。为空表示不限制，但通配符主机名（`*.x`）需要完全相同的条目 |
+| `services` | 否 | 除 IP 字面量外，该 agent 可使用的 tunnel 源站：主机名 glob（`web`、`*.svc.internal`）、IP 地址或 CIDR。为空表示只允许 IP 字面量（参见 [SSRF 防护](/zh/docs/examples/multi-host#ssrf-guard)） |
 | `connect_to` | 否 | `ws://` 或 `wss://` 地址，需包含 `/ws`。为该 agent 启用 [inbound 模式](/zh/docs/examples/multi-host#inbound-mode-example) |
 
 ### Agent token [#agent-tokens]
 
-所有 agent token（`agent.agents.<id>.token`、`agent.accept_token` 和 `connect.token`）都必须**至少 32 个字符**，`api.token` 至少 16 个字符，否则 Labelgate 会拒绝启动。token 本身不会在网络上传输，但任何截获握手的人都可以离线地对它进行猜测，因此 token 必须具有足够高的熵。可以这样生成：
+所有 agent token（`agent.agents.<id>.token`、`agent.accept_token` 和 `connect.token`）都必须**至少 32 个字符**，且**至少包含 12 个不同的字符**；`api.token` 至少 16 个字符。否则 Labelgate 会拒绝启动。token 本身不会在网络上传输，但任何截获握手的人都可以离线地对它进行猜测，因此 token 必须具有足够高的熵。可以这样生成：
 
 ```bash
 openssl rand -hex 32
@@ -197,7 +199,7 @@ openssl rand -hex 32
 | `LABELGATE_CONNECT_MODE` | `connect.mode` | `outbound` | `outbound`（agent 连接 main）或 `inbound`（main 连接 agent） |
 | `LABELGATE_CONNECT_ENDPOINT` | `connect.endpoint` | - | Main 实例地址，例如 `wss://main.example.com:8081/ws`。outbound 必填，必须是 `ws://` 或 `wss://` 地址。**必须包含路径**：没有路径的地址（如 `wss://main:8081`）会在校验时被拒绝，并提示补上 `/ws` |
 | `LABELGATE_CONNECT_LISTEN` | `connect.listen` | - | 监听地址（`[host]:port`）。inbound 必填。提供 `/ws` 和无需认证的 `/health` |
-| `LABELGATE_CONNECT_TOKEN` | `connect.token` | - | 认证 token，至少 32 个字符 **（必填）** |
+| `LABELGATE_CONNECT_TOKEN` | `connect.token` | - | 认证 token，规则见 [Agent token](#agent-tokens) **（必填）** |
 | `LABELGATE_CONNECT_AGENT_ID` | `connect.agent_id` | `/etc/machine-id` 的前 12 位十六进制字符，否则取转为小写并清洗后的 hostname | Agent 标识，`^[a-z0-9][a-z0-9._-]{0,62}$`。允许包含点，不允许大写，显式设置的值不会被改写。默认值取 `/etc/machine-id` 的前 12 个字符（要求是十六进制），否则取 hostname，非法字符替换为 `-` 并截断到 63 个字符 |
 | `LABELGATE_CONNECT_HEARTBEAT_INTERVAL` | `connect.heartbeat_interval` | `30s` | 完整状态上报周期（>= 1s）。连接建立时以及容器变化后不久也会上报 |
 | `LABELGATE_CONNECT_TLS_CA` | `connect.tls.ca` | 系统根证书 | 拨号 main 时用来校验 main 的 CA |

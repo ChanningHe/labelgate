@@ -21,7 +21,23 @@ description: Labelgate 常见问题的解决方案。
 
 **原因：** **先到者胜出**。另一个容器（或 agent）已经声明了该主机名，或者把它用作了另一类记录。只要它的拥有者持续声明，第一个声明就一直有效。
 
-**解决方案：** 换一个主机名，或者停止当前的拥有者（或移除它的标签），然后等待下一次同步。你可以在错误消息或 dashboard 中找到拥有者。
+**解决方案：** 换一个主机名，或者停止当前的拥有者（或移除它的标签），并等待 `sync.remove_delay` 过去：拥有者会在这段时间内保留它的资源，以防它重新出现。你可以在错误消息或 dashboard 中找到拥有者。
+
+### `conflict: hostname ... is owned by ...`
+
+**问题：** 某个服务被拒绝，尽管它使用的记录类型、路径或 tunnel 与该主机名上已有的资源不同。
+
+**原因：** 一个主机名只属于一个来源：main 主机或某一个 agent。另一个来源（`local` 或 `agent <id>`）在该主机名上有资源，包括仍在 `sync.remove_delay` 之内的孤立资源。
+
+**解决方案：** 把该主机名的所有服务都定义在同一台主机上，或者先在另一个来源上释放该主机名（参见[所有权与冲突](/zh/docs/ownership#conflicts-between-claims)）。
+
+### `service host ... is not allowed for agents`
+
+**问题：** agent 主机上的 tunnel 标签被拒绝，例如 `http://web:80`。
+
+**原因：** agent 的 tunnel 服务必须指向 IP 地址，或者指向该 agent 的 `services`（`accept_token` agent 为 `agent.accept_services`）中列出的主机。主机名在 agent 主机上解析，可能会访问到 agent 主机本身或元数据服务。
+
+**解决方案：** 在 main 实例上把该名称、glob、IP 或 CIDR 加入该 agent 的 `services`，或者改用容器的 IP 地址。参见 [SSRF 防护](/zh/docs/examples/multi-host#ssrf-guard)。
 
 ### DNS 和 Tunnel 使用相同主机名
 

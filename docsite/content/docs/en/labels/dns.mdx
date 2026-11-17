@@ -56,7 +56,7 @@ labels:
 
 **Special `target` values:**
 - `auto` - Automatically detect the host's public IP address (IPv4 for `A`, IPv6 for `AAAA`; for agent containers, the agent's public IP)
-- `container` - Use the container's IP address (the first network by name with an address of the right family)
+- `container` - Use the container's IP address: for `A` the IPv4 address, for `AAAA` the global IPv6 address of the first network (by name) that has one
 - Any valid IPv4 (`A`) or IPv6 (`AAAA`) address. An address of the wrong family is an error.
 
 If `auto` or `container` cannot be resolved (no public IP of the right family, or the container has no address of that family), the service goes to the error state and is retried every cycle. Only one service can own the `A` (or `AAAA`) record of a hostname, so DNS round-robin through several services is not possible.

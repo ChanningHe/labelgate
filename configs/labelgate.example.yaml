@@ -70,7 +70,7 @@ sync:
   interval: 5m                            # LABELGATE_SYNC_INTERVAL (>= 10s) periodic full reconcile
   remove_delay: 30m                       # LABELGATE_SYNC_REMOVE_DELAY (>= 0) delay before deleting orphaned resources (cleanup=true)
   orphan_ttl: 0s                          # LABELGATE_SYNC_ORPHAN_TTL (>= 0) drop DB rows of orphaned resources with cleanup=false (0 = never)
-  agent_grace: 24h                        # LABELGATE_SYNC_AGENT_GRACE (>= 0) keep an offline agent's resources for this long
+  agent_grace: 24h                        # LABELGATE_SYNC_AGENT_GRACE (>= 5m) keep an offline agent's resources for this long
 
 # Retry configuration (general retry policy for API calls and reconnection)
 retry:
@@ -99,11 +99,13 @@ agent:
   enabled: false                          # LABELGATE_AGENT_ENABLED
   listen: ":8081"                         # LABELGATE_AGENT_LISTEN (agents connect to wss://<host>:8081/ws)
   # Shared token for agents not listed under "agents". Prefer per-agent tokens.
-  # All agent tokens must be >= 32 characters (openssl rand -hex 32).
+  # All agent tokens must be >= 32 characters with >= 12 distinct characters (openssl rand -hex 32).
   # accept_token: ""                      # LABELGATE_AGENT_ACCEPT_TOKEN
   # Restrict what accept_token agents may claim (empty = unrestricted hostnames / only the default tunnel)
   # accept_hostnames: ["*.remote.example.com"]   # LABELGATE_AGENT_ACCEPT_HOSTNAMES (comma-separated globs)
   # accept_tunnels: []                    # LABELGATE_AGENT_ACCEPT_TUNNELS (comma-separated tunnel references)
+  # Tunnel origins allowed beyond IP literals: hostname globs, IPs, CIDRs (empty = IP literals only)
+  # accept_services: ["web", "172.20.0.0/16"]   # LABELGATE_AGENT_ACCEPT_SERVICES (comma-separated)
   # tls:
   #   cert: /path/to/cert.pem             # LABELGATE_AGENT_TLS_CERT  (server certificate of the agent listener)
   #   key: /path/to/key.pem               # LABELGATE_AGENT_TLS_KEY
@@ -117,7 +119,8 @@ agent:
   #     name: "Remote host 1"             # optional display name
   #     default_tunnel: "default"         # tunnel used when a label omits `tunnel`
   #     tunnels: ["default"]              # tunnels this agent may target (empty = only its default tunnel)
-  #     hostnames: ["*.remote.example.com"]  # hostnames this agent may claim (empty = unrestricted)
+  #     hostnames: ["*.remote.example.com"]  # hostnames this agent may claim (empty = unrestricted; wildcard hostnames need an exact entry)
+  #     services: ["web", "172.20.0.0/16"]  # tunnel origins beyond IP literals (hostname globs, IPs, CIDRs)
   #     connect_to: "wss://remote-host-1:8082/ws"  # inbound mode: the main dials the agent
 
 # Agent connection (when mode: agent)
