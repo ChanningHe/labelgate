@@ -5,6 +5,12 @@
 // ErrNotFound on missing objects, longest-suffix zone resolution, tunnel
 // configuration round-trip (stored as JSON, so callers never share memory with
 // the fake), and one-shot failure injection per operation.
+//
+// It mirrors the production client's input checks and normalization so that
+// reconciler tests see what Cloudflare would return: empty IDs -> ErrInvalid,
+// unknown credentials -> ErrUnknownCredential, DNS records normalized with
+// cloudflare.NormalizeDNSRecord, Access rules with
+// cloudflare.NormalizeAccessRules, empty Tags/PolicyIDs/rule lists as nil.
 package cffake
 
 import (
@@ -167,6 +173,42 @@ func alreadyExists(what, id string) error {
 	return fmt.Errorf("%s %s: %w", what, id, cloudflare.ErrAlreadyExists)
 }
 
+func invalid(what string) error {
+	return fmt.Errorf("%s: %w", what, model.ErrInvalid)
+}
+
+// checkCredential mirrors the production client's credential lookup. Caller holds f.mu.
+func (f *Fake) checkCredential(name string) error {
+	if !f.credentials[name] {
+		return fmt.Errorf("credential %q: %w", name, cloudflare.ErrUnknownCredential)
+	}
+	return nil
+}
+
+// checkZone validates a zone argument. Caller holds f.mu.
+func (f *Fake) checkZone(z cloudflare.Zone) error {
+	if z.ID == "" {
+		return invalid("empty zone ID")
+	}
+	return f.checkCredential(z.Credential)
+}
+
+// checkAccount validates an account argument. Caller holds f.mu.
+func (f *Fake) checkAccount(a cloudflare.Account) error {
+	if a.ID == "" {
+		return invalid("empty account ID")
+	}
+	return f.checkCredential(a.Credential)
+}
+
+// checkTunnel validates a tunnel argument. Caller holds f.mu.
+func (f *Fake) checkTunnel(t cloudflare.Tunnel) error {
+	if t.ID == "" || t.AccountID == "" {
+		return invalid("tunnel without ID or account")
+	}
+	return f.checkCredential(t.Credential)
+}
+
 // Verify always succeeds unless a failure is injected.
 func (f *Fake) Verify(ctx context.Context) error {
 	f.mu.Lock()
@@ -243,7 +285,7 @@ func (f *Fake) PutRecord(zoneID string, rec cloudflare.DNSRecord) cloudflare.DNS
 	if rec.ID == "" {
 		rec.ID = f.newID("rec")
 	}
-	rec.Name = strings.ToLower(rec.Name)
+	rec = cloudflare.NormalizeDNSRecord(rec)
 	f.zoneRecords(zoneID)[rec.ID] = rec
 	return rec
 }
@@ -289,6 +331,9 @@ func (f *Fake) ListDNSRecords(ctx context.Context, zone cloudflare.Zone) ([]clou
 	if err := f.begin(ctx, OpListDNSRecords, zone.ID); err != nil {
 		return nil, err
 	}
+	if err := f.checkZone(zone); err != nil {
+		return nil, err
+	}
 	return sortedRecords(f.records[zone.ID]), nil
 }
 
@@ -296,8 +341,11 @@ func (f *Fake) ListDNSRecords(ctx context.Context, zone cloudflare.Zone) ([]clou
 func (f *Fake) CreateDNSRecord(ctx context.Context, zone cloudflare.Zone, rec cloudflare.DNSRecord) (cloudflare.DNSRecord, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	rec.Name = strings.ToLower(rec.Name)
+	rec = cloudflare.NormalizeDNSRecord(rec)
 	if err := f.begin(ctx, OpCreateDNSRecord, rec.Name); err != nil {
+		return cloudflare.DNSRecord{}, err
+	}
+	if err := f.checkZone(zone); err != nil {
 		return cloudflare.DNSRecord{}, err
 	}
 	for _, ex := range f.records[zone.ID] {
@@ -322,11 +370,17 @@ func (f *Fake) UpdateDNSRecord(ctx context.Context, zone cloudflare.Zone, rec cl
 	if err := f.begin(ctx, OpUpdateDNSRecord, rec.ID); err != nil {
 		return cloudflare.DNSRecord{}, err
 	}
+	if rec.ID == "" {
+		return cloudflare.DNSRecord{}, invalid("empty record ID")
+	}
+	if err := f.checkZone(zone); err != nil {
+		return cloudflare.DNSRecord{}, err
+	}
 	m := f.records[zone.ID]
 	if _, ok := m[rec.ID]; !ok {
 		return cloudflare.DNSRecord{}, notFound("dns record", rec.ID)
 	}
-	rec.Name = strings.ToLower(rec.Name)
+	rec = cloudflare.NormalizeDNSRecord(rec)
 	m[rec.ID] = rec
 	return rec, nil
 }
@@ -336,6 +390,12 @@ func (f *Fake) DeleteDNSRecord(ctx context.Context, zone cloudflare.Zone, record
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.begin(ctx, OpDeleteDNSRecord, recordID); err != nil {
+		return err
+	}
+	if recordID == "" {
+		return invalid("empty record ID")
+	}
+	if err := f.checkZone(zone); err != nil {
 		return err
 	}
 	m := f.records[zone.ID]
@@ -367,6 +427,9 @@ func (f *Fake) GetTunnelConfig(ctx context.Context, t cloudflare.Tunnel) (cloudf
 	if err := f.begin(ctx, OpGetTunnelConfig, t.ID); err != nil {
 		return cloudflare.TunnelConfig{}, err
 	}
+	if err := f.checkTunnel(t); err != nil {
+		return cloudflare.TunnelConfig{}, err
+	}
 	if !f.knownTunnel(t.ID) {
 		return cloudflare.TunnelConfig{}, notFound("tunnel", t.ID)
 	}
@@ -386,6 +449,9 @@ func (f *Fake) PutTunnelConfig(ctx context.Context, t cloudflare.Tunnel, cfg clo
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.begin(ctx, OpPutTunnelConfig, t.ID); err != nil {
+		return err
+	}
+	if err := f.checkTunnel(t); err != nil {
 		return err
 	}
 	if !f.knownTunnel(t.ID) {
@@ -427,6 +493,9 @@ func (f *Fake) EnsureAccessTag(ctx context.Context, acct cloudflare.Account, tag
 	if err := f.begin(ctx, OpEnsureAccessTag, tag); err != nil {
 		return err
 	}
+	if err := f.checkAccount(acct); err != nil {
+		return err
+	}
 	if f.tags[acct.ID] == nil {
 		f.tags[acct.ID] = map[string]bool{}
 	}
@@ -441,6 +510,7 @@ func (f *Fake) PutApp(accountID string, app cloudflare.AccessApp) cloudflare.Acc
 	if app.ID == "" {
 		app.ID = f.newID("app")
 	}
+	app.Domain = strings.ToLower(app.Domain)
 	f.accountApps(accountID)[app.ID] = cloneApp(app)
 	return cloneApp(app)
 }
@@ -488,6 +558,9 @@ func (f *Fake) ListAccessApps(ctx context.Context, acct cloudflare.Account) ([]c
 	if err := f.begin(ctx, OpListAccessApps, acct.ID); err != nil {
 		return nil, err
 	}
+	if err := f.checkAccount(acct); err != nil {
+		return nil, err
+	}
 	return sortedApps(f.apps[acct.ID]), nil
 }
 
@@ -497,6 +570,9 @@ func (f *Fake) CreateAccessApp(ctx context.Context, acct cloudflare.Account, app
 	defer f.mu.Unlock()
 	app.Domain = strings.ToLower(app.Domain)
 	if err := f.begin(ctx, OpCreateAccessApp, app.Domain); err != nil {
+		return cloudflare.AccessApp{}, err
+	}
+	if err := f.checkAccount(acct); err != nil {
 		return cloudflare.AccessApp{}, err
 	}
 	for _, ex := range f.apps[acct.ID] {
@@ -519,6 +595,12 @@ func (f *Fake) UpdateAccessApp(ctx context.Context, acct cloudflare.Account, app
 	if err := f.begin(ctx, OpUpdateAccessApp, app.ID); err != nil {
 		return cloudflare.AccessApp{}, err
 	}
+	if app.ID == "" {
+		return cloudflare.AccessApp{}, invalid("empty app ID")
+	}
+	if err := f.checkAccount(acct); err != nil {
+		return cloudflare.AccessApp{}, err
+	}
 	m := f.apps[acct.ID]
 	if _, ok := m[app.ID]; !ok {
 		return cloudflare.AccessApp{}, notFound("access app", app.ID)
@@ -536,6 +618,12 @@ func (f *Fake) DeleteAccessApp(ctx context.Context, acct cloudflare.Account, app
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.begin(ctx, OpDeleteAccessApp, appID); err != nil {
+		return err
+	}
+	if appID == "" {
+		return invalid("empty app ID")
+	}
+	if err := f.checkAccount(acct); err != nil {
 		return err
 	}
 	m := f.apps[acct.ID]
@@ -562,6 +650,9 @@ func (f *Fake) PutPolicy(accountID string, p cloudflare.AccessPolicy) cloudflare
 	defer f.mu.Unlock()
 	if p.ID == "" {
 		p.ID = f.newID("pol")
+	}
+	if n, err := normalizePolicy(p); err == nil {
+		p = n // invalid seeds are stored verbatim (hand-made live state)
 	}
 	f.accountPolicies(accountID)[p.ID] = clonePolicy(p)
 	return clonePolicy(p)
@@ -592,6 +683,19 @@ func sortedPolicies(m map[string]cloudflare.AccessPolicy) []cloudflare.AccessPol
 	return out
 }
 
+// normalizePolicy applies the production client's rule normalization.
+func normalizePolicy(p cloudflare.AccessPolicy) (cloudflare.AccessPolicy, error) {
+	var err error
+	if p.Include, err = cloudflare.NormalizeAccessRules(p.Include); err != nil {
+		return p, err
+	}
+	if p.Require, err = cloudflare.NormalizeAccessRules(p.Require); err != nil {
+		return p, err
+	}
+	p.Exclude, err = cloudflare.NormalizeAccessRules(p.Exclude)
+	return p, err
+}
+
 func clonePolicy(p cloudflare.AccessPolicy) cloudflare.AccessPolicy {
 	p.Include = cloneRules(p.Include)
 	p.Require = cloneRules(p.Require)
@@ -600,7 +704,7 @@ func clonePolicy(p cloudflare.AccessPolicy) cloudflare.AccessPolicy {
 }
 
 func cloneRules(rs []model.AccessRule) []model.AccessRule {
-	if rs == nil {
+	if len(rs) == 0 {
 		return nil
 	}
 	out := make([]model.AccessRule, len(rs))
@@ -617,6 +721,9 @@ func (f *Fake) ListAccessPolicies(ctx context.Context, acct cloudflare.Account) 
 	if err := f.begin(ctx, OpListAccessPolicies, acct.ID); err != nil {
 		return nil, err
 	}
+	if err := f.checkAccount(acct); err != nil {
+		return nil, err
+	}
 	return sortedPolicies(f.policies[acct.ID]), nil
 }
 
@@ -625,6 +732,13 @@ func (f *Fake) CreateAccessPolicy(ctx context.Context, acct cloudflare.Account, 
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.begin(ctx, OpCreateAccessPolicy, p.Name); err != nil {
+		return cloudflare.AccessPolicy{}, err
+	}
+	if err := f.checkAccount(acct); err != nil {
+		return cloudflare.AccessPolicy{}, err
+	}
+	p, err := normalizePolicy(p)
+	if err != nil {
 		return cloudflare.AccessPolicy{}, err
 	}
 	p.ID = f.newID("pol")
@@ -637,6 +751,16 @@ func (f *Fake) UpdateAccessPolicy(ctx context.Context, acct cloudflare.Account, 
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.begin(ctx, OpUpdateAccessPolicy, p.ID); err != nil {
+		return cloudflare.AccessPolicy{}, err
+	}
+	if p.ID == "" {
+		return cloudflare.AccessPolicy{}, invalid("empty policy ID")
+	}
+	if err := f.checkAccount(acct); err != nil {
+		return cloudflare.AccessPolicy{}, err
+	}
+	p, err := normalizePolicy(p)
+	if err != nil {
 		return cloudflare.AccessPolicy{}, err
 	}
 	m := f.policies[acct.ID]
@@ -652,6 +776,12 @@ func (f *Fake) DeleteAccessPolicy(ctx context.Context, acct cloudflare.Account, 
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.begin(ctx, OpDeleteAccessPolicy, policyID); err != nil {
+		return err
+	}
+	if policyID == "" {
+		return invalid("empty policy ID")
+	}
+	if err := f.checkAccount(acct); err != nil {
 		return err
 	}
 	m := f.policies[acct.ID]
