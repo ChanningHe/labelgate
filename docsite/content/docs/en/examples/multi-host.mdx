@@ -58,7 +58,7 @@ If an agent with the same ID is already connected, the new connection is rejecte
 
 Tokens must be at least 32 characters long and contain at least 12 distinct characters (`openssl rand -hex 32` produces a suitable one); repeated or patterned placeholders fail validation. The token never travels on the wire, but a captured handshake can be attacked offline, so a weak token is guessable; high entropy is what protects it.
 
-Before authentication each listener accepts at most 64 pending connections, and at most 4 from one remote address (an IPv4 address or an IPv6 /64). The request headers and the handshake must each complete within 5 seconds.
+Before authentication each listener accepts at most 64 pending connections, and at most 4 from one remote address (an IPv4 address or an IPv6 /64). The request headers and the handshake must each complete within 5 seconds. The per-address cap uses the TCP peer address: if a reverse proxy terminates the agent connections in front of the listener, every agent appears to come from the proxy's IP, so all of them share those 4 pending slots. Agents reconnect with backoff, so this only delays connections during a reconnect storm; cap or rate-limit unauthenticated connections at the proxy if you rely on per-client limits.
 
 ## Named agents and shared-token agents
 

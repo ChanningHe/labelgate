@@ -21,13 +21,13 @@ Conflicts are shown in the dashboard and in `GET /api/resources/*` as resources 
 
 **Cause:** The **existing owner wins**. Another container (or agent) already claims that hostname, or uses it as a different kind of record. The first claim stays in place for as long as its owner keeps claiming it.
 
-**Solution:** Use a different hostname, or stop the current owner (or remove its labels) and wait for `sync.remove_delay` to pass: the owner keeps its resources reserved that long in case it comes back. You can find the owner in the error message or in the dashboard.
+**Solution:** Use a different hostname, or stop the current owner (or remove its labels): within the same source (the same host or agent) the next claimant takes over on the next cycle. You can find the owner in the error message or in the dashboard.
 
 ### `conflict: hostname ... is owned by ...`
 
 **Problem:** A service is rejected although it uses a different record type, path or tunnel than the existing resources on that hostname.
 
-**Cause:** A hostname belongs to one source: the main host or one agent. Another source (`local` or `agent <id>`) has resources on it, including orphaned ones still within `sync.remove_delay`.
+**Cause:** A hostname belongs to one source: the main host or one agent. Another source (`local` or `agent <id>`) has resources on it, in any state, including orphaned ones: the hostname stays with that source until the last of them is deleted (`cleanup: true`, after `sync.remove_delay`) or dropped from the database (`cleanup: "false"`, after `sync.orphan_ttl`).
 
 **Solution:** Define every service for that hostname on the same host, or free the hostname on the other source first (see [Ownership & Conflicts](/docs/ownership#conflicts-between-claims)).
 
