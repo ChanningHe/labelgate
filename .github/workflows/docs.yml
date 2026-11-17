@@ -9,8 +9,34 @@ permissions:
   contents: read
 
 jobs:
+  # Only stable vX.Y.Z tags deploy; anything else fails (or, for pre-releases, is skipped)
+  # so a stray tag can never overwrite the published docs.
+  validate:
+    name: Validate tag
+    runs-on: ubuntu-latest
+    outputs:
+      prerelease: ${{ steps.parse.outputs.prerelease }}
+    steps:
+      - name: Parse tag
+        id: parse
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          re='^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
+          if [[ ! "$TAG" =~ $re ]]; then
+            echo "::error::Tag '$TAG' does not match vX.Y.Z or vX.Y.Z-suffix"
+            exit 1
+          fi
+          if [[ "$TAG" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
   deploy:
     name: Deploy to Cloudflare Pages
+    needs: validate
+    if: needs.validate.outputs.prerelease == 'false'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
