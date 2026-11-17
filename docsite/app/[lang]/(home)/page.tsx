@@ -86,13 +86,14 @@ const texts = {
 
 const exampleYaml = `services:
   labelgate:
-    image: labelgate:latest
+    image: ghcr.io/channinghe/labelgate:v0.3
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       - LABELGATE_CLOUDFLARE_API_TOKEN=\${CF_API_TOKEN}
       - LABELGATE_CLOUDFLARE_ACCOUNT_ID=\${CF_ACCOUNT_ID}
       - LABELGATE_CLOUDFLARE_TUNNEL_ID=\${CF_TUNNEL_ID}
+      - LABELGATE_API_TOKEN=\${LABELGATE_API_TOKEN}
 
   webapp:
     image: nginx
