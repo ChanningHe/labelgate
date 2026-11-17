@@ -177,9 +177,8 @@ func containerName(c container.Summary) string {
 }
 
 // networkAddrs returns the per-network addresses of a container: v4 maps
-// network name -> IPv4 address (global IPv6 as a fallback for consumers that
-// predate v6), v6 maps network name -> global IPv6 address. Networks without
-// an address of a kind are omitted from that map.
+// network name -> IPv4 address, v6 maps network name -> global IPv6 address.
+// Networks without an address of a kind are omitted from that map.
 func networkAddrs(c container.Summary) (v4, v6 map[string]string) {
 	if c.NetworkSettings == nil {
 		return nil, nil
@@ -193,11 +192,8 @@ func networkAddrs(c container.Summary) (v4, v6 map[string]string) {
 		if ep.GlobalIPv6Address.IsValid() {
 			v6[name] = ep.GlobalIPv6Address.String()
 		}
-		switch {
-		case ep.IPAddress.IsValid():
+		if ep.IPAddress.IsValid() {
 			v4[name] = ep.IPAddress.String()
-		case ep.GlobalIPv6Address.IsValid():
-			v4[name] = ep.GlobalIPv6Address.String()
 		}
 	}
 	return v4, v6
