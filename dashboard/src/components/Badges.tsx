@@ -13,6 +13,7 @@ const TONE_VAR: Record<Tone, string> = {
 };
 
 const STATUS: Record<string, { label: string; tone: Tone; isLive?: boolean }> = {
+  pending: { label: 'Pending', tone: 'off' },
   active: { label: 'Active', tone: 'ok' },
   orphaned: { label: 'Orphaned', tone: 'warn' },
   pending_cleanup: { label: 'Cleanup pending', tone: 'warn' },

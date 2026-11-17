@@ -14,11 +14,14 @@ import { collectAttention, describeProblem, type AttentionItem } from '../resour
 import { KIND_IDS, KIND_META } from '../resources/meta';
 import { useResourceIndex } from '../resources/useResourceIndex';
 import { formatRelative, formatVersion } from '../utils/format';
+import { syncDisplay, type SyncTone } from './syncStatus';
 import classes from './Overview.module.css';
 
 const OK = 'var(--lg-ok)';
 const WARN = 'var(--lg-warn)';
 const ERR = 'var(--lg-err)';
+const OFF = 'var(--lg-off)';
+const SYNC_COLOR: Record<SyncTone, string> = { ok: OK, err: ERR, off: OFF };
 const QUICK_START = recipesFor('tunnel')[0];
 
 const tone = (color: string, extra?: CSSProperties) => ({ '--tone': color, ...extra }) as CSSProperties;
@@ -57,16 +60,16 @@ function agentDetail(data: OverviewData, agents: readonly AgentInfo[], now: numb
 
 function StatusStrip({ data, agents }: { data: OverviewData; agents: readonly AgentInfo[] }) {
   const now = useNow();
-  const isSyncOk = data.sync.status === 'success';
+  const sync = syncDisplay(data.sync.status);
   const { connected, total } = data.agents;
 
   return (
     <div className={`lg-panel ${classes.strip}`}>
       <StripItem
         label="Last sync"
-        value={isSyncOk ? 'Succeeded' : 'Failed'}
-        color={isSyncOk ? OK : ERR}
-        detail={isSyncOk ? formatRelative(data.sync.last_sync, now) : data.sync.error}
+        value={sync.label}
+        color={SYNC_COLOR[sync.tone]}
+        detail={sync.tone === 'ok' ? formatRelative(data.sync.last_sync, now) : data.sync.error}
       />
       <StripItem
         label="Cloudflare API"
