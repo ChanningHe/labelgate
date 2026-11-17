@@ -184,12 +184,12 @@ func TestPoliciesFromConfig(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Agent.Enabled = true
 	cfg.Agent.Agents = map[string]config.AgentEntry{
-		"named":   {Token: "t", Hostnames: []string{"*.a.example.com"}, Tunnels: []string{"x"}, DefaultTunnel: "y"},
+		"named":   {Token: "t", Hostnames: []string{"*.a.example.com"}, Tunnels: []string{"x"}, DefaultTunnel: "y", Services: []string{"web"}},
 		"default": {Token: "t"},
 	}
 	p := PoliciesFromConfig(cfg)
 	if got := p("named"); !got.Allowed || !reflect.DeepEqual(got.Tunnels, []string{"x", "y"}) || got.DefaultTunnel != "y" ||
-		!reflect.DeepEqual(got.Hostnames, []string{"*.a.example.com"}) {
+		!reflect.DeepEqual(got.Hostnames, []string{"*.a.example.com"}) || !reflect.DeepEqual(got.Services, []string{"web"}) {
 		t.Fatalf("named %+v", got)
 	}
 	if got := p("default"); !got.Allowed || !reflect.DeepEqual(got.Tunnels, []string{""}) {
@@ -206,8 +206,10 @@ func TestPoliciesFromConfig(t *testing.T) {
 
 	cfg.Agent.AcceptToken = "shared"
 	cfg.Agent.AcceptHostnames = []string{"*.edge.example.com"}
+	cfg.Agent.AcceptServices = []string{"10.0.0.0/8"}
 	p = PoliciesFromConfig(cfg)
-	if got := p("stranger"); !got.Allowed || !reflect.DeepEqual(got.Tunnels, []string{""}) || len(got.Hostnames) != 1 {
+	if got := p("stranger"); !got.Allowed || !reflect.DeepEqual(got.Tunnels, []string{""}) || len(got.Hostnames) != 1 ||
+		!reflect.DeepEqual(got.Services, []string{"10.0.0.0/8"}) {
 		t.Fatalf("accept %+v", got)
 	}
 	cfg.Agent.AcceptTunnels = []string{"edge"}

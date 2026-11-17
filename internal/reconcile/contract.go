@@ -37,6 +37,9 @@ type AgentPolicy struct {
 	Tunnels []string
 	// DefaultTunnel is the reference used when a label omits `tunnel`; "" = global default.
 	DefaultTunnel string
+	// Services allow-lists tunnel origins beyond public/private IP literals:
+	// hostname globs, IP addresses and CIDRs. Empty = IP literals only.
+	Services []string
 }
 
 // AgentPolicies returns the policy for an agent ID.

@@ -262,6 +262,14 @@ func TestValidate_AgentServer(t *testing.T) {
 		{"agent connect_to without host", base, func(c *Config) { entry(c, "web", AgentEntry{Token: agentToken, ConnectTo: "ws://"}) }, "agent.agents.web.connect_to", "ws:// or wss://"},
 		{"agent unknown default tunnel", base, func(c *Config) { entry(c, "web", AgentEntry{Token: agentToken, DefaultTunnel: "nope"}) }, "agent.agents.web.default_tunnel", "unknown tunnel"},
 		{"agent unknown tunnel", base, func(c *Config) { entry(c, "web", AgentEntry{Token: agentToken, Tunnels: []string{"nope"}}) }, "agent.agents.web.tunnels", "unknown tunnel"},
+		{"accept services ok", base, func(c *Config) {
+			c.Agent.AcceptServices = []string{"web", "*.svc.internal", "10.0.0.0/8", "192.0.2.7", "fd00::/8", "::1"}
+		}, "", ""},
+		{"accept services bad cidr", base, func(c *Config) { c.Agent.AcceptServices = []string{"10.0.0.0/33"} }, "agent.accept_services", "invalid"},
+		{"accept services inet_aton form", base, func(c *Config) { c.Agent.AcceptServices = []string{"127.1"} }, "agent.accept_services", "canonical"},
+		{"accept services hex form", base, func(c *Config) { c.Agent.AcceptServices = []string{"0x7f000001"} }, "agent.accept_services", "canonical"},
+		{"accept services empty entry", base, func(c *Config) { c.Agent.AcceptServices = []string{""} }, "agent.accept_services", "invalid"},
+		{"agent bad services entry", base, func(c *Config) { entry(c, "web", AgentEntry{Token: agentToken, Services: []string{"a b"}}) }, "agent.agents.web.services", "invalid"},
 		{"agent bad hostname glob", base, func(c *Config) { entry(c, "web", AgentEntry{Token: agentToken, Hostnames: []string{"a b"}}) }, "agent.agents.web.hostnames", "invalid pattern"},
 		{"agent full ok", base, func(c *Config) {
 			entry(c, "web-1", AgentEntry{

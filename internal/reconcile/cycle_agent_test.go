@@ -125,14 +125,9 @@ func TestAgentPolicyRejections(t *testing.T) {
 }
 
 func TestAgentAllowedTunnelServices(t *testing.T) {
-	for _, u := range []string{"http://web:80", "https://10.0.0.5", "hello_world", "http_status:404", "tcp://db.internal:5432"} {
-		if err := checkAgentService(u); err != nil {
-			t.Errorf("%s: %v", u, err)
-		}
-	}
 	h := newHarness(t, func(s *Settings) {
 		s.Agents = func(string) AgentPolicy {
-			return AgentPolicy{Allowed: true, Tunnels: []string{"other"}, DefaultTunnel: "OTHER"}
+			return AgentPolicy{Allowed: true, Tunnels: []string{"other"}, DefaultTunnel: "OTHER", Services: []string{"web"}}
 		}
 	})
 	h.st.setAgents(agentSnap("edge", h.clk.now(), ctr("web", tunOnly(tunSpec("web", appHost, "http://web:80")))))

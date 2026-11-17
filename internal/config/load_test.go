@@ -232,9 +232,10 @@ agent:
       default_tunnel: default
       tunnels: [default]
       hostnames: ["web.example.com"]
+      services: ["web", "10.0.0.0/8"]
       connect_to: wss://web-1:8081/ws
 `)
-	cfg := mustLoad(t, path, env("LABELGATE_AGENT_ACCEPT_TUNNELS", "default, t1 ,"))
+	cfg := mustLoad(t, path, env("LABELGATE_AGENT_ACCEPT_TUNNELS", "default, t1 ,", "LABELGATE_AGENT_ACCEPT_SERVICES", "web, 10.0.0.0/8"))
 	a := cfg.Agent
 	if !a.Enabled || a.AcceptToken != strings.Repeat("s", 32) || !reflect.DeepEqual(a.AcceptHostnames, []string{"*.example.com"}) {
 		t.Errorf("agent: %+v", a)
@@ -242,10 +243,13 @@ agent:
 	if !reflect.DeepEqual(a.AcceptTunnels, []string{"default", "t1"}) {
 		t.Errorf("list env must be split and trimmed: %q", a.AcceptTunnels)
 	}
+	if !reflect.DeepEqual(a.AcceptServices, []string{"web", "10.0.0.0/8"}) {
+		t.Errorf("accept_services from env: %q", a.AcceptServices)
+	}
 	e := a.Agents["web-1"]
 	want := AgentEntry{
 		Token: strings.Repeat("x", 32), Name: "Web One", DefaultTunnel: "default", Tunnels: []string{"default"},
-		Hostnames: []string{"web.example.com"}, ConnectTo: "wss://web-1:8081/ws",
+		Hostnames: []string{"web.example.com"}, Services: []string{"web", "10.0.0.0/8"}, ConnectTo: "wss://web-1:8081/ws",
 	}
 	if !reflect.DeepEqual(e, want) {
 		t.Errorf("entry: %+v", e)

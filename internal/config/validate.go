@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"path"
 	"regexp"
@@ -57,7 +58,8 @@ func fail(field, format string, args ...any) error {
 //     db.path set, api.address and api.base_path shape, cloudflare credentials
 //     and tunnels (names, tokens, references), default_tunnel resolvable, at
 //     least one credential unless skip_credential_validation, agent listener
-//     and agent entries (IDs, tokens, connect_to, globs, tunnel references).
+//     and agent entries (IDs, tokens, connect_to, globs, tunnel references,
+//     services allow-lists: CIDR, IP or hostname glob, no inet_aton forms).
 //     Tokens: api.token >= MinAPITokenLen when set (enabled API); named agent
 //     tokens and agent.accept_token (when set) >= MinAgentTokenLen.
 //   - agent mode: connect.token >= MinAgentTokenLen, outbound needs a ws(s):// endpoint,
@@ -375,6 +377,33 @@ func checkGlobs(field string, globs []string) error {
 	return nil
 }
 
+// checkServices validates a tunnel-origin allow-list: CIDRs and IP
+// addresses must parse strictly; anything else is a hostname glob whose last
+// label must not be numeric (inet_aton forms such as 127.1 are no IPs here).
+func checkServices(field string, entries []string) error {
+	for _, e := range entries {
+		e = strings.ToLower(strings.TrimSpace(e))
+		if strings.Contains(e, "/") {
+			if _, err := netip.ParsePrefix(e); err != nil {
+				return fail(field, "invalid CIDR %q", e)
+			}
+			continue
+		}
+		if _, err := netip.ParseAddr(e); err == nil {
+			continue
+		}
+		if !validGlob(e) {
+			return fail(field, "invalid entry %q (use a hostname glob, an IP address or a CIDR)", e)
+		}
+		labels := strings.Split(e, ".")
+		last := labels[len(labels)-1]
+		if strings.HasPrefix(last, "0x") || strings.Trim(last, "0123456789") == "" {
+			return fail(field, "%q is not a canonical IP address or hostname (write IPv4 as a.b.c.d)", e)
+		}
+	}
+	return nil
+}
+
 // checkTokenLen enforces a minimum token length (in characters). An empty
 // token passes when optional is true (the feature is disabled).
 func checkTokenLen(field, token string, minLen int, optional bool) error {
@@ -404,6 +433,9 @@ func checkAgentServer(cfg Config) error {
 		return err
 	}
 	if err := checkTunnelRefs(cfg.Cloudflare, "agent.accept_tunnels", a.AcceptTunnels); err != nil {
+		return err
+	}
+	if err := checkServices("agent.accept_services", a.AcceptServices); err != nil {
 		return err
 	}
 	for _, id := range sortedKeys(a.Agents) {
@@ -436,7 +468,10 @@ func checkAgentEntry(cf CloudflareConfig, id string, e AgentEntry) error {
 	if err := checkTunnelRefs(cf, field+".tunnels", e.Tunnels); err != nil {
 		return err
 	}
-	return checkGlobs(field+".hostnames", e.Hostnames)
+	if err := checkGlobs(field+".hostnames", e.Hostnames); err != nil {
+		return err
+	}
+	return checkServices(field+".services", e.Services)
 }
 
 func checkWebSocketURL(field, raw string) error {
