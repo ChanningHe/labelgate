@@ -1,6 +1,7 @@
 // Package logchange decides which recurring problems are worth logging: a
-// problem is reported when it appears or its text changes, once more when it
-// is resolved, and optionally again at a low rate while it persists.
+// problem is reported when it appears or its cause (see Class) changes, once
+// more when it is resolved, and optionally again at a low rate while it
+// persists. Every report carries the latest full text.
 //
 // A Tracker is not safe for concurrent use; each owner serializes access.
 package logchange
@@ -18,9 +19,10 @@ const DefaultRepeat = time.Hour
 type Kind int
 
 const (
-	// Raised: the problem is new, or its text changed.
+	// Raised: the problem is new, or its Class changed.
 	Raised Kind = iota + 1
-	// Repeated: the problem is unchanged but the repeat interval elapsed.
+	// Repeated: the problem's Class is unchanged but the repeat interval
+	// elapsed; Text is the latest text.
 	Repeated
 	// Resolved: the problem is gone; Text is its last known text.
 	Resolved
@@ -34,7 +36,8 @@ type Event struct {
 }
 
 type entry struct {
-	text     string
+	text     string // latest text
+	class    string // Class(text) when it was last logged
 	loggedAt time.Time
 }
 
@@ -66,17 +69,18 @@ func (t *Tracker) UpdatePartial(now time.Time, active map[string]string) []Event
 func (t *Tracker) update(now time.Time, active map[string]string, resolve bool) []Event {
 	var events []Event
 	for _, key := range sortedKeys(active) {
-		text := active[key]
+		text, class := active[key], Class(active[key])
 		prev, known := t.seen[key]
 		switch {
-		case !known || prev.text != text:
+		case !known || prev.class != class:
 			events = append(events, Event{Raised, key, text})
 		case t.repeat > 0 && now.Sub(prev.loggedAt) >= t.repeat:
 			events = append(events, Event{Repeated, key, text})
 		default:
+			t.seen[key] = entry{text: text, class: prev.class, loggedAt: prev.loggedAt}
 			continue
 		}
-		t.seen[key] = entry{text: text, loggedAt: now}
+		t.seen[key] = entry{text: text, class: class, loggedAt: now}
 	}
 	if !resolve {
 		return events
