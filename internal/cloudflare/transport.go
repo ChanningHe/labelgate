@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	cf "github.com/cloudflare/cloudflare-go/v6"
-	"github.com/cloudflare/cloudflare-go/v6/option"
+	cf "github.com/cloudflare/cloudflare-go/v7"
+	"github.com/cloudflare/cloudflare-go/v7/option"
 )
 
 // alreadyExistsCodes are Cloudflare error codes meaning "an equivalent object exists".

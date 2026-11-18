@@ -5,7 +5,7 @@ go 1.26.0
 toolchain go1.26.11
 
 require (
-	github.com/cloudflare/cloudflare-go/v6 v6.10.0
+	github.com/cloudflare/cloudflare-go/v7 v7.15.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/moby/moby/api v1.57.0
 	github.com/moby/moby/client v0.6.3
