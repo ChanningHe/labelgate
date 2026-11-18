@@ -47,6 +47,7 @@ type AgentOptions struct {
 type Agent struct {
 	opts    AgentOptions
 	id      string
+	idSrc   agentIDSource
 	log     *slog.Logger
 	t       timings
 	seq     atomic.Uint64
@@ -76,7 +77,7 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 	if err := validateRetry(opts.Retry); err != nil {
 		return nil, err
 	}
-	id, err := resolveAgentID(opts.Connect.AgentID, readMachineID, os.Hostname)
+	id, idSrc, err := resolveAgentID(opts.Connect.AgentID, readMachineID, os.Hostname)
 	if err != nil {
 		return nil, err
 	}
@@ -89,6 +90,7 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 	return &Agent{
 		opts:    opts,
 		id:      id,
+		idSrc:   idSrc,
 		log:     opts.Log.With("component", "agent", "agent_id", id),
 		t:       defaultTimings(),
 		pending: newPendingLimiter(MaxPendingHandshakes, MaxPendingPerIP),
@@ -126,6 +128,7 @@ func (a *Agent) ID() string { return a.id }
 // Run runs until ctx is cancelled. Returns nil on cancellation; an error if
 // the inbound listener cannot start or the source fails unrecoverably.
 func (a *Agent) Run(ctx context.Context) error {
+	logAgentID(a.log, a.id, a.idSrc)
 	if a.opts.Connect.Mode == config.ConnectInbound {
 		ln, err := listen(a.opts.Connect.Listen, a.opts.Connect.TLS, sectionConnect)
 		if err != nil {
