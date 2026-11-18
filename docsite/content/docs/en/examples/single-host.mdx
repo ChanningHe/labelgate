@@ -44,7 +44,7 @@ services:
       - LABELGATE_CLOUDFLARE_API_TOKEN
       - LABELGATE_API_TOKEN
     ports:
-      - "127.0.0.1:8080:8080" # dashboard
+      - "127.0.0.1:28111:28111" # dashboard
 
   web:
     image: nginx:alpine
@@ -77,7 +77,7 @@ services:
       - LABELGATE_CLOUDFLARE_TUNNEL_ID
       - LABELGATE_API_TOKEN
     ports:
-      - "127.0.0.1:8080:8080" # dashboard
+      - "127.0.0.1:28111:28111" # dashboard
 
   cloudflared:
     image: cloudflare/cloudflared:latest
@@ -131,7 +131,7 @@ docker compose logs -f labelgate
 ```
 
 - **Logs:** no `level=WARN msg="reconcile problem"` lines.
-- **Dashboard:** open `http://127.0.0.1:8080` and sign in with `LABELGATE_API_TOKEN`. Every resource should be `active`.
+- **Dashboard:** open `http://127.0.0.1:28111` and sign in with `LABELGATE_API_TOKEN`. Every resource should be `active`.
 - **DNS:** `dig +short www.example.com` returns Cloudflare IPs (proxied records hide your real IP).
 - **Tunnel:** `curl -I https://app.example.com` answers from your app.
 

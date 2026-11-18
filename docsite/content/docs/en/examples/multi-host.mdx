@@ -49,7 +49,7 @@ cloudflare:
 
 agent:
   enabled: true
-  listen: ":8081"
+  listen: ":28112"
   tls:
     cert: /etc/labelgate/tls/server.crt
     key: /etc/labelgate/tls/server.key
@@ -78,8 +78,8 @@ services:
       - LABELGATE_CLOUDFLARE_TUNNEL_ID
       - LABELGATE_API_TOKEN
     ports:
-      - "127.0.0.1:8080:8080" # dashboard
-      - "8081:8081"           # agents connect here
+      - "127.0.0.1:28111:28111" # dashboard
+      - "28112:28112"           # agents connect here
 
   cloudflared:
     image: cloudflare/cloudflared:latest
@@ -109,7 +109,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       - LABELGATE_MODE=agent
-      - LABELGATE_CONNECT_ENDPOINT=wss://main.example.com:8081/ws
+      - LABELGATE_CONNECT_ENDPOINT=wss://main.example.com:28112/ws
       - LABELGATE_CONNECT_AGENT_ID=edge1
       - LABELGATE_CONNECT_TOKEN=${AGENT_TOKEN}   # same token as on the main
 
@@ -139,7 +139,7 @@ agent:
   agents:
     edge2:
       token: "PASTE_TOKEN_HERE"
-      connect_to: wss://192.168.1.12:8082/ws
+      connect_to: wss://192.168.1.12:28113/ws
       hostnames: ["*.edge2.example.com"]
 ```
 
@@ -155,13 +155,13 @@ services:
     environment:
       - LABELGATE_MODE=agent
       - LABELGATE_CONNECT_MODE=inbound
-      - LABELGATE_CONNECT_LISTEN=:8082
+      - LABELGATE_CONNECT_LISTEN=:28113
       - LABELGATE_CONNECT_AGENT_ID=edge2
       - LABELGATE_CONNECT_TOKEN=${AGENT_TOKEN}
       - LABELGATE_CONNECT_TLS_CERT=/certs/server.crt
       - LABELGATE_CONNECT_TLS_KEY=/certs/server.key
     ports:
-      - "8082:8082"
+      - "28113:28113"
 ```
 
 The agent's certificate must be valid for the `connect_to` host. For an IP address like `192.168.1.12`, it needs that IP in its SAN list.
@@ -176,14 +176,14 @@ The agent's certificate must be valid for the `connect_to` host. For an IP addre
 
 ## TLS [#tls]
 
-The endpoint is a `wss://` URL that **ends in `/ws`**, for example `wss://main.example.com:8081/ws`.
+The endpoint is a `wss://` URL that **ends in `/ws`**, for example `wss://main.example.com:28112/ws`.
 
 | | Agent connects to main | Main connects to agent |
 |---|---|---|
 | Certificate and key | main: `agent.tls.cert`, `agent.tls.key` (`LABELGATE_AGENT_TLS_CERT`, `LABELGATE_AGENT_TLS_KEY`) | agent: `connect.tls.cert`, `connect.tls.key` (`LABELGATE_CONNECT_TLS_CERT`, `LABELGATE_CONNECT_TLS_KEY`) |
 | Private CA (otherwise system CAs) | agent: `connect.tls.ca` (`LABELGATE_CONNECT_TLS_CA`) | main: `agent.tls.ca` (`LABELGATE_AGENT_TLS_CA`) |
 
-- **Reverse proxy instead:** let Caddy, Traefik or nginx serve `wss://` with your usual certificate and forward WebSocket traffic to port 8081. Leave `agent.tls` empty then.
+- **Reverse proxy instead:** let Caddy, Traefik or nginx serve `wss://` with your usual certificate and forward WebSocket traffic to port 28112. Leave `agent.tls` empty then.
 - **`ws://`** works, but the data is not encrypted. Use it only on a trusted LAN or VPN.
 - **`insecure_skip_verify: true`** (`connect.tls.insecure_skip_verify` / `agent.tls.insecure_skip_verify`) turns off certificate checks. Use it only for testing.
 
@@ -290,7 +290,7 @@ The [first recipe](#outbound-mode-example) does exactly this.
 - Main log: `docker compose logs labelgate | grep agent` shows `msg="agent connected" ... agent_id=edge1`.
 - Agent log: `docker compose logs labelgate-agent` shows `msg="connected to main"`.
 - Dashboard → **Agents**: the agent is `active`. Its resources are `active`; rejected ones show the reason.
-- The endpoint is reachable: `curl https://main.example.com:8081/health` returns `{"status":"ok"}`.
+- The endpoint is reachable: `curl https://main.example.com:28112/health` returns `{"status":"ok"}`.
 - `curl -I https://whoami.edge1.example.com` answers from the agent host.
 
 ## Common problems

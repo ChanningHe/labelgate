@@ -80,7 +80,7 @@ services:
       LABELGATE_CLOUDFLARE_API_TOKEN: ${CF_API_TOKEN}
       LABELGATE_API_TOKEN: ${LABELGATE_API_TOKEN}
     ports:
-      - "127.0.0.1:8080:8080"   # dashboard and API
+      - "127.0.0.1:28111:28111"   # dashboard and API
 ```
 
 ## Minimal agent config [#minimal-agent-config]
@@ -100,12 +100,12 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       LABELGATE_MODE: agent
-      LABELGATE_CONNECT_ENDPOINT: wss://main.example.com:8081/ws
+      LABELGATE_CONNECT_ENDPOINT: wss://main.example.com:28112/ws
       LABELGATE_CONNECT_AGENT_ID: edge1
       LABELGATE_CONNECT_TOKEN: ${AGENT_TOKEN}   # openssl rand -hex 32
 ```
 
-On the main instance, add the agent to `labelgate.yaml` with the same ID and token, and publish port `8081`:
+On the main instance, add the agent to `labelgate.yaml` with the same ID and token, and publish port `28112`:
 
 ```yaml
 agent:

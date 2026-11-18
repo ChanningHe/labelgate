@@ -49,7 +49,7 @@ cloudflare:
 
 agent:
   enabled: true
-  listen: ":8081"
+  listen: ":28112"
   tls:
     cert: /etc/labelgate/tls/server.crt
     key: /etc/labelgate/tls/server.key
@@ -78,8 +78,8 @@ services:
       - LABELGATE_CLOUDFLARE_TUNNEL_ID
       - LABELGATE_API_TOKEN
     ports:
-      - "127.0.0.1:8080:8080" # 控制台
-      - "8081:8081"           # agent 连接这个端口
+      - "127.0.0.1:28111:28111" # 控制台
+      - "28112:28112"           # agent 连接这个端口
 
   cloudflared:
     image: cloudflare/cloudflared:latest
@@ -109,7 +109,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       - LABELGATE_MODE=agent
-      - LABELGATE_CONNECT_ENDPOINT=wss://main.example.com:8081/ws
+      - LABELGATE_CONNECT_ENDPOINT=wss://main.example.com:28112/ws
       - LABELGATE_CONNECT_AGENT_ID=edge1
       - LABELGATE_CONNECT_TOKEN=${AGENT_TOKEN}   # 和 main 上的 token 相同
 
@@ -139,7 +139,7 @@ agent:
   agents:
     edge2:
       token: "PASTE_TOKEN_HERE"
-      connect_to: wss://192.168.1.12:8082/ws
+      connect_to: wss://192.168.1.12:28113/ws
       hostnames: ["*.edge2.example.com"]
 ```
 
@@ -155,13 +155,13 @@ services:
     environment:
       - LABELGATE_MODE=agent
       - LABELGATE_CONNECT_MODE=inbound
-      - LABELGATE_CONNECT_LISTEN=:8082
+      - LABELGATE_CONNECT_LISTEN=:28113
       - LABELGATE_CONNECT_AGENT_ID=edge2
       - LABELGATE_CONNECT_TOKEN=${AGENT_TOKEN}
       - LABELGATE_CONNECT_TLS_CERT=/certs/server.crt
       - LABELGATE_CONNECT_TLS_KEY=/certs/server.key
     ports:
-      - "8082:8082"
+      - "28113:28113"
 ```
 
 agent 的证书必须对 `connect_to` 里的主机有效。如果是 `192.168.1.12` 这样的 IP，证书的 SAN 里要包含这个 IP。
@@ -176,14 +176,14 @@ agent 的证书必须对 `connect_to` 里的主机有效。如果是 `192.168.1.
 
 ## TLS [#tls]
 
-连接地址是一个 `wss://` URL，**必须以 `/ws` 结尾**，例如 `wss://main.example.com:8081/ws`。
+连接地址是一个 `wss://` URL，**必须以 `/ws` 结尾**，例如 `wss://main.example.com:28112/ws`。
 
 | | agent 连接 main | main 连接 agent |
 |---|---|---|
 | 证书和私钥 | main：`agent.tls.cert`、`agent.tls.key`（`LABELGATE_AGENT_TLS_CERT`、`LABELGATE_AGENT_TLS_KEY`） | agent：`connect.tls.cert`、`connect.tls.key`（`LABELGATE_CONNECT_TLS_CERT`、`LABELGATE_CONNECT_TLS_KEY`） |
 | 私有 CA（不设置则用系统 CA） | agent：`connect.tls.ca`（`LABELGATE_CONNECT_TLS_CA`） | main：`agent.tls.ca`（`LABELGATE_AGENT_TLS_CA`） |
 
-- **也可以用反向代理**：让 Caddy、Traefik 或 nginx 用你现有的证书提供 `wss://`，再把 WebSocket 转发到 8081 端口。这时 `agent.tls` 留空即可。
+- **也可以用反向代理**：让 Caddy、Traefik 或 nginx 用你现有的证书提供 `wss://`，再把 WebSocket 转发到 28112 端口。这时 `agent.tls` 留空即可。
 - **`ws://`** 也能用，但数据不加密。只在可信的局域网或 VPN 里使用。
 - **`insecure_skip_verify: true`**（`connect.tls.insecure_skip_verify` / `agent.tls.insecure_skip_verify`）会关闭证书校验，只用于测试。
 
@@ -290,7 +290,7 @@ agent:
 - main 日志：`docker compose logs labelgate | grep agent` 能看到 `msg="agent connected" ... agent_id=edge1`。
 - agent 日志：`docker compose logs labelgate-agent` 能看到 `msg="connected to main"`。
 - 控制台 → **Agents**：该 agent 是 `active`，它的资源也是 `active`；被拒绝的资源会显示原因。
-- 连接地址可达：`curl https://main.example.com:8081/health` 返回 `{"status":"ok"}`。
+- 连接地址可达：`curl https://main.example.com:28112/health` 返回 `{"status":"ok"}`。
 - `curl -I https://whoami.edge1.example.com` 能拿到 agent 主机上服务的响应。
 
 ## 常见问题

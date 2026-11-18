@@ -26,7 +26,14 @@ Your labels keep working in v0.3, but a few settings must change before you upgr
 
    If any are left, Labelgate does not start and lists all of them at once.
 
-4. **Start Labelgate and open the dashboard.** Fix any errors it shows (see [below](#what-changes-you-may-notice)).
+4. **Update the ports.** The dashboard and API now listen on `28111` (was `8080`), and the agent listener on `28112` (was `8081`). Change your port mappings and agent endpoints, or keep the old ports with `api.address` (`LABELGATE_API_ADDRESS`) and `agent.listen` (`LABELGATE_AGENT_LISTEN`).
+
+   ```yaml
+   ports:
+     - "127.0.0.1:28111:28111"
+   ```
+
+5. **Start Labelgate and open the dashboard.** Fix any errors it shows (see [below](#what-changes-you-may-notice)).
 
 ### If you use agents [#agents]
 
@@ -41,7 +48,7 @@ Your labels keep working in v0.3, but a few settings must change before you upgr
 3. **End the agent endpoint in `/ws`.**
 
    ```bash
-   LABELGATE_CONNECT_ENDPOINT=wss://main.example.com:8081/ws
+   LABELGATE_CONNECT_ENDPOINT=wss://main.example.com:28112/ws
    ```
 
 4. **Self-signed certificates need a CA.** Certificates are now checked. Point `connect.tls.ca` (`LABELGATE_CONNECT_TLS_CA`) on the agent, or `agent.tls.ca` (`LABELGATE_AGENT_TLS_CA`) on the main instance for inbound agents, at your CA file.

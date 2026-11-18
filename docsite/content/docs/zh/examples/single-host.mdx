@@ -44,7 +44,7 @@ services:
       - LABELGATE_CLOUDFLARE_API_TOKEN
       - LABELGATE_API_TOKEN
     ports:
-      - "127.0.0.1:8080:8080" # 控制台
+      - "127.0.0.1:28111:28111" # 控制台
 
   web:
     image: nginx:alpine
@@ -77,7 +77,7 @@ services:
       - LABELGATE_CLOUDFLARE_TUNNEL_ID
       - LABELGATE_API_TOKEN
     ports:
-      - "127.0.0.1:8080:8080" # 控制台
+      - "127.0.0.1:28111:28111" # 控制台
 
   cloudflared:
     image: cloudflare/cloudflared:latest
@@ -131,7 +131,7 @@ docker compose logs -f labelgate
 ```
 
 - **日志**：没有 `level=WARN msg="reconcile problem"` 这样的行。
-- **控制台**：打开 `http://127.0.0.1:8080`，用 `LABELGATE_API_TOKEN` 登录，所有资源都应是 `active`。
+- **控制台**：打开 `http://127.0.0.1:28111`，用 `LABELGATE_API_TOKEN` 登录，所有资源都应是 `active`。
 - **DNS**：`dig +short www.example.com` 返回 Cloudflare 的 IP（开启代理的记录不会暴露真实 IP）。
 - **隧道**：`curl -I https://app.example.com` 能拿到应用的响应。
 

@@ -103,7 +103,7 @@ Labelgate 只会删除自己创建的资源，参见[所有权与冲突](/zh/doc
 | 键 | 环境变量 | 默认值 | 作用 |
 |----|----------|--------|------|
 | `api.enabled` | `LABELGATE_API_ENABLED` | `true` | 提供 API 和 Dashboard。 |
-| `api.address` | `LABELGATE_API_ADDRESS` | `:8080` | 监听地址。 |
+| `api.address` | `LABELGATE_API_ADDRESS` | `:28111` | 监听地址。 |
 | `api.base_path` | `LABELGATE_API_BASE_PATH` | `/api` | API 路径。以 `/` 开头，不能以 `/` 结尾，不能是 `/dashboard`。 |
 | `api.token` | `LABELGATE_API_TOKEN` | - | 使用 API 和 Dashboard 时**必填**。至少 16 个字符。留空则两者都关闭。 |
 
@@ -151,7 +151,7 @@ main 实例上用于接入 [agent](/zh/docs/examples/multi-host) 的设置。
 | 键 | 环境变量 | 默认值 | 作用 |
 |----|----------|--------|------|
 | `agent.enabled` | `LABELGATE_AGENT_ENABLED` | `false` | 接受 agent 连接。 |
-| `agent.listen` | `LABELGATE_AGENT_LISTEN` | `:8081` | 监听地址。agent 连接 `wss://<host>:8081/ws`。 |
+| `agent.listen` | `LABELGATE_AGENT_LISTEN` | `:28112` | 监听地址。agent 连接 `wss://<host>:28112/ws`。 |
 | `agent.accept_token` | `LABELGATE_AGENT_ACCEPT_TOKEN` | - | 给未列在 `agent.agents` 中的 agent 使用的共享 token。参见 [Agent token](#agent-tokens)。 |
 | `agent.accept_hostnames` | `LABELGATE_AGENT_ACCEPT_HOSTNAMES` | 任意 | 这些 agent 可用的主机名，支持通配：`*.edge.example.com`。通配符主机名需要完全相同的条目。 |
 | `agent.accept_tunnels` | `LABELGATE_AGENT_ACCEPT_TUNNELS` | 默认 tunnel | 这些 agent 可用的 tunnel：`default`、`cloudflare.tunnels` 中的名字或 tunnel ID。 |
@@ -200,8 +200,8 @@ openssl rand -hex 32
 | 键 | 环境变量 | 默认值 | 作用 |
 |----|----------|--------|------|
 | `connect.mode` | `LABELGATE_CONNECT_MODE` | `outbound` | `outbound`：agent 连接 main。`inbound`：main 连接 agent。 |
-| `connect.endpoint` | `LABELGATE_CONNECT_ENDPOINT` | - | outbound 时**必填**。main 的地址，要带 `/ws`：`wss://main.example.com:8081/ws`。 |
-| `connect.listen` | `LABELGATE_CONNECT_LISTEN` | - | inbound 时**必填**。监听地址，如 `:8082`。 |
+| `connect.endpoint` | `LABELGATE_CONNECT_ENDPOINT` | - | outbound 时**必填**。main 的地址，要带 `/ws`：`wss://main.example.com:28112/ws`。 |
+| `connect.listen` | `LABELGATE_CONNECT_LISTEN` | - | inbound 时**必填**。监听地址，如 `:28113`。 |
 | `connect.token` | `LABELGATE_CONNECT_TOKEN` | - | **必填。** 与 main 上的 token 相同。参见 [Agent token](#agent-tokens)。 |
 | `connect.agent_id` | `LABELGATE_CONNECT_AGENT_ID` | 由机器 ID 生成 | Agent ID。默认取自 `/etc/machine-id`，否则用主机名。请设置成与 main 上一致。 |
 | `connect.heartbeat_interval` | `LABELGATE_CONNECT_HEARTBEAT_INTERVAL` | `30s` | agent 多久发送一次完整上报。最小 `1s`。 |

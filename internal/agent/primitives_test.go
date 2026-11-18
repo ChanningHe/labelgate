@@ -175,12 +175,12 @@ func TestDecodeEdgeCases(t *testing.T) {
 
 func TestValidateWSURL(t *testing.T) {
 	cases := map[string]bool{
-		"ws://main:8081/ws":  true,
+		"ws://main:28112/ws": true,
 		"wss://main/ws":      true,
 		"http://main/ws":     false,
 		"ws:///ws":           false,
 		"ws://[::1":          false,
-		"main:8081":          false,
+		"main:28112":         false,
 		"wss://user:pw@h/ws": true,
 	}
 	for raw, ok := range cases {

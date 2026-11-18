@@ -12,7 +12,7 @@ description: 各部分运行在哪里，以及 Labelgate、agent、cloudflared �
 │          │               │       │          │            │
 │          ▼               │  /ws  │          ▼            │
 │ Labelgate main  ◄────────┼───────┼── Labelgate agent     │
-│  - dashboard + API :8080 │       └───────────────────────┘
+│  - dashboard/API :28111  │       └───────────────────────┘
 │  - 数据库                │
 └──────────┬───────────────┘
            │ Cloudflare API
@@ -35,8 +35,8 @@ description: 各部分运行在哪里，以及 Labelgate、agent、cloudflared �
 
 | 项目 | 默认值 | 配置项 |
 |------|--------|--------|
-| dashboard 和 API | `:8080` | `api.address`（`LABELGATE_API_ADDRESS`） |
-| main 上的 agent 监听 | `:8081`，路径 `/ws` | `agent.listen`（`LABELGATE_AGENT_LISTEN`），需开启 `agent.enabled`（`LABELGATE_AGENT_ENABLED`） |
+| dashboard 和 API | `:28111` | `api.address`（`LABELGATE_API_ADDRESS`） |
+| main 上的 agent 监听 | `:28112`，路径 `/ws` | `agent.listen`（`LABELGATE_AGENT_LISTEN`），需开启 `agent.enabled`（`LABELGATE_AGENT_ENABLED`） |
 | 数据库 | `/app/config/labelgate.db` | `db.path`（`LABELGATE_DB_PATH`） |
 
 请备份 `/app/config` 卷，里面记录了 Labelgate 创建过哪些资源（参见[所有权与冲突](/zh/docs/ownership#recovering-from-database-loss)）。

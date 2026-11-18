@@ -60,7 +60,7 @@ Add labels to a container, and Labelgate creates the Cloudflare DNS record, tunn
          - LABELGATE_CLOUDFLARE_TUNNEL_ID
          - LABELGATE_API_TOKEN
        ports:
-         - "127.0.0.1:8080:8080"     # dashboard, local only
+         - "127.0.0.1:28111:28111"     # dashboard, local only
 
      cloudflared:
        image: cloudflare/cloudflared:latest
@@ -89,7 +89,7 @@ Add labels to a container, and Labelgate creates the Cloudflare DNS record, tunn
    docker compose up -d
    ```
 
-Open `https://app.example.com`. The dashboard is at `http://localhost:8080/dashboard/`; sign in with your `LABELGATE_API_TOKEN`.
+Open `https://app.example.com`. The dashboard is at `http://localhost:28111/dashboard/`; sign in with your `LABELGATE_API_TOKEN`.
 
 Use the `v0.3` image tag. There is no `latest` tag.
 

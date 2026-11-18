@@ -35,14 +35,14 @@
 
   "api": {
     "enabled": true,
-    "address": ":8080",
+    "address": ":28111",
     "base_path": "/api",
     "token": "change-me-to-a-long-random-string"
   },
 
   "agent": {
     "enabled": false,
-    "listen": ":8081",
+    "listen": ":28112",
     "accept_services": []
   }
 }
