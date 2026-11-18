@@ -39,12 +39,13 @@ const (
 //     (re)subscription, so nothing between a list and the subscription is lost;
 //     failures reconnect with ctx-aware backoff forever.
 type Source struct {
-	cli    *client.Client
-	filter string
-	poll   time.Duration
-	retry  config.RetryConfig
-	log    *slog.Logger
-	now    func() time.Time
+	cli      *client.Client
+	endpoint string // for error messages
+	filter   string
+	poll     time.Duration
+	retry    config.RetryConfig
+	log      *slog.Logger
+	now      func() time.Time
 }
 
 var _ source.Source = (*Source)(nil)
@@ -78,12 +79,13 @@ func New(cfg config.DockerConfig, retry config.RetryConfig, log *slog.Logger) (*
 		return nil, fmt.Errorf("docker: create client for %q: %w", endpoint, err)
 	}
 	return &Source{
-		cli:    cli,
-		filter: cfg.FilterLabel,
-		poll:   cfg.PollInterval,
-		retry:  retry,
-		log:    log,
-		now:    time.Now,
+		cli:      cli,
+		endpoint: endpoint,
+		filter:   cfg.FilterLabel,
+		poll:     cfg.PollInterval,
+		retry:    retry,
+		log:      log,
+		now:      time.Now,
 	}, nil
 }
 
@@ -91,7 +93,7 @@ func New(cfg config.DockerConfig, retry config.RetryConfig, log *slog.Logger) (*
 func endpointScheme(endpoint string) (string, error) {
 	scheme, rest, ok := strings.Cut(endpoint, "://")
 	if !ok || rest == "" {
-		return "", fmt.Errorf("docker: invalid endpoint %q: want unix:///path or tcp://host:port", endpoint)
+		return "", fmt.Errorf("docker: invalid endpoint %q: want unix:///path or tcp://host:port (%s)", endpoint, config.KeyWithEnv("docker.endpoint"))
 	}
 	switch scheme {
 	case schemeUnix, schemeTCP:
@@ -110,7 +112,7 @@ func (s *Source) Close() error { return s.cli.Close() }
 func (s *Source) Snapshot(ctx context.Context) (model.Snapshot, error) {
 	res, err := s.cli.ContainerList(ctx, client.ContainerListOptions{Filters: s.labelFilters(nil)})
 	if err != nil {
-		return model.Snapshot{}, fmt.Errorf("docker: list containers: %w", err)
+		return model.Snapshot{}, fmt.Errorf("docker: cannot list containers: %w", explain(s.endpoint, err))
 	}
 	containers := make([]model.Container, 0, len(res.Items))
 	for _, c := range res.Items {
