@@ -31,8 +31,11 @@ Add labels to a container, and Labelgate creates the Cloudflare DNS record, tunn
    LABELGATE_CLOUDFLARE_API_TOKEN=your-api-token
    LABELGATE_CLOUDFLARE_ACCOUNT_ID=your-account-id
    LABELGATE_CLOUDFLARE_TUNNEL_ID=your-tunnel-id
-   LABELGATE_API_TOKEN=output-of-openssl-rand-hex-32   # dashboard login
-   TUNNEL_TOKEN=your-tunnel-token                      # for cloudflared
+   # Dashboard/API login token (at least 16 characters). Generate one with:
+   #   openssl rand -hex 32
+   LABELGATE_API_TOKEN=paste-the-generated-token-here
+   # From the Cloudflare tunnel page, for cloudflared
+   TUNNEL_TOKEN=your-tunnel-token
    ```
 
 2. Prepare the data folder and find the Docker socket's group:
