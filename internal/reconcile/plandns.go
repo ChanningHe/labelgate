@@ -125,9 +125,9 @@ func planDNS(row model.Resource, w claim, zl zoneLive, observed bool, instanceID
 	case w.Err != "":
 		return failDNS(k, w.Err)
 	case !observed:
-		return failDNS(k, zoneNotRead(w.Zone.ID))
+		return failDNS(k, zoneNotRead(zoneRef(w.Zone)))
 	case zl.Err != nil:
-		return failDNS(k, "cannot list the DNS records of zone "+w.Zone.Name+": "+zl.Err.Error())
+		return failDNS(k, "cannot list the DNS records of "+zoneRef(w.Zone)+": "+zl.Err.Error())
 	}
 	want := desiredRecord(row, instanceID)
 	op := dnsOp{Key: k, Zone: w.Zone}
@@ -199,9 +199,9 @@ func planDNSDelete(row model.Resource, zl zoneLive, observed bool, instanceID st
 		op.Action = dnsDrop
 		return op
 	case !observed:
-		return failDNS(k, zoneNotRead(row.ZoneID))
+		return failDNS(k, zoneNotRead(rowZoneRef(row)))
 	case zl.Err != nil:
-		return failDNS(k, "cannot list the DNS records of zone "+row.ZoneID+": "+zl.Err.Error())
+		return failDNS(k, "cannot list the DNS records of "+rowZoneRef(row)+": "+zl.Err.Error())
 	}
 	if row.CFID == "" {
 		return deleteByIdentity(op, row, zl.Records, instanceID)
