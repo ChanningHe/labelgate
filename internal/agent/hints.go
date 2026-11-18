@@ -61,7 +61,7 @@ func dialHint(err error, t dialTarget) string {
 	var se *statusError
 	switch {
 	case isUntrustedCert(err):
-		return fmt.Sprintf("%s's TLS certificate is not trusted: set %s to the CA that signed it (%s=true skips the check; not recommended)",
+		return fmt.Sprintf("%s's TLS certificate is not trusted: set %s to the CA that signed it, or set %s=true to skip the check (not recommended)",
 			t.peer, config.KeyWithEnv(t.section+".tls.ca"), config.KeyWithEnv(t.section+".tls.insecure_skip_verify"))
 	case isHostnameMismatch(err):
 		return fmt.Sprintf("%s's TLS certificate does not list the host in %s: use a host name the certificate is issued for", t.peer, t.urlKey)

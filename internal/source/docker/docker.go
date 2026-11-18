@@ -93,7 +93,7 @@ func New(cfg config.DockerConfig, retry config.RetryConfig, log *slog.Logger) (*
 func endpointScheme(endpoint string) (string, error) {
 	scheme, rest, ok := strings.Cut(endpoint, "://")
 	if !ok || rest == "" {
-		return "", fmt.Errorf("docker: invalid endpoint %q: want unix:///path or tcp://host:port (%s)", endpoint, config.KeyWithEnv("docker.endpoint"))
+		return "", fmt.Errorf("docker: invalid endpoint %q: want unix:///path or tcp://host:port; fix %s", endpoint, config.KeyWithEnv("docker.endpoint"))
 	}
 	switch scheme {
 	case schemeUnix, schemeTCP:
