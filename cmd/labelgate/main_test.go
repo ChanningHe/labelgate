@@ -467,6 +467,11 @@ func TestAgentMode(t *testing.T) {
 		if h.builds["store"] != 0 || h.builds["cloudflare"] != 0 {
 			t.Errorf("agent mode must not open a store or Cloudflare client: %v", h.builds)
 		}
+		// The agent logs "Agent mode" once it has resolved its ID; an earlier
+		// line here would show the unresolved (often empty) ID.
+		if strings.Contains(log.String(), `msg="Agent mode"`) {
+			t.Errorf("startup must leave the Agent mode line to the agent:\n%s", log.String())
+		}
 	})
 	t.Run("docker failure", func(t *testing.T) {
 		h := newHarness(t)

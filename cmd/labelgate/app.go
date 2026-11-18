@@ -120,7 +120,6 @@ func realBuilders() builders {
 
 // runAgent runs agent mode: local Docker source reported to a main instance.
 func (a *app) runAgent(ctx context.Context, cfg config.Config, log *slog.Logger) error {
-	log.Info("Agent mode", "agent_id", cfg.Connect.AgentID, "connect_mode", string(cfg.Connect.Mode))
 	src, err := a.b.newDocker(cfg.Docker, cfg.Retry, log)
 	if err != nil {
 		return fmt.Errorf("docker source: %w", err)
