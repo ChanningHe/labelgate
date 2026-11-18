@@ -93,6 +93,8 @@ agent:
 
 ### Allow-lists
 
+All of these keys belong to the **main** instance's configuration, not the agent's. A rejection reason names the agent, the rejected value, the exact key here and the value to add (see [Troubleshooting](/docs/troubleshooting/common-issues#agent-service-host)).
+
 | Setting | Applies to | Effect |
 |---------|-----------|--------|
 | `agent.agents.<id>.hostnames` | one named agent | Glob list of hostnames this agent may claim. Empty = unrestricted (except wildcard hostnames, see below) |
@@ -109,7 +111,7 @@ Globs use `path.Match` syntax on lower-case hostnames (`*.example.com`). Note th
 
 **Wildcard hostnames** (`*.example.com` as the hostname itself) are allowed for an agent only when its list contains exactly that entry. A glob such as `*` or `*.com` never matches a wildcard hostname, and an empty (unrestricted) list never allows one.
 
-**Agents cannot point CNAMEs at tunnels.** A DNS label of an agent with type `CNAME` and a target under `cfargotunnel.com` is rejected: such a record would route the hostname into a tunnel without the tunnel allow-list. Use a tunnel label instead.
+**Agents cannot point CNAMEs at tunnels.** A DNS label of an agent with type `CNAME` and a target under `cfargotunnel.com` is rejected: such a record would route the hostname into a tunnel without the tunnel allow-list. Use a tunnel label instead. No allow-list can permit it.
 
 Tunnel resolution for an agent's service: the label's `tunnel` > the agent's `default_tunnel` > the global default tunnel, and the result **must be in the agent's allowed tunnels**.
 

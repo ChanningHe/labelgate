@@ -31,13 +31,35 @@ Conflicts are shown in the dashboard and in `GET /api/resources/*` as resources 
 
 **Solution:** Define every service for that hostname on the same host, or free the hostname on the other source first (see [Ownership & Conflicts](/docs/ownership#conflicts-between-claims)).
 
-### `service host ... is not allowed for agents`
+### `service host ... is not allowed for agents` [#agent-service-host]
 
-**Problem:** A tunnel label on an agent host is rejected, for example for `http://web:80`.
+**Problem:** A tunnel label on an agent host is rejected, for example for `http://traefik:80`. The stored reason reads:
 
-**Cause:** Agent tunnel services must target an IP address, or a host listed in the agent's `services` (`agent.accept_services` for `accept_token` agents). Host names are resolved on the agent host and could reach it or a metadata service.
+```
+agent "edge1": service host "traefik" is a host name, which agents may only use if allow-listed; add "traefik" to agent.agents.edge1.services in the main instance config (or use the origin's IP address)
+```
 
-**Solution:** Add the name, glob, IP or CIDR to the agent's `services` on the main instance, or use the container's IP address. See [SSRF guard](/docs/examples/multi-host#ssrf-guard).
+**Cause:** Agent tunnel services must target an IP address, or a host listed in the agent's `services` allow-list. Host names are resolved on the agent host and could reach it or a metadata service. The allow-list is part of the **main** instance's configuration, not the agent's: changing the agent's own config or labels does not help.
+
+**Solution:** On the **main** instance, add the value quoted in the message to the key it names, then restart the main instance (configuration is read at startup). For an agent listed under `agent.agents`:
+
+```yaml
+agent:
+  agents:
+    edge1:                      # the agent ID quoted in the message
+      token: "<unchanged>"
+      services: ["traefik"]     # a host name, glob (*.svc.internal), IP or CIDR
+```
+
+For an agent admitted through `agent.accept_token`, the key is `agent.accept_services`:
+
+```yaml
+agent:
+  accept_token: "<unchanged>"
+  accept_services: ["traefik"]
+```
+
+or set `LABELGATE_AGENT_ACCEPT_SERVICES=traefik` (comma-separated for several entries). Alternatively, point the label at the container's IP address. The same message form appears for loopback, link-local and other local IP addresses (`service target is the loopback address 127.0.0.1 ...`): adding that exact IP, or a CIDR containing it, to the same key permits it. Services that no allow-list can permit (`unix:` sockets, `bastion`, URLs with user info, shorthand IPs such as `127.1`) say so in the message and what to use instead. See [SSRF guard](/docs/examples/multi-host#ssrf-guard).
 
 ### DNS and Tunnel on Same Hostname
 
@@ -202,9 +224,14 @@ labels:
 
 **Problem:** An agent's service shows an error such as a hostname or tunnel not allowed, or a service URL rejected.
 
-**Cause:** The claim violated the agent's allow-lists (`hostnames`, `tunnels`, or `accept_hostnames` / `accept_tunnels`), or the tunnel `service` points at `localhost`, a loopback or link-local address, a unix socket or `bastion` (SSRF guard). The stored reasons read `agent <id> may not claim hostname <host>`, `agent <id> may not use tunnel <ref>` or, for the guard, for example `service host "localhost" is not allowed for agents`.
+**Cause:** The claim violated the agent's allow-lists on the main instance (`hostnames`, `tunnels`, `services`, or `accept_hostnames` / `accept_tunnels` / `accept_services`), or the tunnel `service` is something no allow-list can permit (a `unix:` socket, `bastion`, a URL with user info), or the agent pointed a CNAME at `cfargotunnel.com`. Every stored reason is one line that names the agent, the rejected value, the config key to change in the main instance config and the value to add, for example:
 
-**Solution:** Adjust the agent's entry on the main instance, or use a service address the agent host exposes on a routable address.
+- `agent "edge1": hostname "app.example.com" does not match the agent's hostnames allow-list; add "app.example.com" (or a glob matching it) to agent.agents.edge1.hostnames in the main instance config`
+- `agent "edge1": wildcard hostname "*.example.com" is only allowed by an identical entry (...); add "*.example.com" to agent.agents.edge1.hostnames in the main instance config`
+- `agent "edge1": tunnel "other" is not in the agent's allowed tunnels; add "other" to agent.agents.edge1.tunnels in the main instance config`
+- for `accept_token` agents the key is `agent.accept_<list>` (with its `LABELGATE_AGENT_ACCEPT_<LIST>` variable) instead of `agent.agents.<id>.<list>`.
+
+**Solution:** Apply the change the message names on the **main** instance (not on the agent), or fix the label as the message says. For service hosts see [`service host ... is not allowed for agents`](#agent-service-host) above.
 
 ### Agent Keeps Reconnecting
 
