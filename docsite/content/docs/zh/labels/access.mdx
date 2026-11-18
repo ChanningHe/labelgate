@@ -1,207 +1,142 @@
 ---
-title: Access Policy Labels
-description: Labelgate Zero Trust Access Policy 标签的完整参考。
+title: Access 标签
+description: 用标签在主机名前加一道 Cloudflare Zero Trust Access 登录。
 ---
 
-Access Policy 标签允许你使用 Cloudflare Zero Trust Access 保护服务。它们通过定义可重用的策略模板来工作，这些模板从 tunnel 或 DNS 服务中引用。
+Access 标签会在主机名前加一道 Cloudflare Access 登录。分两步：先定义策略，再在 tunnel 或 DNS 标签里引用它。
 
-## How It Works
+```yaml
+services:
+  admin:
+    image: nginx:alpine
+    labels:
+      # 1. 定义一个名为 "team" 的策略
+      labelgate.access.team.policy.include.emails: "alice@example.com,bob@example.com"
+      # 2. 引用它
+      labelgate.tunnel.admin.hostname: "admin.example.com"
+      labelgate.tunnel.admin.service: "http://admin:80"
+      labelgate.tunnel.admin.access: "team"
+```
 
-1. **Define** 使用 `labelgate.access.<name>.*` 标签定义访问策略模板
-2. **Reference** 使用 `access` 属性从 tunnel 或 DNS 服务中引用它
+现在只有 Alice 和 Bob 通过 Cloudflare Access 登录后才能打开 `admin.example.com`。
+
+## 策略标签 [#policy-properties]
+
+标签格式都是 `labelgate.access.<name>.<property>`。`<name>` 就是策略名，在 `access: "<name>"` 中引用。它遵循[名字规则](/zh/docs/labels#service-names)。
+
+| 属性 | 必填 | 默认值 | 示例 | 含义 |
+|------|------|--------|------|------|
+| `policy.include.<selector>` | `allow` 和 `block` 必填 | - | `policy.include.emails` | 策略作用于谁。满足任意一条即可。 |
+| `policy.require.<selector>` | 否 | - | `policy.require.country` | 还必须同时满足这里的所有条件。 |
+| `policy.exclude.<selector>` | 否 | - | `policy.exclude.emails` | 永远不作用于这些人。 |
+| `policy.decision` | 否 | `allow` | `bypass` | 怎么处理。参见[决策](#decisions)。 |
+| `policy.name` | 否 | 应用名 | `Team only` | 在 Cloudflare 中显示的策略名。 |
+| `app_name` | 否 | `labelgate-<name>` | `Admin panel` | 在 Cloudflare 中显示的 Access 应用名。 |
+| `session_duration` | 否 | `24h` | `12h` | 登录有效期。用 `m` 或 `h`（`30m`、`720h`），不支持 `7d`。 |
+
+### 决策 [#decisions]
+
+| `policy.decision` | 含义 |
+|-------------------|------|
+| `allow` | 匹配的用户登录后可以访问。需要 `include` 规则。 |
+| `block` | 拦截匹配的用户。需要 `include` 规则。 |
+| `bypass` | 匹配的请求无需登录即可访问。 |
+| `service_auth` | 给机器用：凭 service token 或客户端证书访问，无需登录。 |
+
+### 选择器 [#rule-selectors]
+
+多个值用逗号分隔。
+
+| 选择器 | 值 | 示例 |
+|--------|----|------|
+| `emails` | 邮箱地址 | `alice@example.com,bob@example.com` |
+| `emails_ending_in` | 邮箱域名 | `example.com` |
+| `ip_ranges` | IP 地址或 CIDR 网段 | `203.0.113.0/24,198.51.100.7` |
+| `country` | 国家代码 | `US,GB` |
+| `everyone` | 无需值（写 `""`） | `""` |
+| `service_token` | Service token ID | `<token-id>` |
+| `access_groups` | Access 组 ID | `<group-id>` |
+| `certificate` | 无需值（写 `""`）；任何有效的客户端证书 | `""` |
+| `login_methods` | 登录方式（身份提供商）ID | `<idp-id>` |
+
+## 常用示例 [#examples]
+
+### 所有公司邮箱
 
 ```yaml
 labels:
-  # Step 1: Define a policy named "internal"
-  labelgate.access.internal.policy.decision: "allow"
-  labelgate.access.internal.policy.include.emails: "admin@example.com,dev@example.com"
-
-  # Step 2: Reference it from a tunnel service
-  labelgate.tunnel.web.hostname: "app.example.com"
-  labelgate.tunnel.web.service: "http://app:80"
-  labelgate.tunnel.web.access: "internal"
+  labelgate.access.staff.policy.include.emails_ending_in: "example.com"
+  labelgate.tunnel.wiki.hostname: "wiki.example.com"
+  labelgate.tunnel.wiki.service: "http://wiki:80"
+  labelgate.tunnel.wiki.access: "staff"
 ```
 
-## Policy Definition Format
-
-```
-labelgate.access.<policy_name>.<property>=<value>
-```
-
-### Policy Properties
-
-| Property | Default | Description |
-|----------|---------|-------------|
-| `app_name` | `labelgate-<name>` | Cloudflare Access application name |
-| `session_duration` | `24h` | 会话时长，必须是正的 Go 时长（`30m`、`12h`、`720h`），不支持以天为单位（`7d`） |
-| `policy.decision` | `allow` | Policy action: `allow`, `block`, `bypass`, `service_auth` |
-| `policy.name` | - | Policy display name in CF dashboard |
-| `policy.include.<selector>` | - | Include rules (OR logic) |
-| `policy.require.<selector>` | - | Require rules (AND logic) |
-| `policy.exclude.<selector>` | - | Exclude rules (NOT logic) |
-
-### Decisions
-
-| Decision | CF API Value | Description |
-|----------|-------------|-------------|
-| `allow` | `allow` | Allow access if rules match |
-| `block` | `deny` | Block access if rules match |
-| `bypass` | `bypass` | Skip authentication entirely |
-| `service_auth` | `non_identity` | Require service token or mTLS certificate |
-
-<Callout type="warn">
-`allow` 和 `block` 决策需要至少一个 `include` 规则，否则该定义会被丢弃并报错。
-</Callout>
-
-一个定义只描述一条策略：它的 `policy.*` 标签只会生成一条 Cloudflare 策略（决策不会叠加）。策略名（标签键中的 `<policy_name>`）遵循服务名规则，`default` 会被忽略。未知的选择器（`policy.include.foo`）或需要值却没有值的选择器都会报错，并丢弃该定义。
-
-### Rule Selectors
-
-| Selector | CF Web UI Name | Example Values |
-|----------|---------------|----------------|
-| `emails` | Emails | `user@example.com,admin@example.com` |
-| `emails_ending_in` | Emails ending in | `@example.com,@company.io` |
-| `ip_ranges` | IP ranges | `192.168.1.0/24,10.0.0.0/8` |
-| `country` | Country | `US,GB,JP` |
-| `everyone` | Everyone | (no value needed) |
-| `service_token` | Service Token | `<token-id>` |
-| `access_groups` | Access groups | `<group-id>` |
-| `certificate` | Valid Certificate | (no value needed) |
-| `login_methods` | Login Methods | `<method-id>` |
-
-多个值用逗号分隔。`everyone` 和 `certificate` 不接受值（标签的值会被忽略，写 `""` 即可），其他选择器至少需要一个值。
-
-## Rule Logic
-
-- **Include** 规则使用 **OR** 逻辑 - 任何匹配的规则都会授予/阻止访问
-- **Require** 规则使用 **AND** 逻辑 - 所有规则都必须匹配
-- **Exclude** 规则使用 **NOT** 逻辑 - 匹配的规则被豁免
-
-## Examples
-
-### Allow specific emails
+### 仅限办公网络
 
 ```yaml
 labels:
-  labelgate.access.team.policy.decision: "allow"
-  labelgate.access.team.policy.include.emails: "alice@example.com,bob@example.com"
-  labelgate.access.team.session_duration: "12h"
-
-  labelgate.tunnel.admin.hostname: "admin.example.com"
-  labelgate.tunnel.admin.service: "http://admin:8080"
-  labelgate.tunnel.admin.access: "team"
+  labelgate.access.office.policy.include.ip_ranges: "203.0.113.0/24"
+  labelgate.tunnel.intranet.hostname: "intranet.example.com"
+  labelgate.tunnel.intranet.service: "http://intranet:80"
+  labelgate.tunnel.intranet.access: "office"
 ```
 
-### Allow by email domain
-
-```yaml
-labels:
-  labelgate.access.company.policy.decision: "allow"
-  labelgate.access.company.policy.include.emails_ending_in: "@company.io"
-
-  labelgate.tunnel.app.hostname: "app.company.io"
-  labelgate.tunnel.app.service: "http://app:80"
-  labelgate.tunnel.app.access: "company"
-```
-
-### IP-restricted access
-
-```yaml
-labels:
-  labelgate.access.office.policy.decision: "allow"
-  labelgate.access.office.policy.include.ip_ranges: "203.0.113.0/24,198.51.100.0/24"
-
-  labelgate.tunnel.internal.hostname: "internal.example.com"
-  labelgate.tunnel.internal.service: "http://internal:3000"
-  labelgate.tunnel.internal.access: "office"
-```
-
-### Bypass authentication (public access)
+### 公开访问，无需登录
 
 ```yaml
 labels:
   labelgate.access.public.policy.decision: "bypass"
   labelgate.access.public.policy.include.everyone: ""
-
   labelgate.tunnel.docs.hostname: "docs.example.com"
   labelgate.tunnel.docs.service: "http://docs:80"
   labelgate.tunnel.docs.access: "public"
 ```
 
-### Service token authentication
+### 机器凭 service token 访问
 
 ```yaml
 labels:
   labelgate.access.machine.policy.decision: "service_auth"
-  labelgate.access.machine.policy.include.service_token: "your-service-token-id"
-
+  labelgate.access.machine.policy.include.service_token: "<token-id>"
   labelgate.tunnel.api.hostname: "api.example.com"
   labelgate.tunnel.api.service: "http://api:8080"
   labelgate.tunnel.api.access: "machine"
 ```
 
-### Combined rules (include + require + exclude)
+### 公司邮箱、仅限美国、排除外包人员
 
 ```yaml
 labels:
-  # Allow company emails, require US location, exclude contractors
-  labelgate.access.secure.policy.decision: "allow"
-  labelgate.access.secure.policy.include.emails_ending_in: "@company.io"
+  labelgate.access.secure.policy.include.emails_ending_in: "example.com"
   labelgate.access.secure.policy.require.country: "US"
-  labelgate.access.secure.policy.exclude.emails: "contractor1@company.io,contractor2@company.io"
-
-  labelgate.tunnel.secure.hostname: "secure.company.io"
-  labelgate.tunnel.secure.service: "http://secure:443"
-  labelgate.tunnel.secure.access: "secure"
+  labelgate.access.secure.policy.exclude.emails: "contractor@example.com"
+  # 引用方式：labelgate.tunnel.<name>.access: "secure"
 ```
 
-### Shared policy across multiple services
+### 多个主机名共用一个策略
+
+策略只需定义一次，同一主机上的任何容器都能引用。
 
 ```yaml
-labels:
-  # Define one policy
-  labelgate.access.internal.policy.decision: "allow"
-  labelgate.access.internal.policy.include.emails_ending_in: "@example.com"
+services:
+  policies:
+    image: busybox
+    command: sleep infinity    # 必须保持运行
+    labels:
+      labelgate.access.team.policy.include.emails_ending_in: "example.com"
 
-  # Reuse it across multiple services
-  labelgate.tunnel.app.hostname: "app.example.com"
-  labelgate.tunnel.app.service: "http://app:80"
-  labelgate.tunnel.app.access: "internal"
-
-  labelgate.tunnel.admin.hostname: "admin.example.com"
-  labelgate.tunnel.admin.service: "http://admin:8080"
-  labelgate.tunnel.admin.access: "internal"
+  app:
+    image: nginx:alpine
+    labels:
+      labelgate.tunnel.app.hostname: "app.example.com"
+      labelgate.tunnel.app.service: "http://app:80"
+      labelgate.tunnel.app.access: "team"
 ```
 
-## 所有权
+## 注意事项
 
-Labelgate 创建的 Access 应用带有 Access 标签 `labelgate-<instance_id>`。可复用策略按**主机名**创建（命名为 `<policy.name 或应用名称> (<hostname>)`），其 ID 记录在 Labelgate 的数据库中。只有这些对象才会被修改或删除：
-
-- 只要 include、require、exclude、decision 或 name 有差异，策略就会在**每次协调时更新**。从标签中删掉 `bob@example.com`，下一次同步就会撤销 Bob 的访问权限。
-- 不是 Labelgate 创建的策略或应用，即使名称相同，也不会被收编、更新或删除。如果主机名对应的域名上已有一个没有 Labelgate 标签的应用，该服务会报 `conflict: existing record not owned by labelgate`。
-- 如果更新应用失败，该服务进入错误状态。Labelgate 绝不会退而求其次去创建第二个应用。
-
-策略定义在**同一来源**内解析：先找同一容器，再找同一主机或 agent 的其他容器。引用了没有任何定义提供的名称时，服务会以 `access policy definition "<name>" not found` 被拒绝。同一来源内两个同名但内容不同的定义会被判定为有歧义（`ambiguous access policy definition "<name>"`）而被拒绝，并且 agent 永远无法绑定或修改 main 主机上的定义。参见[所有权与冲突](/zh/docs/ownership#access-applications-and-policies)。
-
-## 清理行为
-
-Access 策略没有独立的 `cleanup` 标签。清理行为**继承自引用该策略的 tunnel 或 DNS 服务**，`cleanup` 默认为 `true`。
-
-```yaml
-labels:
-  labelgate.access.team.policy.decision: "allow"
-  labelgate.access.team.policy.include.emails_ending_in: "@company.io"
-
-  labelgate.tunnel.web.hostname: "app.company.io"
-  labelgate.tunnel.web.service: "http://app:80"
-  labelgate.tunnel.web.access: "team"
-  labelgate.tunnel.web.cleanup: "false"  # 同时控制 access 的清理行为
-```
-
-当引用服务启用了 `cleanup` 时（默认）：
-- 容器停止后，Cloudflare 上的 Access 应用将在配置的 `sync.remove_delay`（默认 30 分钟）后被删除
-- Labelgate 为它创建的可复用策略也会一并删除
-
-当 `cleanup` 被关闭时：
-- Access 应用在 Labelgate 中标记为 **orphaned**，但在 Cloudflare 上保留
-- 容器重启后会自动重新激活
+- **策略放在哪里。** 放在同一个容器里，或同一主机上任何正在运行的容器里。在 [agent](/zh/docs/examples/multi-host) 上，只看该 agent 上的容器。
+- **同名策略。** 容器自身的策略优先。否则，如果另外两个容器定义了同名但内容不同的策略，会报 `ambiguous access policy definition`，请改掉其中一个的名字。
+- **清理。** 策略没有 `cleanup` 标签，它的 Access 应用跟随引用它的 tunnel 或 DNS 标签一起清理或保留。
+- **修改会生效。** 修改标签（比如删掉一个邮箱）后，下次同步时 Cloudflare 上也会更新。
+- **不动已有应用。** 如果 Cloudflare 上已有不是 Labelgate 创建的、针对该主机名的 Access 应用，会报 `conflict: existing record not owned by labelgate`。参见[所有权与冲突](/zh/docs/ownership)。

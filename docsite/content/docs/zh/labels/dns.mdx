@@ -1,111 +1,99 @@
 ---
-title: DNS Labels
-description: Labelgate DNS 标签属性的完整参考。
+title: DNS 标签
+description: 用容器标签创建 Cloudflare DNS 记录。
 ---
 
-## Format
+一个标签就够了。下面会为 `app.example.com` 创建一条开启代理的 `A` 记录，指向本机的公网 IP：
 
+```yaml
+services:
+  web:
+    image: nginx:alpine
+    labels:
+      labelgate.dns.web.hostname: "app.example.com"
 ```
-labelgate.dns.<service_name>.<property>=<value>
-```
 
-非法的值和未知的属性都会报错，参见[严格校验](/zh/docs/labels#strict-validation)。
+容器删除 30 分钟后（`sync.remove_delay`），这条记录会被删除。
 
-## Properties
+## 标签 [#properties]
 
-| 属性 | 必填 | 默认值 | 说明 |
-|------|------|--------|------|
-| `hostname` | 是 | - | DNS 记录的完整域名（会规范化为小写） |
-| `type` | 否 | `A` | 记录类型：`A`、`AAAA`、`CNAME`、`TXT`、`MX`、`SRV`、`CAA`（不区分大小写） |
-| `target` | `A`/`AAAA`：否；其他类型：是 | `A`/`AAAA` 为 `auto` | 记录值。`auto` = 检测公网 IP，`container` = 容器 IP（两者都只适用于 `A` 和 `AAAA`），也可以是字面值。`CNAME`、`MX`、`SRV`、`TXT`、`CAA` 没有默认值，缺失时报 `target is required for <type> records` |
-| `proxied` | 否 | `true` | 启用 Cloudflare 代理（橙色云朵）。仅对 `A`、`AAAA`、`CNAME` 有效，其他类型永远不代理。接受 `true`/`false`、`1`/`0`、`yes`/`no`、`on`/`off`（不区分大小写），其他值会报错 |
-| `ttl` | 否 | 自动 | TTL（秒），范围 0-86400。省略、`0` 或 `1` 表示自动。启用代理时始终为自动 |
-| `credential` | 否 | 自动 | 凭据名称。为空表示先按 zone 匹配，再用根凭据 |
-| `cleanup` | 否 | `true` | 容器消失且超过 `sync.remove_delay` 后删除记录。只会删除 Labelgate 自己拥有的记录 |
-| `comment` | 否 | - | 追加在所有权标记**之后**的备注文字（整条备注会按 Cloudflare 的 100 字符上限截断） |
-| `priority` | 否 | `0` | `MX` 和 `SRV` 的优先级（0-65535） |
-| `weight` | 否 | `0` | `SRV` 的权重（0-65535） |
-| `port` | 否 | `0` | `SRV` 的端口（0-65535） |
-| `flags` | 否 | `0` | `CAA` 的 flags（0-255） |
-| `tag` | 否 | `issue` | `CAA` 的 tag：`issue`、`issuewild`、`iodef` |
-| `access` | 否 | - | 要应用的 [Access 策略定义](/zh/docs/labels/access)名称（小写字母、数字和连字符）。没有任何定义提供该名称时，服务会被拒绝，原因为 `access policy definition "<name>" not found` |
+标签格式都是 `labelgate.dns.<name>.<property>`。`<name>` 由你自己定，参见[名字部分](/zh/docs/labels#service-names)。
 
-<Callout type="info">
-`priority` **不做强制校验**：`MX` 或 `SRV` 记录省略它时，值为 `0`。只要这个值有意义，就请显式设置（MX 例如 `10`、`20`……）。`weight`、`port`、`flags` 和 `tag` 只对上表列出的记录类型生效。
-</Callout>
+| 属性 | 必填 | 默认值 | 示例 | 含义 |
+|------|------|--------|------|------|
+| `hostname` | 是 | - | `app.example.com` | 记录名。 |
+| `type` | 否 | `A` | `CNAME` | `A`、`AAAA`、`CNAME`、`TXT`、`MX`、`SRV` 或 `CAA`。 |
+| `target` | `A`/`AAAA` 否，其他类型是 | `auto` | `203.0.113.10` | 记录值。参见[目标值](#targets)。 |
+| `proxied` | 否 | `true` | `false` | 是否开启代理（橙色云朵）。只有 `A`、`AAAA`、`CNAME` 能开启。 |
+| `ttl` | 否 | 自动 | `300` | TTL 秒数，最大 `86400`。`0` 或 `1` 表示自动。开启代理时始终为自动。 |
+| `cleanup` | 否 | `true` | `false` | 容器删除后是否删除记录。`false` 表示保留。 |
+| `credential` | 否 | 自动 | `company` | 使用哪个 [API token](/zh/docs/configuration/reference#multi-credential-setup)。`default` 表示 `cloudflare.api_token`。 |
+| `access` | 否 | - | `team` | 在主机名前加一道 [Access 策略](/zh/docs/labels/access)。 |
+| `comment` | 否 | - | `blog` | 写进 Cloudflare 记录备注的附加文字。 |
+| `priority` | 否 | `0` | `10` | 仅 `MX` 和 `SRV`。0-65535。 |
+| `weight` | 否 | `0` | `5` | 仅 `SRV`。0-65535。 |
+| `port` | 否 | `0` | `5222` | 仅 `SRV`。0-65535。 |
+| `flags` | 否 | `0` | `128` | 仅 `CAA`。0-255。 |
+| `tag` | 否 | `issue` | `issuewild` | 仅 `CAA`。`issue`、`issuewild` 或 `iodef`。 |
 
-## 所有权与清理
+## 目标值 [#targets]
 
-Labelgate 创建的每条记录都会写入备注 `labelgate:<instance_id>`，`comment` 标签的内容会追加在其后（`labelgate:a1b2c3d4 your text`）。只有带这个标记的记录才会被更新或删除。如果已经存在名称和类型相同、但没有这个标记的记录，该服务会报 `conflict: existing record not owned by labelgate`；Labelgate 绝不会接管已有的记录。参见[所有权与冲突](/zh/docs/ownership)。
+`A` 和 `AAAA` 记录：
 
-`cleanup` 默认为 **`true`**：容器停止后，记录会在 `sync.remove_delay`（默认 30 分钟）之后被删除。设置 `cleanup: "false"` 则在容器消失后仍把记录保留在 Cloudflare 上。
+| `target` | 结果 |
+|----------|------|
+| `auto`（默认） | 本机公网 IP：`A` 用 IPv4，`AAAA` 用 IPv6。[agent](/zh/docs/examples/multi-host) 上的容器使用 agent 主机的公网 IP。 |
+| `container` | 容器自己的 IP 地址。 |
+| IP 地址 | 直接使用该地址，如 `A` 用 `203.0.113.10`，`AAAA` 用 `2001:db8::10`。 |
 
-## Record Types
+其他类型必须填写 `target`：
 
-### A / AAAA 记录
+- `CNAME`、`MX`、`SRV`：填主机名，如 `mail.example.com`。
+- `TXT`、`CAA`：填记录内容，原样写入。
 
-将主机名指向一个 IP 地址。
+如果 `auto` 或 `container` 找不到地址（比如没有公网 IPv6），记录会显示错误，Labelgate 每次同步都会重试。
+
+## 常用示例 [#examples]
+
+### 固定 IP，仅 DNS（灰色云朵）
 
 ```yaml
 labels:
   labelgate.dns.web.hostname: "app.example.com"
-  labelgate.dns.web.type: "A"
-  labelgate.dns.web.target: "203.0.113.1"
-  labelgate.dns.web.proxied: "true"
+  labelgate.dns.web.target: "203.0.113.10"
+  labelgate.dns.web.proxied: "false"
 ```
 
-**特殊的 `target` 值：**
-- `auto` - 自动检测主机的公网 IP 地址（`A` 用 IPv4，`AAAA` 用 IPv6；对于 agent 上的容器，使用该 agent 的公网 IP）
-- `container` - 使用容器的 IP 地址：`A` 取 IPv4 地址，`AAAA` 取全局 IPv6 地址，均来自按名称排序后第一个具有该地址的网络
-- 任何合法的 IPv4（`A`）或 IPv6（`AAAA`）地址。地址族不匹配会报错。
-
-如果 `auto` 或 `container` 无法解析（没有对应地址族的公网 IP，或容器没有该地址族的地址），服务会进入错误状态，并在每个周期重试。同一主机名的 `A`（或 `AAAA`）记录只能由一个服务拥有，因此无法通过多个服务实现 DNS 轮询。
-
-### CNAME 记录
-
-创建指向另一个主机名的别名。
+### 一个容器创建多条记录
 
 ```yaml
 labels:
+  labelgate.dns.root.hostname: "example.com"
   labelgate.dns.www.hostname: "www.example.com"
   labelgate.dns.www.type: "CNAME"
   labelgate.dns.www.target: "example.com"
 ```
 
-目标会像主机名一样被规范化（小写、去掉末尾的点），并且必须是合法的主机名；`MX` 和 `SRV` 的目标遵循同样的规则，而 `TXT` 和 `CAA` 的值则原样保留。一个主机名只能有一条 CNAME，并且不能与其他记录共存。出现冲突时会被如实报告，而不会被绕过。
-
-### TXT 记录
-
-添加文本记录（SPF、DKIM、验证等）。TXT 记录从不启用代理。
+### 邮件：MX 和 SPF
 
 ```yaml
 labels:
+  labelgate.dns.mx.hostname: "example.com"
+  labelgate.dns.mx.type: "MX"
+  labelgate.dns.mx.target: "mail.example.com"
+  labelgate.dns.mx.priority: "10"
   labelgate.dns.spf.hostname: "example.com"
   labelgate.dns.spf.type: "TXT"
-  labelgate.dns.spf.target: "v=spf1 include:_spf.google.com ~all"
+  labelgate.dns.spf.target: "v=spf1 mx ~all"
 ```
 
-### MX 记录
+`priority` 默认为 `0`，有需要时请明确设置。
 
-配置邮件交换记录。`priority` 默认为 `0`，建议显式设置。
+### SRV
 
 ```yaml
 labels:
-  labelgate.dns.mail.hostname: "example.com"
-  labelgate.dns.mail.type: "MX"
-  labelgate.dns.mail.target: "mail.provider.com"
-  labelgate.dns.mail.priority: "10"
-```
-
-同一主机名的多条 MX 记录是彼此独立的服务；记录的标识包含优先级和目标。
-
-### SRV 记录
-
-服务定位记录。请设置 `priority`、`weight` 和 `port`（默认都是 `0`）。
-
-```yaml
-labels:
-  labelgate.dns.xmpp.hostname: "_xmpp._tcp.example.com"
+  labelgate.dns.xmpp.hostname: "_xmpp-client._tcp.example.com"
   labelgate.dns.xmpp.type: "SRV"
   labelgate.dns.xmpp.target: "xmpp.example.com"
   labelgate.dns.xmpp.priority: "10"
@@ -113,70 +101,26 @@ labels:
   labelgate.dns.xmpp.port: "5222"
 ```
 
-### CAA 记录
-
-证书颁发机构授权记录。`target` 是记录值（CA 域名，或 `iodef` 的 URL）。
+### CAA
 
 ```yaml
 labels:
   labelgate.dns.caa.hostname: "example.com"
   labelgate.dns.caa.type: "CAA"
   labelgate.dns.caa.target: "letsencrypt.org"
-  labelgate.dns.caa.flags: "0"
-  labelgate.dns.caa.tag: "issue"   # issue（默认）、issuewild、iodef
 ```
 
-## Examples
-
-### 一个容器创建多条 DNS 记录
+### 容器删除后保留记录
 
 ```yaml
-services:
-  myapp:
-    image: myapp:1.0
-    labels:
-      labelgate.dns.root.hostname: "example.com"
-      labelgate.dns.root.type: "A"
-      labelgate.dns.root.target: "auto"
-
-      labelgate.dns.www.hostname: "www.example.com"
-      labelgate.dns.www.type: "CNAME"
-      labelgate.dns.www.target: "example.com"
-
-      labelgate.dns.mail.hostname: "example.com"
-      labelgate.dns.mail.type: "MX"
-      labelgate.dns.mail.target: "mail.example.com"
-      labelgate.dns.mail.priority: "10"
-```
-
-### 容器消失后仍保留记录
-
-```yaml
-services:
-  myapp:
-    image: myapp:1.0
-    labels:
-      labelgate.dns.app.hostname: "app.example.com"
-      labelgate.dns.app.target: "auto"
-      labelgate.dns.app.cleanup: "false"
-```
-
-### 临时环境（默认清理）
-
-```yaml
-services:
-  preview:
-    image: preview:1.0
-    labels:
-      labelgate.dns.preview.hostname: "preview.example.com"
-      labelgate.dns.preview.target: "auto"
-      # cleanup 默认为 "true"：容器停止 30 分钟
-      # （sync.remove_delay）后，记录会被删除
+labels:
+  labelgate.dns.web.hostname: "app.example.com"
+  labelgate.dns.web.cleanup: "false"
 ```
 
 ### 容器级默认值 [#per-container-defaults]
 
-`labelgate.dns.default.<property>` 可以为该容器的所有 DNS 服务设置 `type`、`target`、`proxied`、`ttl`、`credential` 和 `cleanup` 的默认值。`default` 块中的其他属性会被报告为未知属性，非法的值会使该容器的所有 DNS 服务被跳过：
+`labelgate.dns.default.<property>` 为同一容器里的所有 DNS 名字设置默认值。可用的属性：`type`、`target`、`proxied`、`ttl`、`credential`、`cleanup`。
 
 ```yaml
 labels:
@@ -184,3 +128,9 @@ labels:
   labelgate.dns.a.hostname: "a.example.com"
   labelgate.dns.b.hostname: "b.example.com"
 ```
+
+## 注意事项
+
+- Labelgate 只修改自己创建的记录。它在记录备注开头写上 `labelgate:<id>` 作为标记，你的 `comment` 跟在后面。
+- 已存在的同名同类型记录永远不会被接管，会报 `conflict: existing record not owned by labelgate`。参见[所有权与冲突](/zh/docs/ownership)。
+- 已经被 [Tunnel 标签](/zh/docs/labels/tunnel)使用的主机名，不要再加 DNS 标签。Tunnel 会自己创建记录。

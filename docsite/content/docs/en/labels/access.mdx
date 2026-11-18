@@ -1,207 +1,142 @@
 ---
-title: Access Policy Labels
-description: Complete reference for Labelgate Zero Trust Access Policy labels.
+title: Access Labels
+description: Put a Cloudflare Zero Trust Access login in front of a hostname with labels.
 ---
 
-Access Policy labels let you protect services with Cloudflare Zero Trust Access. They work by defining reusable policy templates that are referenced from tunnel or DNS services.
+Access labels add a Cloudflare Access login in front of a hostname. It takes two steps: define a policy, then use it from a tunnel or DNS label.
 
-## How It Works
+```yaml
+services:
+  admin:
+    image: nginx:alpine
+    labels:
+      # 1. Define a policy named "team"
+      labelgate.access.team.policy.include.emails: "alice@example.com,bob@example.com"
+      # 2. Use it
+      labelgate.tunnel.admin.hostname: "admin.example.com"
+      labelgate.tunnel.admin.service: "http://admin:80"
+      labelgate.tunnel.admin.access: "team"
+```
 
-1. **Define** an access policy template using `labelgate.access.<name>.*` labels
-2. **Reference** it from a tunnel or DNS service using the `access` property
+Only Alice and Bob can now open `admin.example.com`, after logging in with Cloudflare Access.
+
+## Policy labels [#policy-properties]
+
+Every label has the form `labelgate.access.<name>.<property>`. The `<name>` is the policy name you use in `access: "<name>"`. It follows the [name rules](/docs/labels#service-names).
+
+| Property | Required | Default | Example | Meaning |
+|----------|----------|---------|---------|---------|
+| `policy.include.<selector>` | for `allow` and `block` | - | `policy.include.emails` | Who the policy applies to. Any one rule is enough. |
+| `policy.require.<selector>` | no | - | `policy.require.country` | Everyone must also match all of these. |
+| `policy.exclude.<selector>` | no | - | `policy.exclude.emails` | Never applies to these. |
+| `policy.decision` | no | `allow` | `bypass` | What to do. See [Decisions](#decisions). |
+| `policy.name` | no | app name | `Team only` | Policy name shown in Cloudflare. |
+| `app_name` | no | `labelgate-<name>` | `Admin panel` | Access application name shown in Cloudflare. |
+| `session_duration` | no | `24h` | `12h` | How long a login lasts. Use `m` or `h` (`30m`, `720h`); `7d` is not accepted. |
+
+### Decisions [#decisions]
+
+| `policy.decision` | Meaning |
+|-------------------|---------|
+| `allow` | Matching users get in after logging in. Needs an `include` rule. |
+| `block` | Matching users are blocked. Needs an `include` rule. |
+| `bypass` | Matching requests get in without logging in. |
+| `service_auth` | For machines: a service token or client certificate, no login. |
+
+### Selectors [#rule-selectors]
+
+Separate several values with commas.
+
+| Selector | Value | Example |
+|----------|-------|---------|
+| `emails` | Email addresses | `alice@example.com,bob@example.com` |
+| `emails_ending_in` | Email domains | `example.com` |
+| `ip_ranges` | IP addresses or CIDR ranges | `203.0.113.0/24,198.51.100.7` |
+| `country` | Country codes | `US,GB` |
+| `everyone` | No value (use `""`) | `""` |
+| `service_token` | Service token IDs | `<token-id>` |
+| `access_groups` | Access group IDs | `<group-id>` |
+| `certificate` | No value (use `""`); any valid client certificate | `""` |
+| `login_methods` | Login method (identity provider) IDs | `<idp-id>` |
+
+## Recipes [#examples]
+
+### Everyone with a company email
 
 ```yaml
 labels:
-  # Step 1: Define a policy named "internal"
-  labelgate.access.internal.policy.decision: "allow"
-  labelgate.access.internal.policy.include.emails: "admin@example.com,dev@example.com"
-
-  # Step 2: Reference it from a tunnel service
-  labelgate.tunnel.web.hostname: "app.example.com"
-  labelgate.tunnel.web.service: "http://app:80"
-  labelgate.tunnel.web.access: "internal"
+  labelgate.access.staff.policy.include.emails_ending_in: "example.com"
+  labelgate.tunnel.wiki.hostname: "wiki.example.com"
+  labelgate.tunnel.wiki.service: "http://wiki:80"
+  labelgate.tunnel.wiki.access: "staff"
 ```
 
-## Policy Definition Format
-
-```
-labelgate.access.<policy_name>.<property>=<value>
-```
-
-### Policy Properties
-
-| Property | Default | Description |
-|----------|---------|-------------|
-| `app_name` | `labelgate-<name>` | Cloudflare Access application name |
-| `session_duration` | `24h` | Session duration as a positive Go duration (`30m`, `12h`, `720h`). Days (`7d`) are not accepted |
-| `policy.decision` | `allow` | Policy action: `allow`, `block`, `bypass`, `service_auth` |
-| `policy.name` | - | Policy display name in CF dashboard |
-| `policy.include.<selector>` | - | Include rules (OR logic) |
-| `policy.require.<selector>` | - | Require rules (AND logic) |
-| `policy.exclude.<selector>` | - | Exclude rules (NOT logic) |
-
-### Decisions
-
-| Decision | CF API Value | Description |
-|----------|-------------|-------------|
-| `allow` | `allow` | Allow access if rules match |
-| `block` | `deny` | Block access if rules match |
-| `bypass` | `bypass` | Skip authentication entirely |
-| `service_auth` | `non_identity` | Require service token or mTLS certificate |
-
-<Callout type="warn">
-`allow` and `block` decisions require at least one `include` rule; otherwise the definition is dropped with an error.
-</Callout>
-
-A definition describes exactly one policy: its `policy.*` labels build a single Cloudflare policy (decisions are not stacked). The policy name (`<policy_name>` in the label key) follows the service name rules, and `default` is ignored. An unknown selector (`policy.include.foo`) or a selector that needs values but has none is an error that drops the definition.
-
-### Rule Selectors
-
-| Selector | CF Web UI Name | Example Values |
-|----------|---------------|----------------|
-| `emails` | Emails | `user@example.com,admin@example.com` |
-| `emails_ending_in` | Emails ending in | `@example.com,@company.io` |
-| `ip_ranges` | IP ranges | `192.168.1.0/24,10.0.0.0/8` |
-| `country` | Country | `US,GB,JP` |
-| `everyone` | Everyone | (no value needed) |
-| `service_token` | Service Token | `<token-id>` |
-| `access_groups` | Access groups | `<group-id>` |
-| `certificate` | Valid Certificate | (no value needed) |
-| `login_methods` | Login Methods | `<method-id>` |
-
-Multiple values are comma-separated. `everyone` and `certificate` take no values (the label value is ignored; use `""`); every other selector needs at least one value.
-
-## Rule Logic
-
-- **Include** rules use **OR** logic - any matching rule grants/blocks access
-- **Require** rules use **AND** logic - all rules must match
-- **Exclude** rules use **NOT** logic - matching rules are exempted
-
-## Examples
-
-### Allow specific emails
+### Office network only
 
 ```yaml
 labels:
-  labelgate.access.team.policy.decision: "allow"
-  labelgate.access.team.policy.include.emails: "alice@example.com,bob@example.com"
-  labelgate.access.team.session_duration: "12h"
-
-  labelgate.tunnel.admin.hostname: "admin.example.com"
-  labelgate.tunnel.admin.service: "http://admin:8080"
-  labelgate.tunnel.admin.access: "team"
+  labelgate.access.office.policy.include.ip_ranges: "203.0.113.0/24"
+  labelgate.tunnel.intranet.hostname: "intranet.example.com"
+  labelgate.tunnel.intranet.service: "http://intranet:80"
+  labelgate.tunnel.intranet.access: "office"
 ```
 
-### Allow by email domain
-
-```yaml
-labels:
-  labelgate.access.company.policy.decision: "allow"
-  labelgate.access.company.policy.include.emails_ending_in: "@company.io"
-
-  labelgate.tunnel.app.hostname: "app.company.io"
-  labelgate.tunnel.app.service: "http://app:80"
-  labelgate.tunnel.app.access: "company"
-```
-
-### IP-restricted access
-
-```yaml
-labels:
-  labelgate.access.office.policy.decision: "allow"
-  labelgate.access.office.policy.include.ip_ranges: "203.0.113.0/24,198.51.100.0/24"
-
-  labelgate.tunnel.internal.hostname: "internal.example.com"
-  labelgate.tunnel.internal.service: "http://internal:3000"
-  labelgate.tunnel.internal.access: "office"
-```
-
-### Bypass authentication (public access)
+### Public, no login
 
 ```yaml
 labels:
   labelgate.access.public.policy.decision: "bypass"
   labelgate.access.public.policy.include.everyone: ""
-
   labelgate.tunnel.docs.hostname: "docs.example.com"
   labelgate.tunnel.docs.service: "http://docs:80"
   labelgate.tunnel.docs.access: "public"
 ```
 
-### Service token authentication
+### Machines with a service token
 
 ```yaml
 labels:
   labelgate.access.machine.policy.decision: "service_auth"
-  labelgate.access.machine.policy.include.service_token: "your-service-token-id"
-
+  labelgate.access.machine.policy.include.service_token: "<token-id>"
   labelgate.tunnel.api.hostname: "api.example.com"
   labelgate.tunnel.api.service: "http://api:8080"
   labelgate.tunnel.api.access: "machine"
 ```
 
-### Combined rules (include + require + exclude)
+### Company emails, US only, minus contractors
 
 ```yaml
 labels:
-  # Allow company emails, require US location, exclude contractors
-  labelgate.access.secure.policy.decision: "allow"
-  labelgate.access.secure.policy.include.emails_ending_in: "@company.io"
+  labelgate.access.secure.policy.include.emails_ending_in: "example.com"
   labelgate.access.secure.policy.require.country: "US"
-  labelgate.access.secure.policy.exclude.emails: "contractor1@company.io,contractor2@company.io"
-
-  labelgate.tunnel.secure.hostname: "secure.company.io"
-  labelgate.tunnel.secure.service: "http://secure:443"
-  labelgate.tunnel.secure.access: "secure"
+  labelgate.access.secure.policy.exclude.emails: "contractor@example.com"
+  # use it with: labelgate.tunnel.<name>.access: "secure"
 ```
 
-### Shared policy across multiple services
+### One policy for several hostnames
+
+Define the policy once. Any container on the same host can use it.
 
 ```yaml
-labels:
-  # Define one policy
-  labelgate.access.internal.policy.decision: "allow"
-  labelgate.access.internal.policy.include.emails_ending_in: "@example.com"
+services:
+  policies:
+    image: busybox
+    command: sleep infinity    # must keep running
+    labels:
+      labelgate.access.team.policy.include.emails_ending_in: "example.com"
 
-  # Reuse it across multiple services
-  labelgate.tunnel.app.hostname: "app.example.com"
-  labelgate.tunnel.app.service: "http://app:80"
-  labelgate.tunnel.app.access: "internal"
-
-  labelgate.tunnel.admin.hostname: "admin.example.com"
-  labelgate.tunnel.admin.service: "http://admin:8080"
-  labelgate.tunnel.admin.access: "internal"
+  app:
+    image: nginx:alpine
+    labels:
+      labelgate.tunnel.app.hostname: "app.example.com"
+      labelgate.tunnel.app.service: "http://app:80"
+      labelgate.tunnel.app.access: "team"
 ```
 
-## Ownership
+## Good to know
 
-Access applications created by Labelgate carry the Access tag `labelgate-<instance_id>`. Reusable policies are created **per hostname** (named `<policy.name or app name> (<hostname>)`) and their IDs are recorded in Labelgate's database. Only these objects are ever modified or deleted:
-
-- Policies are **updated on every reconcile** when include, require, exclude, decision or name differ. Removing `bob@example.com` from a label removes Bob's access on the next sync.
-- A policy or application that Labelgate did not create is never adopted, updated or deleted, even if its name matches. If an application with the hostname's domain exists without Labelgate's tag, the service reports `conflict: existing record not owned by labelgate`.
-- If updating an application fails, the service goes to the error state. Labelgate never creates a second application as a workaround.
-
-Policy definitions are resolved within the **same source**: first the same container, then the other containers of the same host or agent. A reference to a name that no definition provides is rejected with `access policy definition "<name>" not found`. Two different definitions with the same name in one source are rejected as ambiguous (`ambiguous access policy definition "<name>"`), and an agent can never bind or alter definitions on the main host. See [Ownership & Conflicts](/docs/ownership#access-applications-and-policies).
-
-## Cleanup Behavior
-
-Access policies don't have their own `cleanup` label. Instead, the cleanup behavior is **inherited from the tunnel or DNS service** that references the access policy. `cleanup` defaults to `true`.
-
-```yaml
-labels:
-  labelgate.access.team.policy.decision: "allow"
-  labelgate.access.team.policy.include.emails_ending_in: "@company.io"
-
-  labelgate.tunnel.web.hostname: "app.company.io"
-  labelgate.tunnel.web.service: "http://app:80"
-  labelgate.tunnel.web.access: "team"
-  labelgate.tunnel.web.cleanup: "false"  # This controls access cleanup too
-```
-
-When `cleanup` is enabled on the referencing service (the default):
-- If the container stops, the Access application on Cloudflare is removed after the configured `sync.remove_delay` (default: 30 minutes)
-- The reusable policies Labelgate created for it are deleted as well
-
-When `cleanup` is disabled:
-- The Access application is marked as **orphaned** in Labelgate but preserved on Cloudflare
-- It is reactivated automatically if the container restarts
+- **Where a policy can live.** In the same container, or in any running container on the same host. On an [agent](/docs/examples/multi-host), only containers on that agent count.
+- **Same name twice.** A policy in the container itself wins. Otherwise, if two other containers define different policies with that name, you get `ambiguous access policy definition`. Rename one.
+- **Cleanup.** A policy has no `cleanup` label. Its Access app follows the tunnel or DNS label that uses it.
+- **Changes apply.** Edit a label, e.g. remove an email, and Cloudflare is updated on the next sync.
+- **Existing apps are not touched.** If Cloudflare already has an Access app for the hostname that Labelgate did not create, you get `conflict: existing record not owned by labelgate`. See [Ownership & Conflicts](/docs/ownership).
