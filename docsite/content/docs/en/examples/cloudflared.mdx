@@ -1,109 +1,83 @@
 ---
 title: cloudflared Setup
-description: How to deploy cloudflared alongside Labelgate.
+description: Run the cloudflared connector next to Labelgate.
 ---
 
-Labelgate manages Tunnel ingress rules via the Cloudflare API, but you still need a running `cloudflared` daemon to establish the tunnel connection. Here's how to set it up.
+Use this when you publish containers with `labelgate.tunnel.*` labels. Labelgate writes the tunnel routes to Cloudflare. `cloudflared` is the connector that carries the traffic, so it must run too.
 
-## Tunnel Token (Recommended)
+## 1. Create the tunnel
 
-The tunnel configuration is managed remotely via the Cloudflare API, so cloudflared automatically picks up changes made by Labelgate without needing a restart.
+1. Open [Cloudflare Zero Trust](https://one.dash.cloudflare.com/) → **Networks** → **Tunnels** → **Create a tunnel** → **Cloudflared**.
+2. Name it and save. Skip the "public hostname" step: Labelgate adds those.
+3. Copy two values:
+   - the **tunnel ID** → `LABELGATE_CLOUDFLARE_TUNNEL_ID` (for Labelgate);
+   - the **token** from the install command (the long string after `--token`) → `TUNNEL_TOKEN` (for cloudflared).
 
-```yaml
+Labelgate also needs `LABELGATE_CLOUDFLARE_ACCOUNT_ID`, the account that owns the tunnel.
+
+## 2. Add cloudflared to Compose
+
+```yaml title="compose.yaml"
 services:
   cloudflared:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
     command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN}
-```
 
-<Callout type="info">
-When Labelgate adds or removes ingress rules via the API, cloudflared detects the changes and applies them automatically. No restart needed.
-</Callout>
-
-## Getting Your Tunnel Token
-
-1. Go to [Cloudflare Zero Trust Dashboard](https://one.dash.cloudflare.com/)
-2. Navigate to **Networks > Tunnels**
-3. Create a new tunnel or select an existing one
-4. Copy the tunnel token from the install command
-
-Or via CLI:
-
-```bash
-cloudflared tunnel create my-tunnel
-cloudflared tunnel token my-tunnel
-```
-
-## Networking Tips
-
-### Docker Compose Networking
-
-When using Docker Compose, all services share a network by default. Use Docker service names in your labels:
-
-```yaml
-services:
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    command: tunnel run --token ${TUNNEL_TOKEN}
-
-  webapp:
+  app:
     image: nginx:alpine
     labels:
-      # Use the service name "webapp", not "localhost"
-      labelgate.tunnel.web.hostname: "app.example.com"
-      labelgate.tunnel.web.service: "http://webapp:80"
+      labelgate.tunnel.app.hostname: "app.example.com"
+      labelgate.tunnel.app.service: "http://app:80"
 ```
 
-### Host-Based Services
+cloudflared picks up new routes by itself. You never restart it when labels change.
 
-To route to services running directly on the host (not in Docker):
+For the full file with the `labelgate` service, see [Single Host → Tunnel](/docs/examples/single-host#tunnel).
+
+## Reaching your services
+
+cloudflared opens the `service` URL itself, so the address must work **from the cloudflared container**.
+
+| Service runs... | Use in `service` | Extra setup |
+|-----------------|------------------|-------------|
+| in the same Compose file | `http://app:80` (service name) | none |
+| in another Compose project | `http://app:80` | put both containers on one shared network (below) |
+| directly on the host | `http://host.docker.internal:8080` | add `extra_hosts` to cloudflared (below) |
+
+Shared network for containers from other Compose projects:
 
 ```yaml
 services:
   cloudflared:
-    image: cloudflare/cloudflared:latest
-    command: tunnel run --token ${TUNNEL_TOKEN}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-
-  proxy:
-    image: alpine
-    labels:
-      labelgate.tunnel.host-svc.hostname: "svc.example.com"
-      labelgate.tunnel.host-svc.service: "http://host.docker.internal:8080"
-```
-
-### Multiple Docker Networks
-
-If your services are on different Docker networks, make sure cloudflared can reach them:
-
-```yaml
-services:
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    command: tunnel run --token ${TUNNEL_TOKEN}
-    networks:
-      - frontend
-      - backend
+    networks: [tunnel]
 
 networks:
-  frontend:
-  backend:
+  tunnel:
+    name: tunnel # other projects join it with: networks: { tunnel: { external: true } }
 ```
 
-## Health Check
-
-Enable cloudflared metrics for monitoring:
+A service on the host itself:
 
 ```yaml
 services:
   cloudflared:
-    image: cloudflare/cloudflared:latest
-    command: tunnel --metrics 0.0.0.0:2000 run --token ${TUNNEL_TOKEN}
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:2000/ready"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 ```
+
+## How to check it works
+
+- `docker compose logs cloudflared` shows `Registered tunnel connection` lines.
+- The tunnel shows **Healthy** in the Zero Trust dashboard.
+- The tunnel's hostname routes in the dashboard list the hostnames from your labels.
+- `curl -I https://app.example.com` answers from your app.
+
+## Common problems
+
+| Symptom | Fix |
+|---------|-----|
+| `502 Bad Gateway` | cloudflared cannot reach the `service`. Use the service name, not `localhost`, and check the networks. |
+| Hostname gives Cloudflare error `1033` | cloudflared is not running or uses the token of another tunnel. The token must belong to `LABELGATE_CLOUDFLARE_TUNNEL_ID`. |
+| Labelgate shows the route `active`, but cloudflared ignores it | cloudflared runs with a local `config.yml` (a locally managed tunnel). Create the tunnel in the dashboard as above and run cloudflared with `--token` only. |
+| Agent host: `502` for some requests | Each host that runs cloudflared for a tunnel gets a share of its traffic. Give every host its own tunnel; see [Multi-Host](/docs/examples/multi-host#agent-tunnels). |
