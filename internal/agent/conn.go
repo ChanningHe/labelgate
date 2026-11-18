@@ -13,7 +13,7 @@ import (
 // Bounds for peer-supplied text before it reaches logs.
 const (
 	maxPeerErrorLen   = 256
-	maxDockerErrorLen = 512
+	maxDockerErrorLen = 1024 // Docker hints are long; reports are read up to MaxMessage
 )
 
 // truncate cuts s to at most n bytes.
