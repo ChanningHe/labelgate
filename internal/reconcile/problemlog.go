@@ -7,9 +7,8 @@ import (
 )
 
 // problemRepeatInterval is how often a problem that persists unchanged is
-// logged again, so a long-running issue stays visible without flooding the
-// log every cycle.
-const problemRepeatInterval = time.Hour
+// logged again.
+const problemRepeatInterval = logchange.DefaultRepeat
 
 // Subjects of problems that are not tied to a resource or container.
 const (

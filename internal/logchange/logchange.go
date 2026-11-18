@@ -10,6 +10,10 @@ import (
 	"time"
 )
 
+// DefaultRepeat is the suggested repeat interval: a persisting problem is
+// logged again once an hour, so it stays visible without flooding the log.
+const DefaultRepeat = time.Hour
+
 // Kind classifies an Event.
 type Kind int
 
