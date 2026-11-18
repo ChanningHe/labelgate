@@ -24,7 +24,7 @@ RUN yarn build
 
 # Stage 2: Build Go binary (runs on host arch — cross-compiles via GOARCH)
 # Keep the Go minor in step with the go directive in go.mod.
-FROM --platform=$BUILDPLATFORM golang:1.26-alpine@sha256:ecb67f987aa1a57794c91d19ade7ae0209f2f0f5496aaef9e6ae85ddf92d02ab AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine@sha256:70bd7ddea8b6cbe5d6943cde279d6b67feb10cc924fb9100d1d8757c1575b280 AS builder
 
 ARG TARGETARCH
 ARG VERSION=dev
