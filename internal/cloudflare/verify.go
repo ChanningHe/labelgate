@@ -23,7 +23,7 @@ func (c *Client) Verify(ctx context.Context) error {
 	var errs []error
 	for _, name := range c.credOrder {
 		if err := c.verifyToken(ctx, c.creds[name]); err != nil {
-			errs = append(errs, fmt.Errorf("credential %q: %w", name, err))
+			errs = append(errs, fmt.Errorf("credential %q: %w", name, forStartup(err)))
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -31,13 +31,26 @@ func (c *Client) Verify(ctx context.Context) error {
 	}
 	for _, t := range c.tunnels {
 		if err := c.verifyTunnel(ctx, t); err != nil {
-			errs = append(errs, fmt.Errorf("tunnel %q (%s): %w%s", t.Ref, t.ID, err, tunnelVerifyHint(t, err)))
+			errs = append(errs, fmt.Errorf("tunnel %q (%s): %w%s", t.Ref, t.ID, forStartup(err), tunnelVerifyHint(t, err)))
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// forStartup returns err with its *APIError (if any) marked as a startup
+// failure, so its hints do not promise a retry the exiting process cannot make.
+// The original error is left untouched.
+func forStartup(err error) error {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return err
+	}
+	marked := *apiErr
+	marked.startup = true
+	return &marked
 }
 
 // verifyToken tries the user-token endpoint, then (account-owned tokens) the

@@ -127,7 +127,9 @@ func sentinelFor(status int, codes []int) error {
 // retried when the request was certainly not processed: 429 or a dial failure.
 func retryable(method string, e *APIError) bool {
 	if e.Status == http.StatusTooManyRequests {
-		return true
+		// An auth lockout only ends when the token stops failing; retrying
+		// the same bad token would extend it.
+		return !slices.Contains(e.Codes, codeAuthLockout)
 	}
 	if method == http.MethodPost {
 		var opErr *net.OpError
