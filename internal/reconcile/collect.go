@@ -55,7 +55,7 @@ func (r *Reconciler) collectLocal(ctx context.Context, out *collected) *sourceIn
 	switch {
 	case err != nil:
 		src.State = sourceHeld
-		out.Issues = append(out.Issues, fmt.Sprintf("local Docker: %v; resources of local containers are kept unchanged until Docker answers again", err))
+		out.Issues = append(out.Issues, fmt.Sprintf("%v; resources of local containers are kept unchanged until Docker answers again", err))
 	case !snap.Complete:
 		src.State = sourceHeld
 		out.Issues = append(out.Issues, "local Docker returned an incomplete container list; resources of local containers are kept unchanged until the next sync")

@@ -432,7 +432,7 @@ func TestLocalSourceErrorHoldsResources(t *testing.T) {
 	h.cf.ResetCalls()
 	for range 3 {
 		h.clk.advance(time.Hour)
-		if st := h.cycle(); st.State != SyncError || !strings.Contains(st.Error, "local Docker") {
+		if st := h.cycle(); st.State != SyncError || !strings.Contains(st.Error, "resources of local containers are kept unchanged") {
 			t.Fatalf("status %+v", st)
 		}
 	}
