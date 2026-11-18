@@ -116,7 +116,7 @@ Labelgate 只会删除自己创建的资源，参见[所有权与冲突](/zh/doc
 | 接口 | 返回 |
 |------|------|
 | `GET /api/health` | `{"status":"ok"}`。无需 token。 |
-| `GET /api/overview` | 资源数量、同步状态和 agent 概况。 |
+| `GET /api/overview` | 资源数量、同步状态和 agent 概况。`sync.problems` 列出当前的问题（最多 200 条），`sync.problems_total` 是问题总数。 |
 | `GET /api/resources/dns` | DNS 记录。 |
 | `GET /api/resources/tunnels` | Tunnel 路由。 |
 | `GET /api/resources/access` | Access 应用。 |

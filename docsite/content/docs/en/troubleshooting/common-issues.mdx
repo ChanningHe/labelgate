@@ -14,10 +14,10 @@ Search this page for the start of your error message. Most messages already name
    docker compose logs labelgate | grep -E "WARN|ERROR"
    ```
 
-   A problem is logged once, when it appears or its text changes, and again every hour (`still_present=true`) while it lasts. A fixed problem logs `reconcile problem resolved`. So an old log line may no longer apply.
+   A problem is logged when it appears or its cause changes, again every hour while it lasts (`still_present=true`), and once when it is fixed (`reconcile problem resolved`). So an old log line may no longer apply.
 
 2. **Open the dashboard** at `http://localhost:28111/dashboard/`.
-   - The dashboard always shows the current problems. **Overview → Last sync** shows the first one.
+   - **Overview → Sync problems** lists every current problem (up to 200) with a count. The panel is hidden when there are none. The API returns the same list in `sync.problems` and the count in `sync.problems_total` of `GET /api/overview`.
    - **DNS**, **Tunnels** and **Access** list every resource. Open one in status `error` to see why.
    - **Agents** shows which agents are connected.
 
@@ -36,17 +36,18 @@ Labelgate reads its configuration only at startup. After a change, run `docker c
 Labelgate exits (or keeps restarting) right after start:
 
 ```
-labelgate: config: 2 problems:
+labelgate: config: 3 problems:
+  sync.remove_dely: unknown key; did you mean sync.remove_delay?
   api.token (env LABELGATE_API_TOKEN): must be at least 16 characters, got 5 (generate one with: openssl rand -hex 32)
   cloudflare.api_token (env LABELGATE_CLOUDFLARE_API_TOKEN): no Cloudflare API token is configured: set this, or add an entry under cloudflare.credentials in the config file
 ```
 
-**Cause:** a setting is missing or invalid. Each line names one key and the environment variable that sets it.
+**Cause:** a setting is missing, misspelled or invalid. Each line names one key and the environment variable that sets it. All problems are listed at once, including values of the wrong type.
 
 **Fix:**
 
 1. Fix each key, in `labelgate.yaml` or with the variable shown in `(env ...)`. Keys without `(env ...)` can only be set in the config file.
-2. `unknown key`: the key is misspelled. Compare it with the [configuration reference](/docs/configuration/reference).
+2. `unknown key; did you mean ...?`: rename the key as suggested. Without a suggestion, compare it with the [configuration reference](/docs/configuration/reference) or delete it.
 3. `removed in v0.3`: delete the key. See [Removed keys](/docs/configuration/reference#removed-keys).
 4. Start again: `docker compose up -d`.
 
@@ -70,7 +71,7 @@ services:
 Related messages:
 
 - `config: cannot parse ...; fix the syntax at the reported position`: a YAML syntax error. Fix the line the message names.
-- `config: cannot check for a config file: ...; make it readable by the labelgate user`: Labelgate runs as UID 65532. Run `sudo chown 65532 labelgate.yaml`.
+- `config: cannot check for a config file: ...; make it readable by the labelgate user or pass --config`: Labelgate runs as UID 65532. Run `sudo chown 65532 labelgate.yaml`.
 
 ### `open store "/app/config/labelgate.db"` [#database]
 
@@ -173,14 +174,16 @@ Mount the certificate files into the container, for example `./docker-certs:/cer
 Labelgate exits at start:
 
 ```
-labelgate: cloudflare credential validation failed; to skip this startup check ...: credential "default": cloudflare tokens.verify: HTTP 401 ...; the API token in cloudflare.api_token (env LABELGATE_CLOUDFLARE_API_TOKEN) is invalid, expired or revoked; create a new one under My Profile > API Tokens in the Cloudflare dashboard
+labelgate: cloudflare credential validation failed; to skip this startup check set skip_credential_validation (env LABELGATE_SKIP_CREDENTIAL_VALIDATION) to true: credential "default": cloudflare tokens.verify: HTTP 401 ...; replace the API token in cloudflare.api_token (env LABELGATE_CLOUDFLARE_API_TOKEN): Cloudflare reports it as invalid, expired or revoked; create a new one under My Profile > API Tokens in the Cloudflare dashboard
 ```
 
 **Cause:** Cloudflare does not accept the token, or a configured tunnel does not exist.
 
 **Fix:** find the end of the message:
 
-- `is invalid, expired or revoked` or `is disabled or expired`: [create a new token](/docs/getting-started) and put it in the key the message names.
+- `replace the API token in ...` or `is disabled or expired`: [create a new token](/docs/getting-started) and put it in the key the message names.
+- `is invalid and Cloudflare temporarily blocks it`: see [Token locked out](#auth-lockout).
+- `wait a moment, then start labelgate again`: Cloudflare was busy (HTTP 429 or 5xx). Wait a moment, then run `docker compose up -d`.
 - `no such tunnel in account`: compare `LABELGATE_CLOUDFLARE_TUNNEL_ID` and `LABELGATE_CLOUDFLARE_ACCOUNT_ID` with **Zero Trust > Networks > Tunnels**.
 - `cannot reach the Cloudflare API`: see [below](#cloudflare-unreachable).
 
@@ -191,6 +194,8 @@ cannot create DNS record: cloudflare dns.create: HTTP 403 ...; the API token in 
 ```
 
 **Cause:** the token lacks the permission named in the message, or does not cover this zone or account.
+
+If the message says `replace the API token in ...` instead, the token itself is invalid, expired or revoked. Create a new one and restart Labelgate.
 
 **Fix:**
 
@@ -248,14 +253,33 @@ cloudflare dns.list: dial tcp ...; cannot reach the Cloudflare API: check DNS, o
 
 ### `Cloudflare is rate-limiting this API token` [#rate-limit]
 
+```
+cloudflare dns.list: HTTP 429 ...; Cloudflare is rate-limiting this API token; labelgate retries on the next sync
+```
+
 **Cause:** too many API calls in a short time, often after restarting many containers at once.
 
-**Fix:** wait. Labelgate retries on its own. If it keeps happening, sync less often:
+**Fix:** wait. Labelgate retries on the next sync. At startup the message ends with `wait a moment, then start labelgate again`: do that. If it keeps happening, sync less often:
 
 ```bash
 LABELGATE_SYNC_INTERVAL=15m
 LABELGATE_DOCKER_POLL_INTERVAL=5m
 ```
+
+### `is invalid and Cloudflare temporarily blocks it` [#auth-lockout]
+
+```
+cloudflare dns.list: HTTP 429 (codes [10502]) ...; the API token in cloudflare.api_token (env LABELGATE_CLOUDFLARE_API_TOKEN) is invalid and Cloudflare temporarily blocks it after repeated authentication failures; replace the token, then wait for the lockout to expire
+```
+
+**Cause:** the token is invalid. After repeated failed calls, Cloudflare locks it out for a while.
+
+**Fix:**
+
+1. Create a new token and put it in the key the message names.
+2. Wait for the lockout to expire before you start Labelgate again. A restart loop (`restart: unless-stopped`) keeps the lockout active, so stop the container until then: `docker compose stop labelgate`.
+
+Labelgate does not retry calls that hit this lockout.
 
 ### `target auto: cannot detect this host's public IPv4 address` [#public-ip]
 
@@ -264,7 +288,7 @@ target auto: cannot detect this host's public IPv4 address: ...; set the record'
 target auto needs the public IPv4 address of agent edge1, which it did not report (it could not detect one); set the record's target label to an IP address instead
 ```
 
-The agent itself logs `cannot detect this host's public IPv4 address: records with target auto need it; ...`, and `public IPv4 detection recovered` once it works again. The IPv6 warning can be ignored if the host has no IPv6 and no `AAAA` record uses `target: auto`.
+The agent itself logs `cannot detect this host's public IPv4 address: records with target auto need it; ...`, and `public IPv4 detection recovered` once it works again. IPv6 failures are logged at INFO, not as warnings, because many hosts have no IPv6. They only matter for `AAAA` records with `target: auto`.
 
 **Cause:** `target: auto` needs the public IP. Labelgate asks `api.ipify.org` and `ipv4.icanhazip.com` (IPv6: `api6.ipify.org`, `ipv6.icanhazip.com`), and could not reach them. For an agent, the agent host could not reach them.
 
@@ -298,7 +322,7 @@ conflict: existing record not owned by labelgate: a CNAME record for app.example
 | Message continues with | Fix |
 |------------------------|-----|
 | `a ... record for ... already exists in Cloudflare` | Delete the record under **DNS > Records**, or use another hostname. |
-| `it was created by labelgate instance "a1b2c3d4"` | You lost the database. Set `LABELGATE_INSTANCE_ID=a1b2c3d4`. See [If you lose the database](/docs/ownership#recovering-from-database-loss). |
+| `it was created by labelgate instance "a1b2c3d4"` | If this installation lost its database, set `LABELGATE_INSTANCE_ID=a1b2c3d4`, but only if that instance is permanently gone. Never while it still runs: both would claim the same records. See [If you lose the database](/docs/ownership#recovering-from-database-loss). |
 | `the ownership marker was removed from the comment` | Put `labelgate:<instance_id>` back at the start of the record's comment, or delete the record. |
 | `an Access application for ... already exists` | Delete it under **Zero Trust > Access > Applications**, or remove the access label. |
 | `the tag "labelgate-..." was removed` | Add the tag back to the Access application, or delete it. |
@@ -409,28 +433,32 @@ level=WARN msg="cannot connect to the main instance; retrying" url=wss://main.ex
 
 **Fix:** find the end of the error:
 
-| Error ends with | Fix |
-|-----------------|-----|
+| Error contains | Fix |
+|----------------|-----|
 | `must end in /ws` | Use `LABELGATE_CONNECT_ENDPOINT=wss://main.example.com:28112/ws`. |
-| `nothing listens there: ...` | Start the main with `agent.enabled: true` (`LABELGATE_AGENT_ENABLED=true`), publish `"28112:28112"`, and open the port in the firewall. |
+| `this port is not labelgate's agent listener` | HTTP 404 on `/ws`: the URL uses the dashboard port `28111`. Use the agent port `28112` (`agent.listen`). |
+| `nothing listens there` | Start the main with `agent.enabled: true` (`LABELGATE_AGENT_ENABLED=true`), publish `"28112:28112"`, and open the port in the firewall. |
 | `does not resolve` | Fix the host name in `LABELGATE_CONNECT_ENDPOINT`. |
 | `TLS certificate is not trusted` | Set `LABELGATE_CONNECT_TLS_CA` to your CA file, or use a public certificate. |
 | `TLS certificate does not list the host` | Use a host name that the certificate is issued for. |
 | `does not use TLS: use ws://` | Use `ws://`, or give the main a certificate (`agent.tls.cert`, `agent.tls.key`). |
-| `uses TLS: use wss://` | Use `wss://`. |
-| `does not belong to labelgate's agent port` | The URL points somewhere else, for example the dashboard port `28111`. Use port `28112`. |
+| `likely expects TLS: use wss://` | The main uses TLS. Use `wss://`. |
+| `the reverse proxy in front of the main instance cannot reach it` | HTTP 502, 503 or 504: your reverse proxy cannot reach the main. Check that the main runs and that the proxy forwards to its port `28112`. |
+| `does not belong to labelgate's agent port` | Another server answered. Check the host, port and path. |
 
 When the main dials an [inbound agent](/docs/examples/multi-host#inbound-mode-example), the main logs `cannot connect to inbound agent; retrying` with the same endings. Fix `agent.agents.<id>.connect_to` and `agent.tls.ca` on the main instead.
 
-### `peer authentication failed; tokens do not match` [#agent-auth]
+### `main rejected this agent` [#agent-auth]
 
 The agent logs:
 
 ```
-level=WARN msg="handshake with the main instance failed" error="agent: peer authentication failed; tokens do not match: connect.token (env LABELGATE_CONNECT_TOKEN) on this agent must equal agent.agents.edge1.token in the main instance config (or agent.accept_token there if \"edge1\" is not listed under agent.agents)"
+level=WARN msg="handshake with the main instance failed" error="...; main rejected this agent: either agent \"edge1\" is not configured on the main instance (add agent.agents.edge1 with this agent's token there, or set agent.accept_token, env LABELGATE_AGENT_ACCEPT_TOKEN), or the tokens do not match: connect.token (env LABELGATE_CONNECT_TOKEN) on this agent must equal agent.agents.edge1.token (or agent.accept_token) in the main instance config"
 ```
 
 The main logs `agent handshake failed` and names the agent, for example `agent "edge1" is not configured: add agent.agents.edge1 with a token to the main instance config`.
+
+Failed handshakes are throttled: one warning per address and agent ID every 5 minutes. The next one counts the suppressed attempts (`suppressed=...`).
 
 **Cause:** the agent ID or the token does not match the main's config.
 

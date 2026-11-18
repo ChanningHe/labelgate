@@ -98,15 +98,14 @@ services:
       - "999"   # Docker socket 的属组：stat -c '%g' /var/run/docker.sock
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /etc/machine-id:/etc/machine-id:ro   # 稳定的 agent ID
     environment:
       LABELGATE_MODE: agent
       LABELGATE_CONNECT_ENDPOINT: wss://main.example.com:28112/ws
-      LABELGATE_CONNECT_AGENT_ID: edge1      # 可选，优先于 machine-id
+      LABELGATE_CONNECT_AGENT_ID: edge1      # 必须和 main 上的 agent.agents.edge1 一致
       LABELGATE_CONNECT_TOKEN: ${AGENT_TOKEN}   # openssl rand -hex 32
 ```
 
-容器重建后，agent ID 必须保持不变。请挂载 `/etc/machine-id`，或设置 `LABELGATE_CONNECT_AGENT_ID`（优先级更高）。在 `agent.agents.<id>` 里命名的 agent，必须把 `LABELGATE_CONNECT_AGENT_ID` 设成同一个 `<id>`。
+这个 agent 在 main 上登记为 `agent.agents.edge1`（见下文），所以 `LABELGATE_CONNECT_AGENT_ID` 必须是 `edge1`。只有用 `agent.accept_token` 登录的 agent 才可以不设 ID。这类 agent 请挂载 `/etc/machine-id:/etc/machine-id:ro`，这样容器重建后 ID 保持不变。
 
 在 main 实例上，把这个 agent 以相同的 ID 和 token 加进 `labelgate.yaml`，并开放 `28112` 端口：
 

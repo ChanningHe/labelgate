@@ -52,6 +52,7 @@ type Agent struct {
 	t       timings
 	seq     atomic.Uint64
 	pending *pendingLimiter
+	failLog *logThrottle // inbound failed handshake warnings per remote address
 
 	mu  sync.Mutex
 	cur *agentSession // current authenticated main session
@@ -97,6 +98,7 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 		log:     opts.Log.With("component", "agent", "agent_id", id),
 		t:       defaultTimings(),
 		pending: newPendingLimiter(MaxPendingHandshakes, MaxPendingPerIP),
+		failLog: newLogThrottle(handshakeLogWindow, maxHandshakeLogKeys),
 
 		ipProblems: newIPTrackers(),
 	}, nil
@@ -233,7 +235,7 @@ func (a *Agent) runConn(ctx context.Context, ws *websocket.Conn, mode Mode, rele
 	defer ws.Close()
 	log := a.log.With("mode", string(mode), "remote", remote)
 	if err := agentHandshake(ws, mode, a.id, a.opts.Connect.Token, a.opts.Version, a.t); err != nil {
-		log.Warn("handshake with the main instance failed", "error", withHint(err, agentAuthHint(a.id, err)))
+		a.logHandshakeFailure(log, mode, remote, err)
 		return false
 	}
 	release()
@@ -253,6 +255,23 @@ func (a *Agent) runConn(ctx context.Context, ws *websocket.Conn, mode Mode, rele
 	a.serveSession(sctx, s, log)
 	log.Info("disconnected from main")
 	return true
+}
+
+// logHandshakeFailure warns about a failed handshake. Inbound failures come
+// from whoever reaches the listener, so they are throttled per remote address;
+// outbound retries are already paced by the backoff.
+func (a *Agent) logHandshakeFailure(log *slog.Logger, mode Mode, remote string, err error) {
+	args := []any{"error", withHint(err, agentAuthHint(a.id, err))}
+	if mode == ModeInbound {
+		ok, suppressed := a.failLog.allow(a.opts.Now(), peerKey(remote))
+		if !ok {
+			return
+		}
+		if suppressed > 0 {
+			args = append(args, "suppressed", fmt.Sprintf("%d more failed handshakes from this address since the last warning", suppressed))
+		}
+	}
+	log.Warn("handshake with the main instance failed", args...)
 }
 
 // setSession installs s as the current session, cancelling any previous one.

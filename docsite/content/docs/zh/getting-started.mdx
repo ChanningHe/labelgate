@@ -146,6 +146,8 @@ services:
     environment:
       - LABELGATE_CLOUDFLARE_API_TOKEN
       - LABELGATE_API_TOKEN
+    ports:
+      - "127.0.0.1:28111:28111"     # dashboard 和 API，仅本机访问
 
   myapp:
     image: nginx:alpine

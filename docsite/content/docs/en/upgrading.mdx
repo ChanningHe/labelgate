@@ -91,16 +91,34 @@ Inside the container this is `/app/config/labelgate.db.v0.2.bak`. If that file a
 
 To go back to v0.2:
 
-1. Stop Labelgate: `docker compose down`.
-2. Put the backup back in place:
+1. Note the current instance ID. It is in the `Storage ready` line of the startup log, after `instance_id=`:
+
+   ```bash
+   docker compose logs labelgate | grep instance_id
+   ```
+
+   If the log is gone, read it from the comment of a DNS record Labelgate created (`labelgate:a1b2c3d4 ...`).
+
+2. Stop Labelgate: `docker compose down`.
+3. Put the backup back in place. The data folder belongs to UID 65532, so use `sudo`:
 
    ```bash
    cd labelgate-data
-   mv labelgate.db labelgate.db.v0.3
-   rm -f labelgate.db-wal labelgate.db-shm
-   cp labelgate.db.v0.2.bak labelgate.db
+   sudo mv labelgate.db labelgate.db.v0.3
+   sudo rm -f labelgate.db-wal labelgate.db-shm
+   sudo cp -p labelgate.db.v0.2.bak labelgate.db
    ```
 
-3. Change the image to `ghcr.io/channinghe/labelgate:v0.2`, roll back your agents too, and run `docker compose up -d`.
+4. Change the image to `ghcr.io/channinghe/labelgate:v0.2`, roll back your agents too, and run `docker compose up -d`.
 
-v0.2 cannot read a v0.3 database, so always restore the backup.
+<Callout type="warn">
+Always restore the backup file before you start v0.2. v0.2 also starts on a v0.3 database, without an error, but then works with stale data from before the upgrade.
+</Callout>
+
+When you upgrade to v0.3 again, set the ID from step 1 before the first start:
+
+```bash
+LABELGATE_INSTANCE_ID=a1b2c3d4
+```
+
+Without it, the upgrade gives the database a new ID. The records that your first v0.3 run created then look like another instance's, and you get conflicts.

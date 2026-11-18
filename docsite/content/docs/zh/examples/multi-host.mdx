@@ -107,11 +107,10 @@ services:
     group_add: ["${DOCKER_GID}"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /etc/machine-id:/etc/machine-id:ro   # 稳定的 agent ID
     environment:
       - LABELGATE_MODE=agent
       - LABELGATE_CONNECT_ENDPOINT=wss://main.example.com:28112/ws
-      - LABELGATE_CONNECT_AGENT_ID=edge1     # 可选，优先于 machine-id
+      - LABELGATE_CONNECT_AGENT_ID=edge1     # 必须和 main 上的 agent.agents.edge1 一致
       - LABELGATE_CONNECT_TOKEN=${AGENT_TOKEN}   # 和 main 上的 token 相同
 
   cloudflared:
@@ -153,12 +152,11 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./tls:/certs:ro
-      - /etc/machine-id:/etc/machine-id:ro   # 稳定的 agent ID
     environment:
       - LABELGATE_MODE=agent
       - LABELGATE_CONNECT_MODE=inbound
       - LABELGATE_CONNECT_LISTEN=:28113
-      - LABELGATE_CONNECT_AGENT_ID=edge2     # 可选，优先于 machine-id
+      - LABELGATE_CONNECT_AGENT_ID=edge2     # 必须和 main 上的 agent.agents.edge2 一致
       - LABELGATE_CONNECT_TOKEN=${AGENT_TOKEN}
       - LABELGATE_CONNECT_TLS_CERT=/certs/server.crt
       - LABELGATE_CONNECT_TLS_KEY=/certs/server.key
@@ -172,9 +170,8 @@ agent 的证书必须对 `connect_to` 里的主机有效。如果是 `192.168.1.
 
 - 所有 token 都用 `openssl rand -hex 32` 生成。token 至少 32 个字符，且至少包含 12 种不同字符。
 - 同一个 token 要填两处：main 上的 `agent.agents.<id>.token`，以及 agent 上的 `connect.token`（`LABELGATE_CONNECT_TOKEN`）。
-- `connect.agent_id`（`LABELGATE_CONNECT_AGENT_ID`）必须和 `agent.agents` 下的键名一致，只能用小写字母、数字、`.`、`_` 和 `-`。
-- 容器重建后，agent ID 必须保持不变。请挂载 `/etc/machine-id:/etc/machine-id:ro`，或设置 `LABELGATE_CONNECT_AGENT_ID`（优先级更高）。
-- 在 `agent.agents.<id>` 里命名的 agent，必须把 `LABELGATE_CONNECT_AGENT_ID` 设成同一个 `<id>`。
+- **命名 agent**（`agent.agents.<id>`）：把 `connect.agent_id`（`LABELGATE_CONNECT_AGENT_ID`）设成这个 `<id>`。只能用小写字母、数字、`.`、`_` 和 `-`。
+- **共享 token 的 agent**（`agent.accept_token`）：ID 可以不设。请挂载 `/etc/machine-id:/etc/machine-id:ro`，这样容器重建后 ID 保持不变。设置了 `LABELGATE_CONNECT_AGENT_ID` 时以它为准。
 - 两者都没有时，agent 会用容器主机名，并在启动时打印一条警告。主机名每次重建都会变，main 会把它当成新 agent，旧 agent 的资源在 `sync.agent_grace`（`LABELGATE_SYNC_AGENT_GRACE`）之后被删除。
 - Labelgate 不会展开 `labelgate.yaml` 里的 `${VAR}`，请把真实 token 直接写进文件。
 

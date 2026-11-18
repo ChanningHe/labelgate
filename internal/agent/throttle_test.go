@@ -1,8 +1,10 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"strings"
 	"sync"
 	"testing"
@@ -103,6 +105,51 @@ func TestHubThrottlesFailedHandshakeLogs(t *testing.T) {
 	fail("stranger")
 	got := lines("stranger")
 	if len(got) != 2 || !strings.Contains(got[1], "2 more failed handshakes from this address with this agent ID") {
+		t.Fatalf("after the window: %q", got)
+	}
+}
+
+func TestInboundAgentThrottlesFailedHandshakeLogs(t *testing.T) {
+	var buf lockedBuffer
+	clock := &fakeClock{now: fixedNow}
+	a := newTestAgent(t, inboundConnect(), &fakeSource{}, func(o *AgentOptions) {
+		o.Log = slog.New(slog.NewTextHandler(&buf, nil))
+		o.Now = clock.Now
+	})
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runAgent(t, a, func(ctx context.Context) error { return a.serveInbound(ctx, ln) })
+	fail := func() {
+		ws, err := dialAsMain(t, ln.Addr().String(), "wrong-token")
+		if err == nil {
+			t.Fatal("main with wrong token accepted")
+		}
+		_ = ws.Close()
+		eventually(t, "handshake slot released", func() bool { return a.pending.count() == 0 })
+	}
+	lines := func() []string {
+		var out []string
+		for _, l := range strings.Split(buf.String(), "\n") {
+			if strings.Contains(l, "handshake with the main instance failed") {
+				out = append(out, l)
+			}
+		}
+		return out
+	}
+
+	for range 3 {
+		fail()
+	}
+	if got := lines(); len(got) != 1 {
+		t.Fatalf("want one line for 3 failures, got %d:\n%s", len(got), buf.String())
+	}
+
+	clock.add(handshakeLogWindow)
+	fail()
+	got := lines()
+	if len(got) != 2 || !strings.Contains(got[1], "2 more failed handshakes from this address") {
 		t.Fatalf("after the window: %q", got)
 	}
 }
