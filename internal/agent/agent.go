@@ -134,7 +134,8 @@ func (a *Agent) ID() string { return a.id }
 // Run runs until ctx is cancelled. Returns nil on cancellation; an error if
 // the inbound listener cannot start or the source fails unrecoverably.
 func (a *Agent) Run(ctx context.Context) error {
-	logAgentID(a.log, a.id, a.idSrc)
+	// a.log already carries agent_id; the startup line names it itself.
+	logAgentID(a.opts.Log.With("component", "agent"), a.id, a.idSrc, a.opts.Connect.Mode)
 	if a.opts.Connect.Mode == config.ConnectInbound {
 		ln, err := listen(a.opts.Connect.Listen, a.opts.Connect.TLS, sectionConnect)
 		if err != nil {

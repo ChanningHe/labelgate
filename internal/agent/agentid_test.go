@@ -2,15 +2,19 @@ package agent
 
 import (
 	"bytes"
+	"context"
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/channinghe/labelgate/internal/config"
 )
 
 func captureIDLog(src agentIDSource) string {
 	var buf bytes.Buffer
 	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	logAgentID(log, "abc123", src)
+	logAgentID(log, "abc123", src, config.ConnectOutbound)
 	return buf.String()
 }
 
@@ -40,5 +44,40 @@ func TestLogAgentID_WarnsOnlyOnHostnameFallback(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("warning does not contain %q: %s", want, out)
 		}
+	}
+}
+
+func TestLogAgentID_NamesResolvedIDSourceAndMode(t *testing.T) {
+	out := captureIDLog(idFromMachineID)
+	for _, want := range []string{`msg="Agent mode"`, "agent_id=abc123", "agent_id_source=machine-id", "connect_mode=outbound"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("startup line lacks %q: %s", want, out)
+		}
+	}
+}
+
+func TestRunLogsResolvedAgentIDOnce(t *testing.T) {
+	var buf lockedBuffer
+	c := outboundConnect("ws://127.0.0.1:1/ws")
+	c.AgentID = ""
+	a := newTestAgent(t, c, &fakeSource{}, func(o *AgentOptions) { o.Log = slog.New(slog.NewTextHandler(&buf, nil)) })
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	_ = a.Run(ctx)
+
+	var line string
+	for _, l := range strings.Split(buf.String(), "\n") {
+		if strings.Contains(l, `msg="Agent mode"`) {
+			line = l
+		}
+	}
+	if line == "" {
+		t.Fatalf("no startup line: %s", buf.String())
+	}
+	if !strings.Contains(line, "agent_id="+a.ID()) || strings.Contains(line, `agent_id=""`) {
+		t.Errorf("startup line lacks the resolved ID %q: %s", a.ID(), line)
+	}
+	if n := strings.Count(line, "agent_id="); n != 1 {
+		t.Errorf("agent_id appears %d times: %s", n, line)
 	}
 }
