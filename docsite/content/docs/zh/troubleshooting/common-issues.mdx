@@ -31,13 +31,35 @@ description: Labelgate 常见问题的解决方案。
 
 **解决方案：** 把该主机名的所有服务都定义在同一台主机上，或者先在另一个来源上释放该主机名（参见[所有权与冲突](/zh/docs/ownership#conflicts-between-claims)）。
 
-### `service host ... is not allowed for agents`
+### `service host ... is not allowed for agents` [#agent-service-host]
 
-**问题：** agent 主机上的 tunnel 标签被拒绝，例如 `http://web:80`。
+**问题：** agent 主机上的 tunnel 标签被拒绝，例如 `http://traefik:80`。保存的原因形如：
 
-**原因：** agent 的 tunnel 服务必须指向 IP 地址，或者指向该 agent 的 `services`（`accept_token` agent 为 `agent.accept_services`）中列出的主机。主机名在 agent 主机上解析，可能会访问到 agent 主机本身或元数据服务。
+```
+agent "edge1": service host "traefik" is a host name, which agents may only use if allow-listed; add "traefik" to agent.agents.edge1.services in the main instance config (or use the origin's IP address)
+```
 
-**解决方案：** 在 main 实例上把该名称、glob、IP 或 CIDR 加入该 agent 的 `services`，或者改用容器的 IP 地址。参见 [SSRF 防护](/zh/docs/examples/multi-host#ssrf-guard)。
+**原因：** agent 的 tunnel 服务必须指向 IP 地址，或者指向该 agent 的 `services` 允许列表中列出的主机。主机名在 agent 主机上解析，可能会访问到 agent 主机本身或元数据服务。这个允许列表属于 **main** 实例的配置，而不是 agent 的配置：修改 agent 自己的配置或标签没有用。
+
+**解决方案：** 在 **main** 实例上，把消息中引号里的值加入它所指出的键，然后重启 main 实例（配置只在启动时读取）。对于列在 `agent.agents` 下的 agent：
+
+```yaml
+agent:
+  agents:
+    edge1:                      # 消息中的 agent ID
+      token: "<保持不变>"
+      services: ["traefik"]     # 主机名、glob（*.svc.internal）、IP 或 CIDR
+```
+
+对于通过 `agent.accept_token` 接入的 agent，对应的键是 `agent.accept_services`：
+
+```yaml
+agent:
+  accept_token: "<保持不变>"
+  accept_services: ["traefik"]
+```
+
+也可以设置环境变量 `LABELGATE_AGENT_ACCEPT_SERVICES=traefik`（多个条目用逗号分隔）。或者让标签直接指向容器的 IP 地址。对于回环、链路本地等本地 IP 地址，消息形如 `service target is the loopback address 127.0.0.1 ...`：把这个确切的 IP（或包含它的 CIDR）加入同一个键即可放行。任何允许列表都无法放行的服务（`unix:` socket、`bastion`、带用户信息的 URL、`127.1` 这类 IP 简写）会在消息中直接说明，并告诉你应改用什么。参见 [SSRF 防护](/zh/docs/examples/multi-host#ssrf-guard)。
 
 ### DNS 和 Tunnel 使用相同主机名
 
@@ -202,9 +224,14 @@ labels:
 
 **问题：** Agent 的某个服务显示错误，例如主机名或 tunnel 不被允许，或服务地址被拒绝。
 
-**原因：** 声明违反了该 agent 的允许列表（`hostnames`、`tunnels`，或 `accept_hostnames` / `accept_tunnels`），或者 tunnel 的 `service` 指向了 `localhost`、回环地址、链路本地地址、unix socket 或 `bastion`（SSRF 防护）。保存的原因形如 `agent <id> may not claim hostname <host>`、`agent <id> may not use tunnel <ref>`，对于 SSRF 防护则形如 `service host "localhost" is not allowed for agents`。
+**原因：** 声明违反了 main 实例上该 agent 的允许列表（`hostnames`、`tunnels`、`services`，或 `accept_hostnames` / `accept_tunnels` / `accept_services`），或者 tunnel 的 `service` 属于任何允许列表都无法放行的类型（`unix:` socket、`bastion`、带用户信息的 URL），或者 agent 把 CNAME 指向了 `cfargotunnel.com`。保存的每条原因都是一行，写明 agent、被拒绝的值、需要在 main 实例配置中修改的键以及要加入的值，例如：
 
-**解决方案：** 在 main 实例上调整该 agent 的条目，或者使用 agent 主机上可路由地址对外暴露的服务地址。
+- `agent "edge1": hostname "app.example.com" does not match the agent's hostnames allow-list; add "app.example.com" (or a glob matching it) to agent.agents.edge1.hostnames in the main instance config`
+- `agent "edge1": wildcard hostname "*.example.com" is only allowed by an identical entry (...); add "*.example.com" to agent.agents.edge1.hostnames in the main instance config`
+- `agent "edge1": tunnel "other" is not in the agent's allowed tunnels; add "other" to agent.agents.edge1.tunnels in the main instance config`
+- 对于 `accept_token` agent，键是 `agent.accept_<list>`（及对应的 `LABELGATE_AGENT_ACCEPT_<LIST>` 环境变量），而不是 `agent.agents.<id>.<list>`。
+
+**解决方案：** 在 **main** 实例（而不是 agent）上按消息指出的键做修改，或者按消息的提示修正标签。服务主机的情况参见上面的 [`service host ... is not allowed for agents`](#agent-service-host)。
 
 ### Agent 不断重连
 

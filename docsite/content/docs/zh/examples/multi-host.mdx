@@ -93,6 +93,8 @@ agent:
 
 ### 允许列表 [#allow-lists]
 
+下面所有的键都属于 **main** 实例的配置，而不是 agent 的配置。被拒绝的原因会写明 agent、被拒绝的值、这里确切的键以及要加入的值（参见[故障排查](/zh/docs/troubleshooting/common-issues#agent-service-host)）。
+
 | 设置 | 作用对象 | 效果 |
 |------|----------|------|
 | `agent.agents.<id>.hostnames` | 单个命名 agent | 该 agent 可声明的主机名 glob 列表。为空表示不限制（通配符主机名除外，见下文） |
@@ -109,7 +111,7 @@ glob 使用 `path.Match` 语法，作用于小写主机名（`*.example.com`）�
 
 **通配符主机名**（主机名本身就是 `*.example.com`）只有在 agent 的列表中恰好包含这一项时才被允许。`*`、`*.com` 这类 glob 永远不会匹配通配符主机名，空（不限制）的列表也永远不允许。
 
-**Agent 不能把 CNAME 指向 tunnel。** agent 的 `CNAME` 类型 DNS 标签如果目标在 `cfargotunnel.com` 之下，会被拒绝：这样的记录会绕过 tunnel 允许列表，把主机名路由进某个 tunnel。请改用 tunnel 标签。
+**Agent 不能把 CNAME 指向 tunnel。** agent 的 `CNAME` 类型 DNS 标签如果目标在 `cfargotunnel.com` 之下，会被拒绝：这样的记录会绕过 tunnel 允许列表，把主机名路由进某个 tunnel。请改用 tunnel 标签。任何允许列表都无法放行这种 CNAME。
 
 对 agent 的服务做 tunnel 解析的顺序：标签中的 `tunnel` > agent 的 `default_tunnel` > 全局默认 tunnel，且结果**必须在该 agent 允许的 tunnel 之内**。
 

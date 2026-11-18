@@ -36,17 +36,29 @@ const tunnelDomain = "cfargotunnel.com"
 func agentDNSReject(c claim) string {
 	t := model.NormalizeHostname(c.Res.Content)
 	if c.Res.RecordType == model.DNSTypeCNAME && (t == tunnelDomain || strings.HasSuffix(t, "."+tunnelDomain)) {
-		return fmt.Sprintf("agent %s may not point a CNAME at %s (use a tunnel label)", c.Src.AgentID, tunnelDomain)
+		return fmt.Sprintf("agent %q: a CNAME to %s is not allowed (no allow-list can permit it, because it would bypass the tunnel allow-list); use a tunnel label (labelgate.tunnel.<name>.hostname/service) instead", c.Src.AgentID, t)
 	}
 	return ""
 }
 
+// agentHostnameReject explains a hostname the agent's allow-list refuses. The
+// message names the key to extend in the main instance config and the literal
+// entry that fixes it.
+func agentHostnameReject(id string, p AgentPolicy, host string) string {
+	fix := p.fixHint(id, "hostnames")
+	if strings.HasPrefix(host, "*") {
+		return fmt.Sprintf("agent %q: wildcard hostname %q is only allowed by an identical entry (globs such as \"*\" never match it, and an empty list does not allow it); add %q to %s", id, host, host, fix)
+	}
+	return fmt.Sprintf("agent %q: hostname %q does not match the agent's hostnames allow-list; add %q (or a glob matching it) to %s", id, host, host, fix)
+}
+
 // agentReject returns the rejection reason for an agent-sourced DNS or tunnel
-// claim, or "" when the claim satisfies the agent's policy.
+// claim, or "" when the claim satisfies the agent's policy. Every reason is a
+// single line naming the agent, the rejected value and how to fix it.
 func agentReject(c claim, allowedTunnels map[string]bool) string {
-	id := c.Src.AgentID
-	if !hostnameAllowed(c.Src.Policy.Hostnames, c.Res.Hostname) {
-		return fmt.Sprintf("agent %s may not claim hostname %s", id, c.Res.Hostname)
+	id, p := c.Src.AgentID, c.Src.Policy
+	if !hostnameAllowed(p.Hostnames, c.Res.Hostname) {
+		return agentHostnameReject(id, p, c.Res.Hostname)
 	}
 	if c.Res.Kind == model.KindDNS {
 		return agentDNSReject(c)
@@ -55,9 +67,9 @@ func agentReject(c claim, allowedTunnels map[string]bool) string {
 		return ""
 	}
 	if !allowedTunnels[c.Res.TunnelID] {
-		return fmt.Sprintf("agent %s may not use tunnel %s", id, c.Tunnel.Ref)
+		return fmt.Sprintf("agent %q: tunnel %q is not in the agent's allowed tunnels; add %q to %s", id, c.Tunnel.Ref, c.Tunnel.Ref, p.fixHint(id, "tunnels"))
 	}
-	if err := checkAgentService(c.Res.Service, c.Src.Policy.Services); err != nil {
+	if err := checkAgentService(id, p, c.Res.Service); err != nil {
 		return err.Error()
 	}
 	return ""

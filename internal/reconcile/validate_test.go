@@ -30,7 +30,7 @@ var ssrfBypasses = []string{
 
 func TestAgentServiceRejectsSSRFBypasses(t *testing.T) {
 	for _, u := range ssrfBypasses {
-		if err := checkAgentService(u, nil); err == nil {
+		if err := checkAgentService("edge", AgentPolicy{}, u); err == nil {
 			t.Errorf("%s: accepted", u)
 		}
 	}
@@ -43,7 +43,7 @@ func TestAgentServiceDefaultAllows(t *testing.T) {
 		"http://10.0.0.5", "http://172.17.0.5:80", "http://100.63.255.255", "http://100.128.0.1",
 		"http://[64:ff9b::cb00:7105]", "http://[64:ff9b:2::1]",
 	} {
-		if err := checkAgentService(u, nil); err != nil {
+		if err := checkAgentService("edge", AgentPolicy{}, u); err != nil {
 			t.Errorf("%s: %v", u, err)
 		}
 	}
@@ -55,7 +55,7 @@ func TestAgentServiceAllowList(t *testing.T) {
 		"http://web:80", "http://a.svc.internal", "http://10.1.2.3", "http://127.0.0.1:8080",
 		"http://[fd00::5]:80", "http://metadata.google.internal", "http://100.100.100.200", "http://[64:ff9b:1::a00:1]",
 	} {
-		if err := checkAgentService(u, allow); err != nil {
+		if err := checkAgentService("edge", AgentPolicy{Services: allow}, u); err != nil {
 			t.Errorf("%s: %v", u, err)
 		}
 	}
@@ -64,7 +64,7 @@ func TestAgentServiceAllowList(t *testing.T) {
 		"http://127.1", "http://2130706433", "http://0x7f000001", "http://0177.0.0.1", "http://0",
 		"http://localhost..", "http://[::ffff:127.0.0.2]", "unix:/x.sock",
 	} {
-		if err := checkAgentService(u, allow); err == nil {
+		if err := checkAgentService("edge", AgentPolicy{Services: allow}, u); err == nil {
 			t.Errorf("%s: accepted", u)
 		}
 	}
@@ -77,7 +77,7 @@ func TestAgentWildcardClaimNeedsLiteralEntry(t *testing.T) {
 		})
 		h.st.setAgents(agentSnap("edge", h.clk.now(), ctr("web", dnsOnly(dnsSpec("web", "*.example.com")))))
 		h.cycle()
-		if rej := h.st.list(true); len(rej) != 1 || !strings.Contains(rej[0].LastError, "may not claim hostname") {
+		if rej := h.st.list(true); len(rej) != 1 || !strings.Contains(rej[0].LastError, "wildcard hostname") {
 			t.Fatalf("%v: rejected %+v", globs, rej)
 		}
 		if len(h.records()) != 0 {
@@ -123,7 +123,7 @@ func TestAgentServicesPolicyEndToEnd(t *testing.T) {
 	h.cycle()
 	wantStatus(t, h.row(model.KindTunnel, ruleKey), model.StatusActive)
 	rej := h.st.list(true)
-	if len(rej) != 1 || rej[0].Hostname != "meta.example.com" || !strings.Contains(rej[0].LastError, "not allowed") {
+	if len(rej) != 1 || rej[0].Hostname != "meta.example.com" || !strings.Contains(rej[0].LastError, "host name") {
 		t.Fatalf("rejected %+v", rej)
 	}
 }

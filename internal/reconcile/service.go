@@ -41,7 +41,11 @@ var (
 // Host names (which the agent host resolves, e.g. to 127.0.0.1 or a cloud
 // metadata service) are refused unless allow-listed; inet_aton forms such
 // as 127.1 or 0x7f000001 are never accepted.
-func checkAgentService(service string, allow []string) error {
+//
+// Every error names the agent, the offending value and, where an allow-list
+// can fix it, the config key and the literal entry to add. It is stored as
+// the resource's last_error, so it stays on one line.
+func checkAgentService(id string, p AgentPolicy, service string) error {
 	s := strings.TrimSpace(service)
 	lower := strings.ToLower(s)
 	if agentSafeServices[lower] || strings.HasPrefix(lower, "http_status:") {
@@ -49,26 +53,39 @@ func checkAgentService(service string, allow []string) error {
 	}
 	u, err := url.Parse(s)
 	if err != nil || !agentNetworkSchemes[strings.ToLower(u.Scheme)] {
-		return fmt.Errorf("service %q is not allowed for agents (use http, https, tcp, ssh or rdp)", s)
+		return fmt.Errorf("agent %q: service %q is not allowed: agents may only use http, https, tcp, ssh or rdp URLs (no allow-list can permit other schemes)", id, s)
 	}
 	if u.User != nil {
-		return fmt.Errorf("service URL %q must not contain user info", s)
+		return fmt.Errorf("agent %q: service URL %q must not contain user info; remove it from the URL (no allow-list can permit it)", id, u.Redacted())
 	}
 	host := strings.ToLower(u.Hostname())
 	if host == "" {
-		return fmt.Errorf("service URL %q has no host", s)
+		return fmt.Errorf("agent %q: service URL %q has no host; use a URL such as http://<ip>:<port>", id, s)
 	}
-	if serviceAllowed(host, allow) {
+	if serviceAllowed(host, p.Services) {
 		return nil
 	}
+	return serviceHostError(id, p, host)
+}
+
+// serviceHostError explains why host, which is not allow-listed, is refused;
+// nil when it is an IP literal that is fine by default.
+func serviceHostError(id string, p AgentPolicy, host string) error {
 	addr, err := netip.ParseAddr(host)
 	if err != nil {
-		return fmt.Errorf("service host %q is not allowed for agents: use an IP address or add it to the agent's services allow-list", host)
+		if !validServiceHost(host) {
+			return fmt.Errorf("agent %q: service host %q is not a valid host name or canonical IP address (shorthand forms such as 127.1 are never accepted, not even allow-listed); use a DNS name or the full IP address", id, host)
+		}
+		return fmt.Errorf("agent %q: service host %q is a host name, which agents may only use if allow-listed; add %q to %s (or use the origin's IP address)", id, host, host, p.fixHint(id, "services"))
 	}
-	if forbiddenAddr(addr) {
-		return fmt.Errorf("service address %s is not allowed for agents", host)
+	reason := forbiddenReason(addr)
+	switch {
+	case reason == "":
+		return nil
+	case addr.Zone() != "":
+		return fmt.Errorf("agent %q: service target is the %s %s, which is never accepted; use an address without a zone", id, reason, host)
 	}
-	return nil
+	return fmt.Errorf("agent %q: service target is the %s %s, which agents may not use unless allow-listed; if intended, add %q (or a CIDR containing it) to %s", id, reason, host, host, p.fixHint(id, "services"))
 }
 
 // serviceAllowed reports whether host matches the allow-list: IP hosts by IP
@@ -127,27 +144,60 @@ func validServiceHost(h string) bool {
 	return !allDigits.MatchString(last) && !strings.HasPrefix(last, "0x")
 }
 
-// forbiddenAddr reports whether an IP literal reaches the agent host itself,
-// its link or a metadata service.
-func forbiddenAddr(a netip.Addr) bool {
+// forbiddenReason names the category of an IP literal that reaches the agent
+// host itself, its link or a metadata service; "" when the address is fine.
+func forbiddenReason(a netip.Addr) string {
 	if a.Zone() != "" {
-		return true
+		return "zoned address"
 	}
 	a = a.Unmap()
 	if a.Is4() {
-		return forbiddenV4(a)
+		return forbiddenV4Reason(a)
+	}
+	if r := forbiddenV6Reason(a); r != "" {
+		return r
 	}
 	if ipv6Compat.Contains(a) || ipv6Translated.Contains(a) || ipv6NAT64.Contains(a) {
 		b := a.As16()
-		if forbiddenV4(netip.AddrFrom4([4]byte{b[12], b[13], b[14], b[15]})) {
-			return true
+		if r := forbiddenV4Reason(netip.AddrFrom4([4]byte{b[12], b[13], b[14], b[15]})); r != "" {
+			return "IPv4-embedding " + r
 		}
 	}
-	return a.IsLoopback() || a.IsUnspecified() || a.IsLinkLocalUnicast() || a.IsMulticast() ||
-		ipv6SiteLocal.Contains(a) || ipv6NAT64Local.Contains(a)
+	return ""
 }
 
-func forbiddenV4(a netip.Addr) bool {
-	return a.IsLoopback() || a.IsUnspecified() || a.IsLinkLocalUnicast() || a.IsMulticast() ||
-		ipv4Zero.Contains(a) || ipv4CGNAT.Contains(a) || a == ipv4Broadcast
+func forbiddenV6Reason(a netip.Addr) string {
+	switch {
+	case a.IsLoopback():
+		return "loopback address"
+	case a.IsUnspecified():
+		return "unspecified address"
+	case a.IsLinkLocalUnicast():
+		return "link-local address"
+	case a.IsMulticast():
+		return "multicast address"
+	case ipv6SiteLocal.Contains(a):
+		return "site-local address"
+	case ipv6NAT64Local.Contains(a):
+		return "NAT64 local-use address"
+	}
+	return ""
+}
+
+func forbiddenV4Reason(a netip.Addr) string {
+	switch {
+	case a.IsLoopback():
+		return "loopback address"
+	case a.IsUnspecified(), ipv4Zero.Contains(a):
+		return "unspecified (0.0.0.0/8) address"
+	case a.IsLinkLocalUnicast():
+		return "link-local address"
+	case a.IsMulticast():
+		return "multicast address"
+	case ipv4CGNAT.Contains(a):
+		return "carrier-grade NAT address"
+	case a == ipv4Broadcast:
+		return "broadcast address"
+	}
+	return ""
 }
