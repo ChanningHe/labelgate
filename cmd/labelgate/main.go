@@ -18,6 +18,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	flag "github.com/spf13/pflag"
@@ -73,7 +74,7 @@ func (a *app) run(args []string, stdout, stderr io.Writer) int {
 
 	cfg, err := a.load(*configPath)
 	if err != nil {
-		fmt.Fprintf(stderr, "labelgate: %v\n", err)
+		fmt.Fprint(stderr, formatFatal(err))
 		return exitFatal
 	}
 	if command == healthcheckCommand {
@@ -86,7 +87,7 @@ func (a *app) run(args []string, stdout, stderr io.Writer) int {
 func (a *app) serve(cfg config.Config, stderr io.Writer) int {
 	log, err := newLogger(cfg.LogLevel, cfg.LogFormat, stderr)
 	if err != nil {
-		fmt.Fprintf(stderr, "labelgate: %v\n", err)
+		fmt.Fprint(stderr, formatFatal(err))
 		return exitFatal
 	}
 	// Packages that log through slog's default (store migrations) must honour
@@ -106,11 +107,38 @@ func (a *app) serve(cfg config.Config, stderr io.Writer) int {
 		stop() // a second signal now terminates immediately
 	}
 	if err != nil && !errors.Is(err, context.Canceled) {
-		log.Error("labelgate failed", "error", err)
+		reportFatal(stderr, log, cfg.LogFormat, err)
 		return exitFatal
 	}
 	log.Info("Labelgate stopped")
 	return exitOK
+}
+
+// reportFatal reports a fatal error from serve. Text logs get the readable
+// form of config errors (one problem per line); JSON logs keep one
+// structured record, because their consumers parse one object per line.
+func reportFatal(stderr io.Writer, log *slog.Logger, logFormat string, err error) {
+	if logFormat == "json" {
+		log.Error("labelgate failed", "error", err)
+		return
+	}
+	fmt.Fprint(stderr, formatFatal(err))
+}
+
+// formatFatal renders err for stderr as "labelgate: <first line>" followed by
+// one indented line per further problem, e.g. the members of errors.Join.
+// Lines that are already indented (config problems) keep their indent.
+func formatFatal(err error) string {
+	lines := strings.Split(err.Error(), "\n")
+	var b strings.Builder
+	b.WriteString("labelgate: " + lines[0] + "\n")
+	for _, l := range lines[1:] {
+		if !strings.HasPrefix(l, " ") && !strings.HasPrefix(l, "\t") {
+			b.WriteString("  ")
+		}
+		b.WriteString(l + "\n")
+	}
+	return b.String()
 }
 
 // logReloadUnsupported answers SIGHUP honestly: configuration is read once.

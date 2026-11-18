@@ -135,7 +135,7 @@ func TestRunSignalsAndExitCodes(t *testing.T) {
 		if got := h.app.run(nil, &bytes.Buffer{}, &errOut); got != exitFatal {
 			t.Fatalf("exit = %d", got)
 		}
-		if !strings.Contains(errOut.String(), "labelgate failed") {
+		if !strings.Contains(errOut.String(), "labelgate: api: boom") {
 			t.Fatalf("log:\n%s", errOut.String())
 		}
 	})
