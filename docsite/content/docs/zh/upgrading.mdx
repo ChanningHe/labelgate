@@ -1,111 +1,99 @@
 ---
 title: 升级到 v0.3
-description: 从 Labelgate v0.2 升级到 v0.3 的不兼容变更、数据库自动迁移和升级清单。
+description: 从 Labelgate v0.2 升级到 v0.3 前需要改什么，以及出问题时如何回滚。
 ---
 
-v0.3 重写了整个后端。标签语法和 HTTP API 保持兼容，但有若干默认值和安全特性是有意改变的。升级前请先阅读本页。
+v0.3 下你的标签照常可用，但升级前有几项设置必须先改好。
 
-## 升级清单 [#checklist]
+## 升级前必做 [#checklist]
 
-1. 备份你的数据目录（SQLite 数据库）。Labelgate 自己也会做一份备份，见[下文](#database-migration)。
-2. 把镜像标签改为 `ghcr.io/channinghe/labelgate:v0.3`（见[镜像标签](#image-tag)）。
-3. 设置 `LABELGATE_API_TOKEN`，否则 dashboard 和 API 会被禁用（见[必须设置 API token](#api-token-required)）。
-4. 从配置文件和环境变量中删除[已移除的配置项](#removed-config-keys)。
-5. 确认标签写法合法（见[更严格的标签校验](#stricter-label-validation)）。
-6. 如果使用了 agent，**请在同一个维护窗口内升级所有 agent**（见 [Agent](#agents)）。
-7. 启动新版本，并在 dashboard（或 `GET /api/overview`）中检查是否有错误。
+1. **镜像标签改成 `v0.3`。** 没有 `latest` 标签，`v0` 也仍然停留在 0.2。
 
-## 不兼容变更
+   ```yaml
+   image: ghcr.io/channinghe/labelgate:v0.3
+   ```
 
-### 镜像标签 [#image-tag]
+2. **设置 API token。** `api.token`（`LABELGATE_API_TOKEN`）至少 16 个字符。不设置的话，dashboard 和 API 都不会开启。
 
-镜像发布在 `ghcr.io/channinghe/labelgate`，**没有** `latest` 标签。请使用：
+   ```bash
+   openssl rand -hex 32   # 把输出填到 LABELGATE_API_TOKEN
+   ```
 
-| 标签 | 含义 |
-|------|------|
-| `v0.3.0` | 精确版本 |
-| `v0.3` | 0.3.x 的最新补丁版本（推荐） |
-| `v0.3.0-full`、`v0.3-full` | 同一版本，但基于 debug 版 distroless 基础镜像，额外包含 busybox shell（`docker exec -it ... sh`） |
+3. **删掉已移除的配置项**，配置文件和环境变量里都要删：
+   - `docker.ssh.*`（`LABELGATE_DOCKER_SSH_*`）以及 `ssh://` 形式的 Docker 地址。改用本地 socket、带 TLS 的 `tcp://`，或在远程主机上运行 [agent](/zh/docs/examples/multi-host)。
+   - `db.retention`（`LABELGATE_DB_RETENTION`）
+   - `db.vacuum_interval`（`LABELGATE_DB_VACUUM_INTERVAL`）
 
-`v0.3.0-rc1` 这样的预发布标签只会发布该精确标签（及其 `-full` 变体），不会发布 `v0.3`。浮动标签 `v0` **不会**移动到 0.3，它停留在 0.2.x 系列（最后一次发布时所在的位置）。如果你现在使用 `ghcr.io/channinghe/labelgate:v0`，必须显式改成 `v0.3` 才能升级。
+   只要还留着任何一项，Labelgate 就不会启动，并一次性列出所有问题。
 
-### 必须设置 API token [#api-token-required]
+4. **启动 Labelgate，打开 dashboard。** 有报错就逐一修复（参见[下文](#what-changes-you-may-notice)）。
 
-`api.token`（`LABELGATE_API_TOKEN`）现在是**必填项**。在 v0.2 中，token 为空表示“不认证”；在 v0.3 中，token 为空表示 **API 和 dashboard 被禁用**（会输出醒目的错误日志，同步逻辑继续运行）。请设置一个至少 16 个字符的随机 token（`openssl rand -hex 32`），并用它登录 dashboard。没有 TLS 保护时，不要把端口发布到公网。
+### 如果你在用 agent [#agents]
 
-`api.base_path` 现在对 dashboard 同样生效：服务端会向 dashboard 页面注入 `<meta name="labelgate-api-base">` 标签，因此无需额外的 dashboard 配置。
+1. **main 实例和所有 agent 一起升级。** v0.2 和 v0.3 之间无法通信。agent 离线后，main 实例会保留它的记录 24 小时（`sync.agent_grace`），之后就删除。请在这段时间内升级完。
 
-### Agent [#agents]
+2. **使用足够强的 agent token。** 每个 agent token 至少 32 个随机字符，包括 `agent.agents.<id>.token`、`agent.accept_token`（`LABELGATE_AGENT_ACCEPT_TOKEN`）和 `connect.token`（`LABELGATE_CONNECT_TOKEN`）。
 
-Agent 协议已变更（双向 HMAC 认证、校验 TLS）。**v0.2 的 agent 无法连接 v0.3 的 main 实例，反之亦然。** 请把 main 实例和所有 agent 一起升级，并注意：
+   ```bash
+   openssl rand -hex 32
+   ```
 
-- WebSocket 地址必须包含 **`/ws` 路径**（`wss://main.example.com:8081/ws`）；
-- TLS 证书**默认会被校验**。如果你的 agent 使用自签名证书，请配置 `connect.tls.ca` / `agent.tls.ca`，或者（不推荐）显式开启 `insecure_skip_verify`；
-- `connect.tls.cert` / `key` 不再表示“客户端证书”，而是 inbound agent 监听端的服务端证书；
-- Agent ID 必须匹配 `^[a-z0-9][a-z0-9._-]{0,62}$`（允许包含点；迁移时旧的 ID 会被转为小写，因此 `NAS.lan` 变为 `nas.lan`）。带点的 ID 可以直接用作 `agent.agents` 下的键（见[配置参考](/zh/docs/configuration/reference#per-agent-entries)）；
-- 每个命名 agent 需要有自己的 `token`，且所有 agent token（`agent.agents.<id>.token`、`agent.accept_token`、`connect.token`）都必须至少 32 个字符，且至少包含 12 个不同的字符。请用 `openssl rand -hex 32` 生成；高熵很重要，因为截获的握手可以被离线攻击；
-- agent 的 tunnel 服务必须指向 IP 地址，或者指向该 agent 新增的 `services` 允许列表中的条目（`accept_token` agent 使用 `agent.accept_services`）。`http://web:80` 这样的 Compose 服务名会被拒绝，直到你把 `web` 加入该列表（参见 [SSRF 防护](/zh/docs/examples/multi-host#ssrf-guard)）；
-- 一个主机名只属于一个来源：agent 不能再向 main 主机（或其他 agent）已经在用的主机名添加记录、路径或 tunnel 规则；通配符主机名需要在 agent 的 `hostnames` 中有完全相同的条目。agent 指向 `*.cfargotunnel.com` 的 CNAME 会被拒绝；
-- `sync.agent_grace` 必须至少为 `5m`。
+3. **agent 连接地址必须以 `/ws` 结尾。**
 
-在 v0.2 的 agent 无法连接期间，它的资源**不会**立刻被移除。迁移完成后，main 实例会保留每个 agent 最后已知的资源，直到该 agent 再次上报，最长保留 `sync.agent_grace`（默认 **24h**）。超过之后，这些资源变为孤立状态，由于 `cleanup` 默认为 `true`，会在 `sync.remove_delay`（默认 30m）之后被删除。请在宽限期内完成 agent 升级。
+   ```bash
+   LABELGATE_CONNECT_ENDPOINT=wss://main.example.com:8081/ws
+   ```
 
-### 所有权模型 [#ownership-model]
+4. **自签名证书要配置 CA。** 现在会校验证书。在 agent 上设置 `connect.tls.ca`（`LABELGATE_CONNECT_TLS_CA`）；如果是 main 主动连接 agent（inbound 模式），在 main 上设置 `agent.tls.ca`（`LABELGATE_AGENT_TLS_CA`），指向你的 CA 文件。
 
-Labelgate 现在只删除和修改自己拥有的资源，并且**绝不收编**已存在的记录。参见[所有权与冲突](/zh/docs/ownership)。实际影响：
+5. **agent 的 tunnel 服务要用主机名，需先加白名单。** agent 的 tunnel 服务可以直接指向 IP 地址。如果要用 `http://web:80` 这样的主机名，需要在 main 实例的配置文件里放行：
 
-- 新建的 DNS 记录会带有备注标记 `labelgate:<instance_id>`；Access 应用会带有 `labelgate-<instance_id>` 标签。
-- 如果你在标签里写的主机名在 Cloudflare 上已经有一条 Labelgate 不拥有的记录、Access 应用或 tunnel 规则，你会得到 `conflict: existing record not owned by labelgate`，而不再是以前那种悄悄接管。
-- Tunnel 更新会保留你手工管理的 ingress 规则、catch-all 规则，以及全局的 `originRequest` / `warp-routing` 设置。
-- Access 策略现在每次协调都会更新（从标签里删掉一个邮箱，对应的访问权限就会被撤销），并且不会触碰别人创建的策略。
+   ```yaml
+   agent:
+     agents:
+       edge1:
+         services: ["web"]
+     # 使用 accept_token 连接的 agent：
+     accept_services: ["web"]
+   ```
 
-### `cleanup` 默认为 `true` [#cleanup-defaults-to-true]
+   `agent.agents` 只能写在配置文件里。
 
-代码一直以来都把 `cleanup` 默认为 `true`，只是 v0.2 的文档错误地写成了 `false`。现在文档已更正，行为没有变化。Labelgate 拥有的资源，会在容器消失后 `sync.remove_delay`（默认 `30m`）被删除。如需保留，请在服务上设置 `cleanup: "false"`。请确认你的配置文件中没有 `remove_delay: 0s`，它的意思是“立即删除”。
+## 你可能会注意到的变化 [#what-changes-you-may-notice]
 
-### 更严格的标签校验 [#stricter-label-validation]
+- **不再接管已有记录。** 如果某个主机名在 Cloudflare 上已经有 DNS 记录、Access 应用或 tunnel 规则，而且不是 Labelgate 创建的，你会看到 `conflict` 错误，并且什么都不会被修改。v0.2 创建的记录仍然归 Labelgate 管理。参见[所有权与冲突](/zh/docs/ownership)。
+- **标签写错现在会报错。** 拼写错误或非法取值（`hostnme`、`proxied: "maybe"`）会显示在 dashboard 和日志里。该服务在 Cloudflare 上已有的资源保持不动，直到你改好标签。
+- **默认开启清理。** 容器消失 30 分钟（`sync.remove_delay`）后，Labelgate 会删除它的资源。v0.2 的实际行为也是这样，只是文档写错了。想保留某个服务的资源，加上 `cleanup: "false"`：
 
-非法的标签值和未知的属性现在是**错误**，不再被默默替换成默认值：
+  ```yaml
+  labelgate.tunnel.web.cleanup: "false"
+  ```
 
-- 非法的布尔、整数或枚举值（`proxied: "maybe"`、`ttl: "abc"`、`type: "AAAAA"`）会丢弃该服务并报错；
-- 未知的属性（`labelgate.dns.web.hostnme`）会作为错误报告；
-- 主机名会被规范化（转小写、去空白、去掉末尾的点）并校验；
-- 同一个主机名同时被 DNS 服务和 tunnel 服务使用属于冲突（参见[所有权与冲突](/zh/docs/ownership#conflicts-between-claims)）。
+- **一个主机名只属于一台主机。** 如果 main 主机或某个 agent 已经在用某个主机名，其他主机再用它就会报 `conflict`。同一个主机名同时配 DNS 服务和 tunnel 服务也算冲突。
+- **Access 跟随标签变化。** 从标签里删掉某个邮箱，下一次同步时这个人就失去访问权限。v0.2 创建的共享 Access 策略不会被动，不再需要时请在 Cloudflare 里手动删除。
 
-标签错误会连同容器名和标签键一起写入日志，并使 `/overview` 和 dashboard 中的同步状态变为 `error`。因此，以前被忽略的拼写错误在升级后可能会暴露出来，这是有意为之。
+## 出问题怎么办 [#database-migration]
 
-### 已移除的配置项 [#removed-config-keys]
+v0.3 首次启动时会自动升级数据库。升级前，它会先在原数据库旁边保存一份旧数据库的副本：
 
-| 已移除 | 替代方案 |
-|--------|----------|
-| `docker.ssh.host`、`docker.ssh.key`、`docker.ssh.key_passphrase`、`docker.ssh.known_hosts` 以及 `ssh://` Docker 地址 | 本地 socket、带 `docker.tls.*` 的 `tcp://`，或在远程主机上运行 Labelgate agent |
-| `db.retention` | 无（直接删除该键） |
-| `db.vacuum_interval` | 无（直接删除该键） |
+```
+./labelgate-data/labelgate.db.v0.2.bak
+```
 
-这些配置项现在会在启动时报明确的错误，并一次列出所有问题。未知的 `mode`、`log_level`、`log_format` 值同样会失败，而不是静默回退。
+容器内的路径是 `/app/config/labelgate.db.v0.2.bak`。如果这个文件已经存在，新副本的文件名末尾会加上时间戳。如果副本写不进去（目录不可写或磁盘已满），Labelgate 会直接停止，什么都不改。
 
-### 其他行为变化 [#other-behavior-changes]
+回滚到 v0.2：
 
-- `sync.interval` 现在真正生效，默认值为 `5m`（之前文档写的是 `1h`，但从未使用）。最小值 `10s`。
-- 标签的 `credential` 不再默认为 `"default"`。凭据按最长后缀 zone 匹配自动选择，然后回退到根凭据。未知的 `tunnel` 标签会报错，而不是悄悄使用别的 tunnel。
-- 发生致命错误时进程以非零状态退出，所以 `restart: on-failure` 能正常工作。
-- `HEALTHCHECK` 会遵循 `api.address` 和 `api.base_path`，并在 API 被禁用时报告健康。
-- API 分页：`limit` 默认 500（最大 1000），`total` 为真实总数，非法参数返回 `400`。
+1. 停止 Labelgate：`docker compose down`。
+2. 用备份替换数据库：
 
-## 数据库迁移 [#database-migration]
+   ```bash
+   cd labelgate-data
+   mv labelgate.db labelgate.db.v0.3
+   rm -f labelgate.db-wal labelgate.db-shm
+   cp labelgate.db.v0.2.bak labelgate.db
+   ```
 
-v0.2 的数据库会在首次启动时自动迁移，无需手动执行任何操作。
+3. 把镜像改回 `ghcr.io/channinghe/labelgate:v0.2`，agent 也一起回滚，然后执行 `docker compose up -d`。
 
-1. 在改动 v0.2 数据库之前，Labelgate 会使用 `VACUUM INTO` 在旁边写一份一致性备份：`<db.path>.v0.2.bak`（默认是 `/app/config/labelgate.db.v0.2.bak`）。已有的备份绝不会被覆盖：如果 `.v0.2.bak` 已经存在，新备份会命名为 `.v0.2.bak.<unix 时间戳>`。**如果无法写入备份，迁移不会执行**，Labelgate 会报错停止。请确保该目录可写且有剩余空间。
-2. 随后迁移在单个事务中完成：已删除的记录被丢弃，重复项被合并（保留最近更新的一条），主机名被规范化，时间戳被转换。
-3. 生成并保存一个随机的**实例 ID**（8 位十六进制字符），启动时也会写入日志。
-4. v0.2 跟踪的所有资源都被视为**由本实例拥有**，因为它们就是 Labelgate 创建的。下一次更新时，每条 DNS 记录会被写入备注标记，每个 Access 应用会被打上标签。v0.2 创建但没有跟踪的 tunnel CNAME 记录也会补上跟踪记录。v0.2 中已经标记为孤立的资源会保留原来的孤立时间，因此其中 `remove_delay` 早已过期的资源会在升级后的最初几个周期内被删除。Agent 会被迁移过来，其 last-seen 时间被设为迁移时刻、且没有容器快照，所以它们的资源会被保留，直到 agent 再次上报（或 `sync.agent_grace` 结束）。凭据已不存在的迁移资源（例如新配置没有 `cloudflare.api_token` 时的 `default`）会自动按 zone 匹配；v0.2 遗留的孤立 tunnel CNAME 会按名称找到，并像其他自有记录一样被删除。如果 v0.2 中某个主机名上有多台主机的资源，由拥有最早资源的主机保有它，其他主机的声明会被拒绝，其资源会被清理。
-5. v0.2 创建的 Access 可复用策略在新模型中不属于任何人：它们不会被收编，也不会被删除。Labelgate 会创建新的按主机名划分的策略，旧策略你可以在 Cloudflare 控制台中自行删除。
-
-不支持降级：v0.3 会拒绝由更新的 schema 写入的数据库，而 v0.2 也无法读取新数据库。如需回滚，请停止 Labelgate，把 `labelgate.db.v0.2.bak`（或你自己的备份）恢复为数据库文件，再启动旧版镜像。
-
-## 验证升级结果
-
-- 打开 dashboard（或带着 token 调用 `GET /api/overview`），确认同步状态为 `success`。
-- 检查 `GET /api/resources/dns?status=error`，看是否有需要手动处理的冲突。
-- 在 `GET /api/agents` 中确认每个 agent 都是 `active`。
+v0.2 读不了 v0.3 的数据库，所以回滚时一定要恢复备份。
