@@ -72,7 +72,10 @@ var (
 //   - agent mode: connect.token like agent tokens, outbound needs a ws(s):// endpoint,
 //     inbound needs connect.listen, connect.agent_id valid when set,
 //     heartbeat_interval >= 1s.
-func Validate(cfg Config) error {
+func Validate(cfg Config) error { return validate(cfg).err() }
+
+// validate runs every check and returns all problems (nil when valid).
+func validate(cfg Config) ValidationErrors {
 	var p ValidationErrors
 	checkCore(&p, cfg)
 	checkRetry(&p, cfg)
@@ -86,7 +89,7 @@ func Validate(cfg Config) error {
 		checkCloudflare(&p, cfg)
 		checkAgentServer(&p, cfg)
 	}
-	return p.err()
+	return p
 }
 
 func checkCore(p *ValidationErrors, cfg Config) {
