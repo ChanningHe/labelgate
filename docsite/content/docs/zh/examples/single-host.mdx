@@ -1,207 +1,146 @@
 ---
-title: 单主机部署
-description: 单主机部署的 Docker Compose 示例。
+title: 单主机
+description: 在一台 Docker 主机上运行 Labelgate 的 Compose 示例，复制即可用。
 ---
 
-<Callout type="info">
-所有示例都传入了 `LABELGATE_API_TOKEN`，它用于启用 dashboard 和 API，没有它这两者都会被禁用。这里没有发布任何端口；如需在本机访问 dashboard，请添加 `ports: ["127.0.0.1:8080:8080"]`。
-</Callout>
+所有容器都跑在**同一台 Docker 主机**上时，用这里的示例。多台主机请看[多主机](/zh/docs/examples/multi-host)。
 
-<Callout type="warn">
-为了简洁，这些示例省略了非 root 镜像（UID 65532）所需的 `group_add`（加入拥有 Docker socket 的组）。镜像自带属主为 UID 65532 的 `/app/config`，因此像 `labelgate-data` 这样的 Docker 命名卷开箱即可写入；bind mount 则需要先执行 `chown -R 65532:65532`。完整的服务定义见[快速开始](/zh/docs/getting-started#create-compose)。
-</Callout>
+## 1. 创建 `.env` [#env]
 
-## 仅 DNS 配置
+放在 `compose.yaml` 旁边：
 
-最简单的配置 - Labelgate 仅管理 DNS 记录，无需隧道。
+```bash
+# Cloudflare API token（所需权限见“快速开始”）
+LABELGATE_CLOUDFLARE_API_TOKEN=your-cloudflare-api-token
+# 控制台登录口令，用 openssl rand -hex 32 生成
+LABELGATE_API_TOKEN=paste-a-random-string
+# Docker socket 所属的组：stat -c '%g' /var/run/docker.sock
+DOCKER_GID=999
 
-```yaml
+# 仅隧道示例需要：
+LABELGATE_CLOUDFLARE_ACCOUNT_ID=your-account-id
+LABELGATE_CLOUDFLARE_TUNNEL_ID=your-tunnel-id
+TUNNEL_TOKEN=your-cloudflared-token
+```
+
+API token 的创建方法见[快速开始](/zh/docs/getting-started)，隧道 ID 和 token 的获取方法见 [cloudflared](/zh/docs/examples/cloudflared)。
+
+## 2. 选一个示例
+
+### 只管理 DNS 记录 [#dns-only]
+
+把 `www.example.com` 指向本机公网 IP，不需要隧道。
+
+```yaml title="compose.yaml"
 services:
   labelgate:
     image: ghcr.io/channinghe/labelgate:v0.3
     restart: unless-stopped
+    group_add: ["${DOCKER_GID}"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - labelgate-data:/app/config
     environment:
       - LABELGATE_CLOUDFLARE_API_TOKEN
       - LABELGATE_API_TOKEN
+    ports:
+      - "127.0.0.1:8080:8080" # 控制台
 
-  # Web server with auto DNS
-  nginx:
+  web:
     image: nginx:alpine
+    ports:
+      - "80:80"
     labels:
       labelgate.dns.web.hostname: "www.example.com"
-      labelgate.dns.web.type: "A"
-      labelgate.dns.web.target: "auto"
-      labelgate.dns.web.proxied: "true"
+      # 默认值：type A，target auto（本机公网 IP），proxied true
 
 volumes:
   labelgate-data:
 ```
 
-## 仅隧道配置
+### 隧道（不开放端口） [#tunnel]
 
-通过 Cloudflare Tunnel 暴露服务 - 无需公共端口。
+通过 Cloudflare Tunnel 发布 `app.example.com`。路由和 DNS 记录都由 Labelgate 添加。
 
-```yaml
+```yaml title="compose.yaml"
 services:
   labelgate:
     image: ghcr.io/channinghe/labelgate:v0.3
     restart: unless-stopped
+    group_add: ["${DOCKER_GID}"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - labelgate-data:/app/config
     environment:
       - LABELGATE_CLOUDFLARE_API_TOKEN
-      - LABELGATE_API_TOKEN
       - LABELGATE_CLOUDFLARE_ACCOUNT_ID
       - LABELGATE_CLOUDFLARE_TUNNEL_ID
+      - LABELGATE_API_TOKEN
+    ports:
+      - "127.0.0.1:8080:8080" # 控制台
 
   cloudflared:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
-    command: tunnel run --token ${TUNNEL_TOKEN}
-
-  # Web application
-  webapp:
-    image: nginx:alpine
-    labels:
-      labelgate.tunnel.web.hostname: "app.example.com"
-      labelgate.tunnel.web.service: "http://webapp:80"
-
-  # API server
-  api:
-    image: node:alpine
-    labels:
-      labelgate.tunnel.api.hostname: "api.example.com"
-      labelgate.tunnel.api.service: "http://api:3000"
-
-volumes:
-  labelgate-data:
-```
-
-<Callout type="info">
-在 `service` 标签中使用 Docker 服务名称（例如 `http://webapp:80`），而不是 `localhost`。容器通过 Docker 的内部网络进行通信。
-</Callout>
-
-## DNS + 隧道（不同主机名）
-
-在不同的主机名上组合 DNS 记录和隧道服务。
-
-```yaml
-services:
-  labelgate:
-    image: ghcr.io/channinghe/labelgate:v0.3
-    restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - labelgate-data:/app/config
-    environment:
-      - LABELGATE_CLOUDFLARE_API_TOKEN
-      - LABELGATE_API_TOKEN
-      - LABELGATE_CLOUDFLARE_ACCOUNT_ID
-      - LABELGATE_CLOUDFLARE_TUNNEL_ID
-
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    restart: unless-stopped
-    command: tunnel run --token ${TUNNEL_TOKEN}
+    command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN}
 
   app:
-    image: myapp:latest
+    image: nginx:alpine
     labels:
-      # Tunnel: expose via Cloudflare Tunnel
-      labelgate.tunnel.web.hostname: "app.example.com"
-      labelgate.tunnel.web.service: "http://app:80"
-
-      # DNS: point a different hostname to server IP
-      labelgate.dns.legacy.hostname: "old.example.com"
-      labelgate.dns.legacy.type: "A"
-      labelgate.dns.legacy.target: "203.0.113.1"
+      labelgate.tunnel.app.hostname: "app.example.com"
+      labelgate.tunnel.app.service: "http://app:80" # 用 Compose 服务名，不要用 localhost
 
 volumes:
   labelgate-data:
 ```
 
-## 使用访问策略
+### 加登录页（Access） [#access]
 
-使用 Zero Trust Access 保护服务。
+把下面的服务加进隧道示例。只有 `@example.com` 邮箱的用户能打开 `admin.example.com`。
 
 ```yaml
-services:
-  labelgate:
-    image: ghcr.io/channinghe/labelgate:v0.3
-    restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - labelgate-data:/app/config
-    environment:
-      - LABELGATE_CLOUDFLARE_API_TOKEN
-      - LABELGATE_API_TOKEN
-      - LABELGATE_CLOUDFLARE_ACCOUNT_ID
-      - LABELGATE_CLOUDFLARE_TUNNEL_ID
-
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    restart: unless-stopped
-    command: tunnel run --token ${TUNNEL_TOKEN}
-
-  admin-panel:
-    image: admin:latest
+  admin:
+    image: nginx:alpine
     labels:
-      # Define access policy
-      labelgate.access.team.policy.decision: "allow"
-      labelgate.access.team.policy.include.emails_ending_in: "@company.io"
+      labelgate.access.team.policy.include.emails_ending_in: "@example.com"
       labelgate.access.team.session_duration: "8h"
-
-      # Tunnel with access policy
-      labelgate.tunnel.admin.hostname: "admin.company.io"
-      labelgate.tunnel.admin.service: "http://admin-panel:8080"
+      labelgate.tunnel.admin.hostname: "admin.example.com"
+      labelgate.tunnel.admin.service: "http://admin:80"
       labelgate.tunnel.admin.access: "team"
-
-  # Public docs - no access policy needed
-  docs:
-    image: docs:latest
-    labels:
-      labelgate.tunnel.docs.hostname: "docs.company.io"
-      labelgate.tunnel.docs.service: "http://docs:80"
-
-volumes:
-  labelgate-data:
 ```
 
-## PR 预览环境
+Cloudflare API token 还需要 `Access: Apps and Policies: Edit` 权限。所有 Access 标签见 [Access 标签](/zh/docs/labels/access)。
 
-自动预览部署。`cleanup` 默认为 `true`，所以容器停止 `sync.remove_delay`（默认 30 分钟）之后，tunnel 规则及其 CNAME 会被移除。如果希望预览环境更快消失，可以调低延迟（例如 `LABELGATE_SYNC_REMOVE_DELAY=5m`）。
+### 预览环境 [#preview]
+
+每个预览一个服务。容器删除后，Labelgate 会在 `sync.remove_delay`（`LABELGATE_SYNC_REMOVE_DELAY`，默认 `30m`）之后删掉对应的路由和 DNS 记录。
 
 ```yaml
-services:
-  labelgate:
-    image: ghcr.io/channinghe/labelgate:v0.3
-    restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - labelgate-data:/app/config
-    environment:
-      - LABELGATE_CLOUDFLARE_API_TOKEN
-      - LABELGATE_API_TOKEN
-      - LABELGATE_CLOUDFLARE_ACCOUNT_ID
-      - LABELGATE_CLOUDFLARE_TUNNEL_ID
-
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    restart: unless-stopped
-    command: tunnel run --token ${TUNNEL_TOKEN}
-
   preview:
-    image: myapp:pr-${PR_NUMBER:-0}
+    image: myapp:pr-${PR_NUMBER}
     labels:
-      labelgate.tunnel.preview.hostname: "pr-${PR_NUMBER:-0}.preview.example.com"
+      labelgate.tunnel.preview.hostname: "pr-${PR_NUMBER}.preview.example.com"
       labelgate.tunnel.preview.service: "http://preview:3000"
-      # cleanup 默认就是 "true"，也可以显式写出
-      labelgate.tunnel.preview.cleanup: "true"
-
-volumes:
-  labelgate-data:
 ```
+
+## 3. 启动并检查
+
+```bash
+docker compose up -d
+docker compose logs -f labelgate
+```
+
+- **日志**：没有 `level=WARN msg="reconcile problem"` 这样的行。
+- **控制台**：打开 `http://127.0.0.1:8080`，用 `LABELGATE_API_TOKEN` 登录，所有资源都应是 `active`。
+- **DNS**：`dig +short www.example.com` 返回 Cloudflare 的 IP（开启代理的记录不会暴露真实 IP）。
+- **隧道**：`curl -I https://app.example.com` 能拿到应用的响应。
+
+## 常见问题
+
+| 现象 | 解决办法 |
+|------|----------|
+| 访问 `/var/run/docker.sock` 报 `permission denied` | `DOCKER_GID` 不对。运行 `stat -c '%g' /var/run/docker.sock`，把结果填进 `.env`。 |
+| 控制台打不开 | `LABELGATE_API_TOKEN` 为空或少于 16 个字符。没有它控制台不会启用。 |
+| 数据库写不进去（用了 `./data:/app/config` 这类目录挂载） | 执行一次 `sudo chown -R 65532:65532 ./data`。上面的命名卷不需要这一步。 |
+| 隧道返回 `502 Bad Gateway` | `service` 用了 `localhost`，或 cloudflared 访问不到该容器。改用 Compose 服务名，并让 cloudflared 和应用在同一个网络里。 |
+| `conflict: existing record not owned by labelgate` | 这个主机名已经有一条记录。去 Cloudflare 删掉它，或换一个主机名。见[所有权](/zh/docs/ownership)。 |
