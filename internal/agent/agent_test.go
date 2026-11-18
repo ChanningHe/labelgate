@@ -209,28 +209,31 @@ func TestAgentTooManyContainersReportsDockerNotOK(t *testing.T) {
 
 func TestAgentLookupIPFamilies(t *testing.T) {
 	cases := []struct {
-		name string
-		fn   model.PublicIPFunc
-		v4   string
-		v6   string
+		name  string
+		fn    model.PublicIPFunc
+		v4    string
+		v6    string
+		fails bool
 	}{
-		{"nil func", nil, "", ""},
-		{"error", func(context.Context, bool) (netip.Addr, error) { return netip.Addr{}, errors.New("x") }, "", ""},
+		{"nil func", nil, "", "", false},
+		{"error", func(context.Context, bool) (netip.Addr, error) { return netip.Addr{}, errors.New("x") }, "", "", true},
 		{"wrong families", func(_ context.Context, v6 bool) (netip.Addr, error) {
 			if v6 {
 				return netip.MustParseAddr("1.2.3.4"), nil
 			}
 			return netip.MustParseAddr("2001:db8::2"), nil
-		}, "", ""},
+		}, "", "", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			a := newTestAgent(t, outboundConnect("ws://x/ws"), &fakeSource{}, func(o *AgentOptions) { o.PublicIP = tc.fn })
-			if got := a.lookupIP(context.Background(), false, a.log); got != tc.v4 {
-				t.Fatalf("v4 = %q", got)
+			got4, err4 := a.lookupIP(context.Background(), false)
+			got6, err6 := a.lookupIP(context.Background(), true)
+			if got4 != tc.v4 || got6 != tc.v6 {
+				t.Fatalf("v4 = %q, v6 = %q", got4, got6)
 			}
-			if got := a.lookupIP(context.Background(), true, a.log); got != tc.v6 {
-				t.Fatalf("v6 = %q", got)
+			if (err4 != nil) != tc.fails || (err6 != nil) != tc.fails {
+				t.Fatalf("errors = %v, %v; want failure: %v", err4, err6, tc.fails)
 			}
 		})
 	}

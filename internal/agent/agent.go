@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/channinghe/labelgate/internal/config"
+	"github.com/channinghe/labelgate/internal/logchange"
 	"github.com/channinghe/labelgate/internal/model"
 	"github.com/channinghe/labelgate/internal/source"
 	"github.com/gorilla/websocket"
@@ -54,6 +55,9 @@ type Agent struct {
 
 	mu  sync.Mutex
 	cur *agentSession // current authenticated main session
+
+	ipMu       sync.Mutex
+	ipProblems *logchange.Tracker // public IP detection failures, guarded by ipMu
 }
 
 // agentSession is one authenticated main connection.
@@ -92,6 +96,8 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 		log:     opts.Log.With("component", "agent", "agent_id", id),
 		t:       defaultTimings(),
 		pending: newPendingLimiter(MaxPendingHandshakes, MaxPendingPerIP),
+
+		ipProblems: logchange.New(logchange.DefaultRepeat),
 	}, nil
 }
 
@@ -358,11 +364,11 @@ func (a *Agent) waitReport(ctx context.Context, s *agentSession, heartbeat <-cha
 // buildReport takes a full snapshot. Snapshot failures are reported as
 // DockerOK=false, never as an empty list.
 func (a *Agent) buildReport(ctx context.Context, log *slog.Logger) Report {
-	rep := Report{
-		Seq:        a.seq.Add(1),
-		PublicIP:   a.lookupIP(ctx, false, log),
-		PublicIPv6: a.lookupIP(ctx, true, log),
-	}
+	rep := Report{Seq: a.seq.Add(1)}
+	var err4, err6 error
+	rep.PublicIP, err4 = a.lookupIP(ctx, false)
+	rep.PublicIPv6, err6 = a.lookupIP(ctx, true)
+	a.logIPProblems(ctx, log, err4, err6)
 	snap, err := a.opts.Source.Snapshot(ctx)
 	switch {
 	case err != nil:
@@ -382,18 +388,26 @@ func (a *Agent) buildReport(ctx context.Context, log *slog.Logger) Report {
 	return rep
 }
 
-func (a *Agent) lookupIP(ctx context.Context, v6 bool, log *slog.Logger) string {
+// lookupIP returns this host's public address of one family, or "" without
+// an error when no lookup is configured. A failed lookup is an error.
+func (a *Agent) lookupIP(ctx context.Context, v6 bool) (string, error) {
 	if a.opts.PublicIP == nil {
-		return ""
+		return "", nil
 	}
 	addr, err := a.opts.PublicIP(ctx, v6)
 	if err != nil {
-		log.Debug("public IP lookup failed", "ipv6", v6, "error", err)
-		return ""
+		return "", err
 	}
 	addr = addr.Unmap()
 	if (v6 && !addr.Is6()) || (!v6 && !addr.Is4()) {
-		return ""
+		return "", fmt.Errorf("the lookup returned %q, not an %s address", addr, ipFamily(v6))
 	}
-	return addr.String()
+	return addr.String(), nil
+}
+
+func ipFamily(v6 bool) string {
+	if v6 {
+		return "IPv6"
+	}
+	return "IPv4"
 }

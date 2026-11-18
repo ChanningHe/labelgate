@@ -9,6 +9,7 @@ import (
 
 	"github.com/channinghe/labelgate/internal/cloudflare"
 	"github.com/channinghe/labelgate/internal/labels"
+	"github.com/channinghe/labelgate/internal/logchange"
 	"github.com/channinghe/labelgate/internal/model"
 	"github.com/channinghe/labelgate/internal/source"
 )
@@ -41,6 +42,9 @@ type Reconciler struct {
 
 	mu     sync.Mutex
 	status SyncStatus
+
+	// problems decides which cycle problems are logged (loop goroutine only).
+	problems *logchange.Tracker
 
 	// tagged records accounts whose ownership tag exists (loop goroutine only).
 	tagged map[string]bool
@@ -78,6 +82,8 @@ func New(d Deps) (*Reconciler, error) {
 		trigger: make(chan struct{}, 1),
 		status:  SyncStatus{State: SyncPending},
 		tagged:  map[string]bool{},
+
+		problems: logchange.New(problemRepeatInterval),
 	}, nil
 }
 
