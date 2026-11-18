@@ -132,7 +132,7 @@ func (o *observer) resolveWinner(ctx context.Context, w claim) claim {
 	}
 	z, err := o.zone(ctx, w.Res.Hostname, w.SpecCred)
 	if err != nil {
-		w.Err = fmt.Sprintf("zone for %s: %v", w.Res.Hostname, err)
+		w.Err = zoneError(w.Res.Hostname, err)
 		return w
 	}
 	w.Zone = z
@@ -182,7 +182,8 @@ func (o *observer) target(ctx context.Context, w claim) (netip.Addr, error) {
 		}
 		a, err := netip.ParseAddr(raw)
 		if err != nil || !familyOK(a, v6) {
-			return netip.Addr{}, fmt.Errorf("agent %s reported no public %s address", w.Src.AgentID, family)
+			return netip.Addr{}, fmt.Errorf("target auto needs the public %s address of agent %s, which it did not report (it could not detect one); %s",
+				family, w.Src.AgentID, dynamicTargetFix)
 		}
 		return a, nil
 	}
@@ -193,10 +194,10 @@ func (o *observer) target(ctx context.Context, w claim) (netip.Addr, error) {
 		o.ips[v6] = res
 	}
 	if res.err != nil {
-		return netip.Addr{}, fmt.Errorf("public %s address: %w", family, res.err)
+		return netip.Addr{}, fmt.Errorf("target auto: cannot detect this host's public %s address: %w; %s", family, res.err, dynamicTargetFix)
 	}
 	if !familyOK(res.addr, v6) {
-		return netip.Addr{}, fmt.Errorf("public %s address: got %s", family, res.addr)
+		return netip.Addr{}, fmt.Errorf("target auto: the public %s address lookup returned %s; %s", family, res.addr, dynamicTargetFix)
 	}
 	return res.addr, nil
 }
@@ -214,7 +215,8 @@ func containerIP(c *model.Container, v6 bool, family string) (netip.Addr, error)
 			return a, nil
 		}
 	}
-	return netip.Addr{}, fmt.Errorf("container %s has no %s address", c.Name, family)
+	return netip.Addr{}, fmt.Errorf("target container: container %s has no %s address on any network; attach it to a network with %s, or %s",
+		c.Name, family, family, dynamicTargetFix)
 }
 
 func (r *Reconciler) observeZones(ctx context.Context, winners []claim, tracked []model.Resource, held holdSet) map[string]zoneLive {

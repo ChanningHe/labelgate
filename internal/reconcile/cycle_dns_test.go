@@ -148,9 +148,10 @@ func TestDNSUnownedRecordIsConflictNeverTouched(t *testing.T) {
 				t.Fatalf("mutations: %+v", h.cf.Calls())
 			}
 			row := h.row(model.KindDNS, appKey)
-			if row.Status != model.StatusError || row.LastError != model.ConflictNotOwned || row.CFID != "" {
+			if row.Status != model.StatusError || !strings.HasPrefix(row.LastError, model.ConflictNotOwned) || row.CFID != "" {
 				t.Fatalf("row %+v", row)
 			}
+			mustContain(t, row.LastError, "already exists in Cloudflare", "DNS > Records", seeded.ID)
 			h.src.set()
 			h.cycle()
 			h.clk.advance(31 * time.Minute)
@@ -169,9 +170,10 @@ func TestDNSCreateAlreadyExistsIsConflict(t *testing.T) {
 	h.cf.FailNext(cffake.OpCreateDNSRecord, cloudflare.ErrAlreadyExists)
 	h.cycle()
 	row := h.row(model.KindDNS, appKey)
-	if row.LastError != model.ConflictNotOwned || row.CFID != "" {
+	if !strings.HasPrefix(row.LastError, model.ConflictNotOwned) || row.CFID != "" {
 		t.Fatalf("row %+v", row)
 	}
+	mustContain(t, row.LastError, "Cloudflare refused to create the A record "+appHost)
 }
 
 func TestDNSAdoptsOwnMarkedRecord(t *testing.T) {
@@ -307,9 +309,9 @@ func TestDNSTransientErrorsRetryNextCycle(t *testing.T) {
 		op  cffake.Op
 		msg string
 	}{
-		{cffake.OpCreateDNSRecord, "create dns record"},
-		{cffake.OpListDNSRecords, "list dns records"},
-		{cffake.OpResolveZone, "zone for"},
+		{cffake.OpCreateDNSRecord, "cannot create DNS record"},
+		{cffake.OpListDNSRecords, "cannot list the DNS records of zone"},
+		{cffake.OpResolveZone, "cannot find the Cloudflare zone for"},
 	}
 	for _, tc := range tests {
 		t.Run(string(tc.op), func(t *testing.T) {
@@ -430,7 +432,7 @@ func TestLocalSourceErrorHoldsResources(t *testing.T) {
 	h.cf.ResetCalls()
 	for range 3 {
 		h.clk.advance(time.Hour)
-		if st := h.cycle(); st.State != SyncError || !strings.Contains(st.Error, "local source") {
+		if st := h.cycle(); st.State != SyncError || !strings.Contains(st.Error, "resources of local containers are kept unchanged") {
 			t.Fatalf("status %+v", st)
 		}
 	}

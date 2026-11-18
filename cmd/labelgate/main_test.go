@@ -290,8 +290,11 @@ func TestMainWithoutTokenKeepsReconcilerRunning(t *testing.T) {
 	if h.builds["api"] != 0 {
 		t.Fatal("API must not be constructed without a token")
 	}
-	if !strings.Contains(log.String(), "api.token is empty: API and dashboard disabled") || !strings.Contains(log.String(), "level=ERROR") {
-		t.Fatalf("missing loud error log:\n%s", log.String())
+	for _, want := range []string{"level=WARN", "API and dashboard disabled: api.token is empty",
+		"LABELGATE_API_TOKEN", "openssl rand -hex 32", "sync keep running"} {
+		if !strings.Contains(log.String(), want) {
+			t.Fatalf("API-disabled warning lacks %q:\n%s", want, log.String())
+		}
 	}
 }
 

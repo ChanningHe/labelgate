@@ -43,7 +43,7 @@ func (s *Source) Watch(ctx context.Context, notify func()) error {
 		}
 		delay := s.backoff(attempt)
 		attempt++
-		s.log.Warn("docker event stream lost; reconnecting", "error", err, "retry_in", delay)
+		s.log.Warn("Docker event stream lost; reconnecting", "error", explain(s.endpoint, err), "retry_in", delay)
 		if !sleep(ctx, delay) {
 			return ctx.Err()
 		}

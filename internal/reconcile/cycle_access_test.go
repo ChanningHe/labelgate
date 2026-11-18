@@ -137,7 +137,7 @@ func TestAccessAppUpdateFailureNeverCreatesSecondApp(t *testing.T) {
 	h.src.set(accessCtr("web", def))
 	h.cf.FailNext(cffake.OpUpdateAccessApp, errBoom)
 	h.cycle()
-	if row := h.row(model.KindAccess, appHost); row.Status != model.StatusError || !strings.Contains(row.LastError, "update access app") {
+	if row := h.row(model.KindAccess, appHost); row.Status != model.StatusError || !strings.Contains(row.LastError, "cannot update Access application") {
 		t.Fatalf("row %+v", row)
 	}
 	if len(h.cf.Apps(testAccount)) != 1 || h.cf.CountCalls(cffake.OpCreateAccessApp) != 1 {
@@ -154,7 +154,7 @@ func TestAccessUntaggedAppIsConflict(t *testing.T) {
 	h.cf.PutApp(testAccount, cloudflare.AccessApp{Name: "manual", Domain: appHost})
 	h.src.set(accessCtr("web", teamDef("a@example.com")))
 	h.cycle()
-	if row := h.row(model.KindAccess, appHost); row.LastError != model.ConflictNotOwned {
+	if row := h.row(model.KindAccess, appHost); !strings.HasPrefix(row.LastError, model.ConflictNotOwned) || !strings.Contains(row.LastError, "Zero Trust > Access > Applications") {
 		t.Fatalf("row %+v", row)
 	}
 	if len(h.cf.Policies(testAccount)) != 0 || h.onlyApp().Name != "manual" {
@@ -268,8 +268,8 @@ func TestAccessDefinitionLookup(t *testing.T) {
 		want               *model.AccessPolicyDef
 	}{
 		{"own", "team", "", &def},
-		{"none", "missing", "not found", nil},
-		{"none", "team", "ambiguous", nil},
+		{"none", "missing", `access policy "missing" is not defined`, nil},
+		{"none", "team", "defined differently on several containers", nil},
 	}
 	for _, tc := range tests {
 		got, msg := lookupDef(src, tc.ctr, tc.name)

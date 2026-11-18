@@ -91,7 +91,7 @@ func (p *parser) group(labels map[string]string) map[string]map[string]props {
 		}
 		parts := strings.SplitN(rest, ".", 3)
 		if !knownType(parts[0]) {
-			p.errs.add(key, "unknown label type %q (expected dns, tunnel or access)", parts[0])
+			p.errs.add(key, "unknown label type %q: use %s.dns.*, %s.tunnel.* or %s.access.*", parts[0], p.prefix, p.prefix, p.prefix)
 			continue
 		}
 		if len(parts) < 3 {
@@ -128,10 +128,10 @@ func serviceNameProblem(name string) string {
 		return ""
 	}
 	if reservedNames[name] {
-		return "reserved service name " + name
+		return "service name " + name + " is reserved (it is a property name); rename the service in this label key"
 	}
 	if !serviceNamePattern.MatchString(name) {
-		return "invalid service name " + name + " (must be lowercase alphanumeric with hyphens)"
+		return "invalid service name " + name + ": use lower-case letters, digits and inner hyphens"
 	}
 	return ""
 }
@@ -169,7 +169,7 @@ func accessRef(v string) (string, error) {
 		return "", nil
 	}
 	if !serviceNamePattern.MatchString(v) {
-		return "", fmt.Errorf("invalid access policy name %q (must be lowercase alphanumeric with hyphens)", v)
+		return "", fmt.Errorf("invalid access policy name %q: use lower-case letters, digits and inner hyphens", v)
 	}
 	return v, nil
 }

@@ -38,7 +38,7 @@ retry:
 		// validation, in check order
 		"log_level", "retry.attempts")
 	msg := err.Error()
-	if !strings.HasPrefix(msg, "config: 7 problems:\n  db.retention: ") {
+	if !strings.HasPrefix(msg, "config: 7 problems:\n  db.retention (env LABELGATE_DB_RETENTION): ") {
 		t.Errorf("unexpected header or order:\n%s", msg)
 	}
 	if strings.Count(msg, "\n") != 7 {

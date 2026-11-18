@@ -117,7 +117,7 @@ func unknownKeys(section, list string) ValidationErrors {
 	for _, name := range strings.Split(list, ",") {
 		key := dotted(section + "." + strings.TrimSpace(name))
 		if !isRemovedPath(key) {
-			p.addf(key, "unknown key")
+			p.addf(key, "unknown key; check the spelling against the configuration reference, or delete it")
 		}
 	}
 	return p

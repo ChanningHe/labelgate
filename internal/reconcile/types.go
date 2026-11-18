@@ -69,6 +69,8 @@ type sourceInfo struct {
 	Policy   AgentPolicy
 	// Defs holds access policy definitions per container name.
 	Defs map[string][]model.AccessPolicyDef
+	// LabelPrefix is the label prefix the containers were parsed with (for messages).
+	LabelPrefix string
 }
 
 func (s *sourceInfo) isAgent() bool { return s.AgentID != model.LocalAgentID }

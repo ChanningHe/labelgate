@@ -94,7 +94,7 @@ func validate(cfg Config) ValidationErrors {
 
 func checkCore(p *ValidationErrors, cfg Config) {
 	if !labelPrefixPattern.MatchString(cfg.LabelPrefix) {
-		p.addf("label_prefix", "%q must match %s", cfg.LabelPrefix, labelPrefixPattern)
+		p.addf("label_prefix", "%q is invalid: use lower-case letters, digits, dots, hyphens or underscores, starting with a letter or digit (default: labelgate)", cfg.LabelPrefix)
 	}
 	if cfg.Mode != ModeMain && cfg.Mode != ModeAgent {
 		p.addf("mode", "%q is invalid (use main or agent)", cfg.Mode)
@@ -190,7 +190,7 @@ func checkListen(field, addr string) *ValidationError {
 
 func checkTLSPair(prefix string, t TLSConfig) *ValidationError {
 	if (t.Cert == "") != (t.Key == "") {
-		return fail(prefix+".cert", "cert and key must be set together")
+		return fail(prefix+".cert", "%s and %s must be set together: set both for a certificate, or neither", prefix+".cert", KeyWithEnv(prefix+".key"))
 	}
 	return nil
 }
@@ -207,7 +207,7 @@ func checkSyncDB(p *ValidationErrors, cfg Config) {
 		p.addf("sync.orphan_ttl", "must be >= 0, got %s", s.OrphanTTL)
 	}
 	if s.AgentGrace < MinAgentGrace {
-		p.addf("sync.agent_grace", "must be >= 5m, got %s", s.AgentGrace)
+		p.addf("sync.agent_grace", "must be >= %s, got %s", MinAgentGrace, s.AgentGrace)
 	}
 	if strings.TrimSpace(cfg.DB.Path) == "" {
 		p.addf("db.path", "must not be empty")
@@ -250,7 +250,7 @@ func validGlob(p string) bool {
 func checkGlobs(field string, globs []string) *ValidationError {
 	for _, g := range globs {
 		if !validGlob(g) {
-			return fail(field, "invalid pattern %q", g)
+			return fail(field, "invalid pattern %q (use a host name or a glob such as *.example.com)", g)
 		}
 	}
 	return nil

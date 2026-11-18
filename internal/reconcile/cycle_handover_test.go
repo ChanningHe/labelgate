@@ -46,7 +46,7 @@ func TestClassSwitchNeverHandsHostnameToOtherSource(t *testing.T) {
 	for range 2 {
 		h.cycle()
 		h.wantNoEvilRecord()
-		h.wantOnlyRejected("a-evil", "is owned by agent edge", 1)
+		h.wantOnlyRejected("a-evil", "is already managed by agent edge", 1)
 	}
 	if recs := h.recordsNamed(appHost); len(recs) != 1 || recs[0].Type != model.DNSTypeCNAME {
 		t.Fatalf("records %+v", recs)
@@ -77,7 +77,7 @@ func TestRenameThenExpiryKeepsHostname(t *testing.T) {
 	set("web2")
 	h.cycle()
 	h.wantNoEvilRecord()
-	h.wantOnlyRejected("a-evil", "is owned by agent edge", 1)
+	h.wantOnlyRejected("a-evil", "is already managed by agent edge", 1)
 }
 
 // A renamed container takes over its tunnel rule without waiting for
@@ -184,7 +184,7 @@ func TestMixedSourceRowIsNotTakenOver(t *testing.T) {
 		t.Fatalf("row %+v", row)
 	}
 	rej := h.st.list(true)
-	if len(rej) != 1 || rej[0].Owner.AgentID != "" || !strings.Contains(rej[0].LastError, "already claimed by agent edge") {
+	if len(rej) != 1 || rej[0].Owner.AgentID != "" || !strings.Contains(rej[0].LastError, "is already managed by agent edge") {
 		t.Fatalf("rejected %+v", rej)
 	}
 }

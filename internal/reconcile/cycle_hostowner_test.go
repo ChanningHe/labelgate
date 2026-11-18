@@ -8,7 +8,7 @@ import (
 	"github.com/channinghe/labelgate/internal/model"
 )
 
-const ownedByLocal = "is owned by local"
+const ownedByLocal = "is already managed by local"
 
 // wantOnlyRejected asserts every rejected row belongs to agent id and
 // carries reason.
@@ -92,7 +92,7 @@ func TestFreshHostnameGoesToFirstSource(t *testing.T) {
 		agentSnap("a-edge", h2.clk.now(), ctr("y", dnsOnly(dnsSpec("web", appHost)))),
 	)
 	h2.cycle()
-	h2.wantOnlyRejected("b-edge", "is owned by agent a-edge", 1)
+	h2.wantOnlyRejected("b-edge", "is already managed by agent a-edge", 1)
 }
 
 // Containers of one source may share a hostname with different record types
@@ -288,7 +288,7 @@ func TestMixedSourceRowsOldestWins(t *testing.T) {
 	h.st.setAgents(agentSnap("edge", h.clk.now(), ctr("x", dnsOnly(aaaa))))
 	h.cycle()
 	rej := h.st.list(true)
-	if len(rej) != 1 || rej[0].Owner.AgentID != "" || !strings.Contains(rej[0].LastError, "is owned by agent edge") {
+	if len(rej) != 1 || rej[0].Owner.AgentID != "" || !strings.Contains(rej[0].LastError, "is already managed by agent edge") {
 		t.Fatalf("rejected %+v", rej)
 	}
 }

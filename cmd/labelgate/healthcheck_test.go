@@ -141,8 +141,10 @@ func TestHealthcheckSubcommand(t *testing.T) {
 	if got := h.app.run([]string{"-c", "x.yaml", "healthcheck"}, &out, &errOut); got != exitFatal {
 		t.Fatalf("exit = %d", got)
 	}
-	if !strings.Contains(errOut.String(), "healthcheck failed") {
-		t.Fatalf("stderr = %q", errOut.String())
+	for _, want := range []string{"healthcheck failed", "the API is not answering", "api.address (env LABELGATE_API_ADDRESS)"} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Fatalf("stderr = %q, want %q", errOut.String(), want)
+		}
 	}
 }
 

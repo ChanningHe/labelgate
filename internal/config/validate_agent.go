@@ -79,14 +79,15 @@ func checkAgentServer(p *ValidationErrors, cfg Config) {
 func checkAgentEntry(p *ValidationErrors, cf CloudflareConfig, id string, e AgentEntry) {
 	field := "agent.agents." + id
 	if !model.ValidAgentID(id) {
-		p.addf(field, "invalid agent ID %q (must match ^[a-z0-9][a-z0-9._-]{0,62}$)", id)
+		p.addf(field, "invalid agent ID %q: use up to 63 lower-case letters, digits, dots, hyphens or underscores, starting with a letter or digit", id)
 	}
-	p.add(checkRequiredAgentToken(field+".token", e.Token, "must not be empty"))
+	p.add(checkRequiredAgentToken(field+".token", e.Token,
+		"must not be empty: generate one with: openssl rand -hex 32, and set the same value as connect.token on agent "+id))
 	if e.ConnectTo != "" {
 		p.add(checkWebSocketURL(field+".connect_to", e.ConnectTo))
 	}
 	if e.DefaultTunnel != "" && !resolvableTunnel(cf, e.DefaultTunnel) {
-		p.addf(field+".default_tunnel", "unknown tunnel %q", e.DefaultTunnel)
+		p.addf(field+".default_tunnel", "unknown tunnel %q (use default for cloudflare.tunnel_id, or a name or tunnel ID from cloudflare.tunnels)", e.DefaultTunnel)
 	}
 	p.add(checkTunnelRefs(cf, field+".tunnels", e.Tunnels))
 	p.add(checkGlobs(field+".hostnames", e.Hostnames))
@@ -96,16 +97,17 @@ func checkAgentEntry(p *ValidationErrors, cf CloudflareConfig, id string, e Agen
 func checkWebSocketURL(field, raw string) *ValidationError {
 	u, err := url.Parse(raw)
 	if err != nil || (u.Scheme != "ws" && u.Scheme != "wss") || u.Host == "" {
-		return fail(field, "%q must be a ws:// or wss:// URL", raw)
+		return fail(field, "%q must be a ws:// or wss:// URL with a host, e.g. wss://host:8081/ws", raw)
 	}
 	return nil
 }
 
 func checkConnect(p *ValidationErrors, cfg Config) {
 	c := cfg.Connect
-	p.add(checkRequiredAgentToken("connect.token", c.Token, "must not be empty in agent mode"))
+	p.add(checkRequiredAgentToken("connect.token", c.Token,
+		"must not be empty in agent mode: use the token the main instance has for this agent (agent.agents.<id>.token or agent.accept_token)"))
 	if c.AgentID != "" && !model.ValidAgentID(c.AgentID) {
-		p.addf("connect.agent_id", "%q must match ^[a-z0-9][a-z0-9._-]{0,62}$", c.AgentID)
+		p.addf("connect.agent_id", "%q is invalid: use up to 63 lower-case letters, digits, dots, hyphens or underscores, starting with a letter or digit", c.AgentID)
 	}
 	if c.HeartbeatInterval < MinHeartbeatInterval {
 		p.addf("connect.heartbeat_interval", "must be >= %s, got %s", MinHeartbeatInterval, c.HeartbeatInterval)
@@ -122,7 +124,7 @@ func checkConnect(p *ValidationErrors, cfg Config) {
 
 func checkConnectListen(listen string) *ValidationError {
 	if listen == "" {
-		return fail("connect.listen", "required in inbound mode")
+		return fail("connect.listen", "required when connect.mode is inbound: the address the main instance dials, e.g. :8081")
 	}
 	return checkListen("connect.listen", listen)
 }
@@ -130,7 +132,7 @@ func checkConnectListen(listen string) *ValidationError {
 func checkConnectEndpoint(endpoint string) *ValidationError {
 	const field = "connect.endpoint"
 	if endpoint == "" {
-		return fail(field, "required in outbound mode")
+		return fail(field, "required when connect.mode is outbound: the main instance's agent URL, e.g. wss://main.example.com:8081/ws")
 	}
 	if ve := checkWebSocketURL(field, endpoint); ve != nil {
 		return ve

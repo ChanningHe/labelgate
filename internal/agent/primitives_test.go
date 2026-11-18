@@ -205,31 +205,31 @@ func TestClientTLSConfig(t *testing.T) {
 	}
 	cert := selfSignedCert(t)
 
-	if _, err := clientTLSConfig(config.TLSConfig{CA: notPEM}, log); err == nil {
+	if _, err := clientTLSConfig(config.TLSConfig{CA: notPEM}, sectionConnect, log); err == nil {
 		t.Fatal("non-PEM CA accepted")
 	}
-	if _, err := clientTLSConfig(config.TLSConfig{CA: "/nonexistent"}, log); err == nil {
+	if _, err := clientTLSConfig(config.TLSConfig{CA: "/nonexistent"}, sectionConnect, log); err == nil {
 		t.Fatal("missing CA accepted")
 	}
-	cfg, err := clientTLSConfig(config.TLSConfig{CA: cert.cert}, log)
+	cfg, err := clientTLSConfig(config.TLSConfig{CA: cert.cert}, sectionConnect, log)
 	if err != nil || cfg.RootCAs == nil || cfg.InsecureSkipVerify {
 		t.Fatalf("CA config: %+v, %v", cfg, err)
 	}
 	if logs.Len() != 0 {
 		t.Fatalf("unexpected warning: %s", logs.String())
 	}
-	cfg, err = clientTLSConfig(config.TLSConfig{InsecureSkipVerify: true}, log)
+	cfg, err = clientTLSConfig(config.TLSConfig{InsecureSkipVerify: true}, sectionConnect, log)
 	if err != nil || !cfg.InsecureSkipVerify || !strings.Contains(logs.String(), "DISABLED") {
 		t.Fatalf("insecure config: %+v, %v, log=%q", cfg, err, logs.String())
 	}
 }
 
 func TestListenTLSPair(t *testing.T) {
-	if _, err := listen("127.0.0.1:0", config.TLSConfig{Key: "k.pem"}); err == nil {
+	if _, err := listen("127.0.0.1:0", config.TLSConfig{Key: "k.pem"}, sectionConnect); err == nil {
 		t.Fatal("key without cert accepted")
 	}
 	cert := selfSignedCert(t)
-	ln, err := listen("127.0.0.1:0", config.TLSConfig{Cert: cert.cert, Key: cert.key})
+	ln, err := listen("127.0.0.1:0", config.TLSConfig{Cert: cert.cert, Key: cert.key}, sectionConnect)
 	if err != nil {
 		t.Fatal(err)
 	}

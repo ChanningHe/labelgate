@@ -229,6 +229,38 @@ func TestSnapshotOverUnixSocket(t *testing.T) {
 	}
 }
 
+func TestSnapshotMissingSocketExplainsMount(t *testing.T) {
+	src := newSource(t, "unix://"+filepath.Join(t.TempDir(), "docker.sock"), nil)
+	_, err := src.Snapshot(context.Background())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	for _, want := range []string{"mount the socket", socketMount, "docker.endpoint (env LABELGATE_DOCKER_ENDPOINT)"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("%q lacks %q", err, want)
+		}
+	}
+}
+
+func TestSnapshotSocketPermissionExplainsGroupAdd(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores socket permissions")
+	}
+	_, sock := newFakeEngineUnix(t)
+	if err := os.Chmod(sock, 0); err != nil {
+		t.Fatal(err)
+	}
+	_, err := newSource(t, "unix://"+sock, nil).Snapshot(context.Background())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	for _, want := range []string{"group_add", "stat -c %g " + sock} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("%q lacks %q", err, want)
+		}
+	}
+}
+
 func TestMatchesFilter(t *testing.T) {
 	labels := map[string]string{"a": "1", "empty": ""}
 	tests := []struct {
@@ -457,8 +489,8 @@ func TestTLSHTTPClient(t *testing.T) {
 		{"ca only", config.TLSConfig{CA: ca}, false, ""},
 		{"ca and client cert", config.TLSConfig{CA: ca, Cert: cert, Key: key}, false, ""},
 		{"insecure only", config.TLSConfig{InsecureSkipVerify: true}, false, ""},
-		{"missing ca file", config.TLSConfig{CA: filepath.Join(dir, "nope.pem")}, false, "read tls.ca"},
-		{"garbage ca", config.TLSConfig{CA: garbage}, false, "no valid certificate"},
+		{"missing ca file", config.TLSConfig{CA: filepath.Join(dir, "nope.pem")}, false, "cannot read docker.tls.ca (env LABELGATE_DOCKER_TLS_CA)"},
+		{"garbage ca", config.TLSConfig{CA: garbage}, false, "contains no PEM certificate"},
 		{"cert without key", config.TLSConfig{Cert: cert}, false, "together"},
 		{"key without cert", config.TLSConfig{Key: key}, false, "together"},
 		{"unreadable pair", config.TLSConfig{Cert: garbage, Key: key}, false, "client certificate"},
@@ -489,13 +521,13 @@ func TestTLSEndToEnd(t *testing.T) {
 		name    string
 		engine  *fakeEngine
 		tls     config.TLSConfig
-		wantErr bool
+		wantErr string // a fix hint the error must name; "" = success
 	}{
-		{"verified with CA", plain, config.TLSConfig{CA: ca}, false},
-		{"unknown CA is rejected by default", plain, config.TLSConfig{Cert: cert, Key: key}, true},
-		{"insecure opt-in skips verification", plain, config.TLSConfig{InsecureSkipVerify: true}, false},
-		{"mutual TLS with client certificate", mtls, config.TLSConfig{CA: ca, Cert: cert, Key: key}, false},
-		{"mutual TLS without client certificate fails", mtls, config.TLSConfig{CA: ca}, true},
+		{"verified with CA", plain, config.TLSConfig{CA: ca}, ""},
+		{"unknown CA is rejected by default", plain, config.TLSConfig{Cert: cert, Key: key}, "docker.tls.ca (env LABELGATE_DOCKER_TLS_CA)"},
+		{"insecure opt-in skips verification", plain, config.TLSConfig{InsecureSkipVerify: true}, ""},
+		{"mutual TLS with client certificate", mtls, config.TLSConfig{CA: ca, Cert: cert, Key: key}, ""},
+		{"mutual TLS without client certificate fails", mtls, config.TLSConfig{CA: ca}, "docker.tls.cert (env LABELGATE_DOCKER_TLS_CERT)"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -504,9 +536,9 @@ func TestTLSEndToEnd(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			snap, err := src.Snapshot(ctx)
-			if tt.wantErr {
-				if err == nil {
-					t.Fatal("expected TLS failure")
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want TLS failure naming %q", err, tt.wantErr)
 				}
 				return
 			}

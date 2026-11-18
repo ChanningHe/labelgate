@@ -128,7 +128,7 @@ func (h *Hub) Run(ctx context.Context) error {
 	var ln net.Listener
 	if h.opts.Server.Listen != "" {
 		var err error
-		if ln, err = listen(h.opts.Server.Listen, h.opts.Server.TLS); err != nil {
+		if ln, err = listen(h.opts.Server.Listen, h.opts.Server.TLS, sectionAgent); err != nil {
 			return err
 		}
 		h.log.Info("agent listener started", "address", ln.Addr().String())
@@ -204,14 +204,15 @@ func (h *Hub) runConn(ctx context.Context, ws *websocket.Conn, mode Mode, creds 
 
 	hello, err := mainHandshake(ws, mode, creds, h.dummyKey, h.t)
 	if err != nil {
-		log.Warn("agent handshake failed", "error", err)
+		log.Warn("agent handshake failed", "error", h.explainAuth(err, mode))
 		return false
 	}
 	log = log.With("agent_id", hello.AgentID)
 	s := &hubSession{id: hello.AgentID, mode: mode}
 	if !h.register(s) {
 		rejectDirect(ws, ErrDuplicateAgent, "agent already connected", h.t.write)
-		log.Warn("rejected duplicate agent connection; existing session kept")
+		log.Warn("rejected a second connection for an agent ID that is already connected; existing session kept " +
+			"(if two hosts share this ID, give each its own connect.agent_id)")
 		return false
 	}
 	defer h.unregister(s)
@@ -288,7 +289,7 @@ func (h *Hub) startDialers(ctx context.Context, wg *sync.WaitGroup) error {
 		return nil
 	}
 	slices.Sort(ids)
-	tlsCfg, err := clientTLSConfig(h.opts.Server.TLS, h.log)
+	tlsCfg, err := clientTLSConfig(h.opts.Server.TLS, sectionAgent, h.log)
 	if err != nil {
 		return err
 	}
@@ -313,11 +314,12 @@ func (h *Hub) dialLoop(ctx context.Context, id string, e config.AgentEntry, tlsC
 		return e.Token, true
 	}
 	target := redactURL(e.ConnectTo)
+	where := dialTarget{urlKey: "agent.agents." + id + ".connect_to", section: sectionAgent, peer: "the agent"}
 	bo := newBackoff(h.opts.Retry)
 	for {
 		ws, err := dial(ctx, e.ConnectTo, tlsCfg, h.t.handshake)
 		if err != nil {
-			h.log.Warn("inbound agent dial failed", "agent_id", id, "url", target, "error", err)
+			h.log.Warn("cannot connect to inbound agent; retrying", "agent_id", id, "url", target, "error", explainDial(err, where))
 		} else if h.runConn(ctx, ws, ModeInbound, creds, func() {}, target) {
 			bo.reset()
 		}

@@ -36,7 +36,7 @@ func newDashboardHandler(assets fs.FS, apiBase string, log *slog.Logger) *dashbo
 	h := &dashboardHandler{assets: assets, log: log}
 	raw, err := fs.ReadFile(assets, indexFile)
 	if err != nil {
-		log.Warn("dashboard index.html not available; dashboard disabled", "error", err)
+		log.Warn("this binary was built without the dashboard (build it with yarn build in dashboard/ before go build); the API still works", "error", err)
 		return h
 	}
 	h.index = injectAPIBase(raw, apiBase)

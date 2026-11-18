@@ -182,7 +182,8 @@ func resolveSources(claims []claim, owners map[string]string) ([]claim, []model.
 			kept = append(kept, c)
 			continue
 		}
-		reason := fmt.Sprintf("conflict: hostname %s is owned by %s", c.Res.Hostname, describeSource(src))
+		reason := fmt.Sprintf("conflict: hostname %s is already managed by %s, and a hostname can belong to only one instance (main or one agent); "+
+			"remove this label or the one on %s", c.Res.Hostname, describeSource(src), describeSource(src))
 		rejected = append(rejected, rejectRow(c.Res, reason))
 	}
 	return kept, rejected
@@ -228,7 +229,8 @@ func resolveClasses(claims []claim, tracked []model.Resource, owners map[string]
 			kept = append(kept, c)
 			continue
 		}
-		reason := fmt.Sprintf("conflict: hostname %s is used by %s as %s", c.Res.Hostname, describeOwner(hc.owner), hc.class)
+		reason := fmt.Sprintf("conflict: hostname %s already has %s from %s; a hostname can have DNS records, one CNAME record or "+
+			"one tunnel route, not a mix: remove one of the labels", c.Res.Hostname, describeClass(hc.class), describeOwner(hc.owner))
 		rejected = append(rejected, rejectRow(c.Res, reason))
 	}
 	return kept, rejected
@@ -268,7 +270,7 @@ func winnerIndex(cs []claim, row model.Resource, hasRow bool, held holdSet) int 
 }
 
 func conflictReason(k rowKey, o model.Owner) string {
-	return fmt.Sprintf("conflict: %s already claimed by %s", k.Key, describeOwner(o))
+	return fmt.Sprintf("conflict: %s is already managed by %s; remove the duplicate label from one of the containers", describeKey(k), describeOwner(o))
 }
 
 // pickWinners resolves competing claims per (kind, key) (§6.4 step 2).
@@ -355,11 +357,13 @@ func lookupDef(src *sourceInfo, ctr, name string) (model.AccessPolicyDef, string
 		}
 	}
 	if len(found) == 0 {
-		return model.AccessPolicyDef{}, fmt.Sprintf("access policy definition %q not found", name)
+		return model.AccessPolicyDef{}, fmt.Sprintf("access policy %q is not defined: add %s.access.%s.* labels to this container "+
+			"or another container of the same host", name, src.LabelPrefix, name)
 	}
 	for _, d := range found[1:] {
 		if !reflect.DeepEqual(d, found[0]) {
-			return model.AccessPolicyDef{}, fmt.Sprintf("ambiguous access policy definition %q", name)
+			return model.AccessPolicyDef{}, fmt.Sprintf("access policy %q is defined differently on several containers of this host: "+
+				"define it on this container, or make the definitions identical", name)
 		}
 	}
 	return found[0], ""

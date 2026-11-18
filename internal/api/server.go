@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/channinghe/labelgate/dashboard"
+	"github.com/channinghe/labelgate/internal/config"
 )
 
 // HTTP server timeouts.
@@ -125,7 +126,8 @@ func redirectToDashboard(w http.ResponseWriter, r *http.Request) {
 func (s *Server) Run(ctx context.Context) error {
 	ln, err := net.Listen("tcp", s.deps.Config.Address)
 	if err != nil {
-		return fmt.Errorf("api: listen %s: %w", s.deps.Config.Address, err)
+		return fmt.Errorf("api: cannot listen on %s: %w; free the port or change %s",
+			s.deps.Config.Address, err, config.KeyWithEnv("api.address"))
 	}
 	return s.Serve(ctx, ln)
 }

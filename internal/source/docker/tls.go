@@ -30,16 +30,17 @@ func tlsHTTPClient(cfg config.TLSConfig, log *slog.Logger) (*http.Client, error)
 	}
 	if cfg.Cert != "" || cfg.Key != "" {
 		if cfg.Cert == "" || cfg.Key == "" {
-			return nil, errors.New("docker: tls.cert and tls.key must be set together")
+			return nil, errors.New("docker: docker.tls.cert and docker.tls.key must be set together")
 		}
 		cert, err := tls.LoadX509KeyPair(cfg.Cert, cfg.Key)
 		if err != nil {
-			return nil, fmt.Errorf("docker: load client certificate: %w", err)
+			return nil, fmt.Errorf("docker: cannot load the client certificate from %s and %s: %w",
+				config.KeyWithEnv("docker.tls.cert"), config.KeyWithEnv("docker.tls.key"), err)
 		}
 		tc.Certificates = []tls.Certificate{cert}
 	}
 	if cfg.InsecureSkipVerify {
-		log.Warn("docker.tls.insecure_skip_verify is enabled: the Docker daemon's certificate is NOT verified")
+		log.Warn("docker.tls.insecure_skip_verify is enabled: the Docker daemon's certificate is NOT verified; set docker.tls.ca instead")
 		tc.InsecureSkipVerify = true // #nosec G402 -- explicit operator opt-in, warned above
 	}
 	return &http.Client{Transport: &http.Transport{TLSClientConfig: tc}}, nil
@@ -48,11 +49,11 @@ func tlsHTTPClient(cfg config.TLSConfig, log *slog.Logger) (*http.Client, error)
 func loadCAPool(path string) (*x509.CertPool, error) {
 	pem, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("docker: read tls.ca: %w", err)
+		return nil, fmt.Errorf("docker: cannot read %s: %w", config.KeyWithEnv("docker.tls.ca"), err)
 	}
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM(pem) {
-		return nil, fmt.Errorf("docker: tls.ca %q contains no valid certificate", path)
+		return nil, fmt.Errorf("docker: %s file %q contains no PEM certificate", config.KeyWithEnv("docker.tls.ca"), path)
 	}
 	return pool, nil
 }

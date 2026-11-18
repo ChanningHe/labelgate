@@ -100,8 +100,8 @@ const (
 type SyncStatus struct {
 	State    SyncState
 	LastSync time.Time // end of the latest completed cycle; zero while pending
-	// Error summarizes the latest cycle's failures ("" on success), e.g.
-	// "3 resources failed; first: dns app.example.com: conflict: ...".
+	// Error summarizes the latest cycle's failures ("" on success): the only
+	// problem, or "3 problems (...); first: <problem>".
 	Error string
 }
 

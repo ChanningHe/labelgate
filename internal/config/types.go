@@ -251,6 +251,7 @@ type ValidationError struct {
 	Message string
 }
 
+// Error names the key, plus its environment variable when one can set it.
 func (e *ValidationError) Error() string {
-	return "config: " + e.Field + ": " + e.Message
+	return "config: " + KeyWithEnv(e.Field) + ": " + e.Message
 }

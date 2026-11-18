@@ -102,8 +102,10 @@ func TestE2EOutboundAgent(t *testing.T) {
 	m.waitAPI()
 
 	bad := startAgent(t, agentConfig(config.ConnectOutbound, e2eAgentID, "x"+e2eAgentToken, cfg.Agent.Listen), remoteSource())
-	bad.waitLog("main handshake failed")
+	bad.waitLog("handshake with the main instance failed")
+	bad.waitLog("tokens do not match: connect.token (env LABELGATE_CONNECT_TOKEN) on this agent must equal agent.agents." + e2eAgentID + ".token")
 	m.waitLog("agent handshake failed")
+	m.waitLog("connect.token on the agent must equal agent.agents." + e2eAgentID + ".token on this main instance")
 	if err := bad.stop(); err != nil {
 		t.Fatalf("bad agent: %v", err)
 	}
@@ -156,7 +158,7 @@ func TestE2EInboundAgentRejectsImpostorMain(t *testing.T) {
 	impEnv := newEnv(t)
 	imp := impEnv.startMain(impEnv.agentMainConfig("x"+e2eAgentToken, wsURL), newScriptSource(impEnv.clock.Now))
 	imp.waitLog("agent handshake failed")
-	ag.waitLog("main handshake failed")
+	ag.waitLog("handshake with the main instance failed")
 	imp.waitAPI()
 	if got := agentsOf(t, imp); len(got) != 0 {
 		t.Fatalf("impostor learned agents: %v", got)

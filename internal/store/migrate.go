@@ -68,10 +68,10 @@ func upgradeLegacy(ctx context.Context, db *sql.DB, st dbState, now int64, log *
 	if st.version >= 1 {
 		path, err := backupLegacy(ctx, db, now)
 		if err != nil {
-			return fmt.Errorf("store: refusing to migrate legacy database, backup failed: %w", err)
+			return fmt.Errorf("store: refusing to migrate the v0.2 database because the backup failed: %w; make the database directory writable and free some disk space", err)
 		}
 		if path != "" {
-			log.Info("legacy database backed up before migration", "path", path)
+			log.Info("v0.2 database backed up before migration; keep this file until the upgrade is confirmed", "path", path)
 		}
 	}
 	for _, m := range legacyMigrations {

@@ -183,7 +183,7 @@ func TestTLSInboundListenerAndHubCA(t *testing.T) {
 	c := inboundConnect()
 	c.TLS = config.TLSConfig{Cert: cert.cert, Key: cert.key}
 	a := newTestAgent(t, c, &fakeSource{containers: containers("web")}, nil)
-	ln, err := listen("127.0.0.1:0", c.TLS)
+	ln, err := listen("127.0.0.1:0", c.TLS, sectionConnect)
 	if err != nil {
 		t.Fatal(err)
 	}

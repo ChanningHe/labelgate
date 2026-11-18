@@ -182,7 +182,7 @@ func (e *executor) tunnel(ctx context.Context, op tunnelOp) error {
 	}
 	if op.Put {
 		if err := e.r.cf.PutTunnelConfig(ctx, op.Tunnel, op.Config); err != nil {
-			msg := "put tunnel configuration: " + err.Error()
+			msg := "cannot update the configuration of tunnel " + op.Tunnel.ID + ": " + err.Error()
 			for _, k := range append(append([]rowKey(nil), op.Applied...), op.Deletes...) {
 				if err := e.fail(ctx, k, msg); err != nil {
 					return err

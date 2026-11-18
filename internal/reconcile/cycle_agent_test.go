@@ -174,7 +174,7 @@ func TestAgentAccessDefinitionsAreScopedToSource(t *testing.T) {
 	h.st.setAgents(agentSnap("edge", h.clk.now(), ctr("web", dnsOnly(svc))))
 	h.cycle()
 	rej := h.st.list(true)
-	if len(rej) != 1 || !strings.Contains(rej[0].LastError, `"team" not found`) {
+	if len(rej) != 1 || !strings.Contains(rej[0].LastError, `access policy "team" is not defined: add labelgate.access.team.* labels`) {
 		t.Fatalf("agent bound a local definition: %+v", rej)
 	}
 	if len(h.cf.Apps(testAccount)) != 0 {

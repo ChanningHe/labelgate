@@ -76,8 +76,8 @@ func TestValidate_Baselines(t *testing.T) {
 func TestValidate_Core(t *testing.T) {
 	m := validMain
 	runValidateCases(t, []validateCase{
-		{"bad label prefix", m, func(c *Config) { c.LabelPrefix = "Label Gate" }, "label_prefix", "must match"},
-		{"empty label prefix", m, func(c *Config) { c.LabelPrefix = "" }, "label_prefix", "must match"},
+		{"bad label prefix", m, func(c *Config) { c.LabelPrefix = "Label Gate" }, "label_prefix", "(default: labelgate)"},
+		{"empty label prefix", m, func(c *Config) { c.LabelPrefix = "" }, "label_prefix", "is invalid: use lower-case"},
 		{"custom label prefix ok", m, func(c *Config) { c.LabelPrefix = "my.prefix-1" }, "", ""},
 		{"bad mode", m, func(c *Config) { c.Mode = "worker" }, "mode", "use main or agent"},
 		{"empty mode", m, func(c *Config) { c.Mode = "" }, "mode", "invalid"},
@@ -172,7 +172,7 @@ func TestValidate_Cloudflare(t *testing.T) {
 		c.Cloudflare.Tunnels = map[string]TunnelConfig{name: tc}
 	}
 	runValidateCases(t, []validateCase{
-		{"no credential", m, func(c *Config) { c.Cloudflare = CloudflareConfig{} }, "cloudflare.api_token", "at least one credential"},
+		{"no credential", m, func(c *Config) { c.Cloudflare = CloudflareConfig{} }, "cloudflare.api_token", "no Cloudflare API token is configured"},
 		{"no credential but skipped", m, func(c *Config) { c.Cloudflare = CloudflareConfig{}; c.SkipCredentialValidation = true }, "", ""},
 		{"only named credential ok", m, func(c *Config) {
 			c.Cloudflare = CloudflareConfig{}
@@ -182,9 +182,9 @@ func TestValidate_Cloudflare(t *testing.T) {
 		{"tunnel id without token", m, func(c *Config) {
 			c.Cloudflare.APIToken = ""
 			creds(c, "corp", CredentialConfig{APIToken: agentToken})
-		}, "cloudflare.api_token", "root credential"},
+		}, "cloudflare.api_token", "required because cloudflare.tunnel_id is set"},
 		{"credential named default", m, func(c *Config) { creds(c, "default", CredentialConfig{APIToken: agentToken}) }, "cloudflare.credentials.default", "reserved"},
-		{"credential bad name", m, func(c *Config) { creds(c, "Corp Co", CredentialConfig{APIToken: agentToken}) }, "cloudflare.credentials.Corp Co", "must match"},
+		{"credential bad name", m, func(c *Config) { creds(c, "Corp Co", CredentialConfig{APIToken: agentToken}) }, "cloudflare.credentials.Corp Co", "is invalid: use lower-case"},
 		{"credential empty token", m, func(c *Config) { creds(c, "corp", CredentialConfig{APIToken: " "}) }, "cloudflare.credentials.corp.api_token", "must not be empty"},
 		{"credential bad zone", m, func(c *Config) { creds(c, "corp", CredentialConfig{APIToken: agentToken, Zones: []string{"[bad"}}) }, "cloudflare.credentials.corp.zones", "invalid zone pattern"},
 		{"credential empty zone", m, func(c *Config) { creds(c, "corp", CredentialConfig{APIToken: agentToken, Zones: []string{""}}) }, "cloudflare.credentials.corp.zones", "invalid zone pattern"},
@@ -192,7 +192,7 @@ func TestValidate_Cloudflare(t *testing.T) {
 			creds(c, "corp", CredentialConfig{APIToken: agentToken, Zones: []string{"example.com", "*.corp.io"}})
 		}, "", ""},
 		{"tunnel named default", m, func(c *Config) { tunnels(c, "default", TunnelConfig{AccountID: "a", TunnelID: "t"}) }, "cloudflare.tunnels.default", "reserved"},
-		{"tunnel bad name", m, func(c *Config) { tunnels(c, "-x", TunnelConfig{AccountID: "a", TunnelID: "t"}) }, "cloudflare.tunnels.-x", "must match"},
+		{"tunnel bad name", m, func(c *Config) { tunnels(c, "-x", TunnelConfig{AccountID: "a", TunnelID: "t"}) }, "cloudflare.tunnels.-x", "is invalid: use lower-case"},
 		{"tunnel no account", m, func(c *Config) { tunnels(c, "sec", TunnelConfig{TunnelID: "t"}) }, "cloudflare.tunnels.sec.account_id", "must not be empty"},
 		{"tunnel no id", m, func(c *Config) { tunnels(c, "sec", TunnelConfig{AccountID: "a"}) }, "cloudflare.tunnels.sec.tunnel_id", "must not be empty"},
 		{"tunnel unknown credential", m, func(c *Config) {
@@ -202,7 +202,7 @@ func TestValidate_Cloudflare(t *testing.T) {
 			c.Cloudflare.APIToken, c.Cloudflare.TunnelID, c.Cloudflare.AccountID = "", "", ""
 			creds(c, "corp", CredentialConfig{APIToken: agentToken})
 			tunnels(c, "sec", TunnelConfig{AccountID: "a", TunnelID: "t"})
-		}, "cloudflare.tunnels.sec.credential", "root credential"},
+		}, "cloudflare.tunnels.sec.credential", "cloudflare.api_token (env LABELGATE_CLOUDFLARE_API_TOKEN) is empty"},
 		{"tunnel with named credential ok", m, func(c *Config) {
 			creds(c, "corp", CredentialConfig{APIToken: agentToken})
 			tunnels(c, "sec", TunnelConfig{AccountID: "a", TunnelID: "t", Credential: "corp"})
@@ -229,7 +229,7 @@ func TestValidate_DefaultTunnel(t *testing.T) {
 		{"default ok", withNamed, func(c *Config) { c.DefaultTunnel = "default" }, "", ""},
 		{"named ok", withNamed, func(c *Config) { c.DefaultTunnel = "sec" }, "", ""},
 		{"unknown", withNamed, func(c *Config) { c.DefaultTunnel = "nope" }, "default_tunnel", "unknown tunnel"},
-		{"default without root tunnel", noRoot, func(c *Config) { c.DefaultTunnel = "default" }, "default_tunnel", "requires cloudflare.tunnel_id"},
+		{"default without root tunnel", noRoot, func(c *Config) { c.DefaultTunnel = "default" }, "default_tunnel", "cloudflare.tunnel_id (env LABELGATE_CLOUDFLARE_TUNNEL_ID), which is empty"},
 		{"empty without root tunnel ok", noRoot, func(c *Config) {}, "", ""},
 	})
 }
@@ -307,7 +307,7 @@ func TestValidate_AgentMode(t *testing.T) {
 		{"inbound missing listen", a, func(c *Config) { c.Connect.Mode = ConnectInbound }, "connect.listen", "required"},
 		{"inbound bad listen", a, func(c *Config) { c.Connect.Mode = ConnectInbound; c.Connect.Listen = "x" }, "connect.listen", "[host]:port"},
 		{"inbound ok without endpoint", a, func(c *Config) { c.Connect.Mode = ConnectInbound; c.Connect.Listen = ":9000" }, "", ""},
-		{"bad agent id", a, func(c *Config) { c.Connect.AgentID = "Bad_ID!" }, "connect.agent_id", "must match"},
+		{"bad agent id", a, func(c *Config) { c.Connect.AgentID = "Bad_ID!" }, "connect.agent_id", "is invalid: use up to 63"},
 		{"good agent id", a, func(c *Config) { c.Connect.AgentID = "host-1" }, "", ""},
 		{"heartbeat too small", a, func(c *Config) { c.Connect.HeartbeatInterval = 500 * time.Millisecond }, "connect.heartbeat_interval", ">= 1s"},
 		{"connect tls cert without key", a, func(c *Config) { c.Connect.TLS.Key = "k" }, "connect.tls.cert", "together"},
@@ -333,5 +333,52 @@ func TestValidationError_Error(t *testing.T) {
 	err := &ValidationError{Field: "a.b", Message: "bad"}
 	if err.Error() != "config: a.b: bad" {
 		t.Errorf("got %q", err.Error())
+	}
+}
+
+func TestKeyWithEnv(t *testing.T) {
+	tests := []struct{ key, want string }{
+		{"api.token", "api.token (env LABELGATE_API_TOKEN)"},
+		{"connect.tls.ca", "connect.tls.ca (env LABELGATE_CONNECT_TLS_CA)"},
+		{"db.retention", "db.retention (env LABELGATE_DB_RETENTION)"}, // removed, still read from env
+		{"agent.agents.edge1.token", "agent.agents.edge1.token"},      // map section: file only
+		{"cloudflare.credentials.corp.api_token", "cloudflare.credentials.corp.api_token"},
+		{"bogus", "bogus"},
+	}
+	for _, tt := range tests {
+		if got := KeyWithEnv(tt.key); got != tt.want {
+			t.Errorf("KeyWithEnv(%q) = %q, want %q", tt.key, got, tt.want)
+		}
+	}
+}
+
+func TestValidationError_NamesEnvAndFix(t *testing.T) {
+	cfg := validMain()
+	cfg.API.Token = "short"
+	err := Validate(cfg)
+	if err == nil {
+		t.Fatal("want error")
+	}
+	for _, want := range []string{"api.token (env LABELGATE_API_TOKEN): ", "at least 16 characters", "openssl rand -hex 32"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("%q does not contain %q", err.Error(), want)
+		}
+	}
+}
+
+func TestValidationErrors_NameEnvPerLine(t *testing.T) {
+	err := ValidationErrors{fail("api.token", "bad"), fail("agent.agents.a.token", "worse")}
+	want := "config: 2 problems:\n  api.token (env LABELGATE_API_TOKEN): bad\n  agent.agents.a.token: worse"
+	if err.Error() != want {
+		t.Errorf("got %q\nwant %q", err.Error(), want)
+	}
+}
+
+func TestValidate_TLSPairNamesBothKeys(t *testing.T) {
+	cfg := validMain()
+	cfg.Docker.TLS.Cert = "/c.pem"
+	err := Validate(cfg)
+	if err == nil || !strings.Contains(err.Error(), "docker.tls.key (env LABELGATE_DOCKER_TLS_KEY)") {
+		t.Errorf("got %v", err)
 	}
 }

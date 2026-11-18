@@ -25,7 +25,10 @@ func (r *Reconciler) runCycle(ctx context.Context) time.Time {
 	st := SyncStatus{State: SyncSuccess, LastSync: r.now()}
 	if len(issues) > 0 {
 		st.State = SyncError
-		st.Error = fmt.Sprintf("%d problems; first: %s", len(issues), issues[0])
+		st.Error = issues[0]
+		if len(issues) > 1 {
+			st.Error = fmt.Sprintf("%d problems (see the resource list and the labelgate log); first: %s", len(issues), issues[0])
+		}
 	}
 	r.setStatus(st)
 	return deadline
@@ -99,7 +102,7 @@ func heldRejected(prev []model.Resource, held holdSet) []model.Resource {
 func rejectionIssues(rows []model.Resource) []string {
 	out := make([]string, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, fmt.Sprintf("rejected %s (%s): %s", keyOf(r), describeOwner(r.Owner), r.LastError))
+		out = append(out, fmt.Sprintf("rejected %s (%s): %s", describeKey(keyOf(r)), describeOwner(r.Owner), r.LastError))
 	}
 	return out
 }

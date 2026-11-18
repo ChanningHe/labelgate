@@ -68,22 +68,23 @@ func validateTLSPair(c config.TLSConfig) error {
 // clientTLSConfig builds the TLS configuration used to dial a peer:
 // verification against the configured CA (or system roots); verification is
 // disabled only when explicitly requested, with a loud warning.
-func clientTLSConfig(c config.TLSConfig, log *slog.Logger) (*tls.Config, error) {
+// section is the config section of c (sectionAgent or sectionConnect).
+func clientTLSConfig(c config.TLSConfig, section string, log *slog.Logger) (*tls.Config, error) {
 	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
 	if c.CA != "" {
 		pem, err := os.ReadFile(c.CA)
 		if err != nil {
-			return nil, fmt.Errorf("agent: read tls.ca: %w", err)
+			return nil, fmt.Errorf("agent: cannot read %s: %w", config.KeyWithEnv(section+".tls.ca"), err)
 		}
 		pool := x509.NewCertPool()
 		if !pool.AppendCertsFromPEM(pem) {
-			return nil, fmt.Errorf("agent: tls.ca %s: no PEM certificates found", c.CA)
+			return nil, fmt.Errorf("agent: %s file %s contains no PEM certificate", config.KeyWithEnv(section+".tls.ca"), c.CA)
 		}
 		cfg.RootCAs = pool
 	}
 	if c.InsecureSkipVerify {
-		log.Warn("TLS CERTIFICATE VERIFICATION IS DISABLED (insecure_skip_verify=true): " +
-			"the peer is NOT authenticated at the transport layer; use tls.ca instead")
+		log.Warn("TLS CERTIFICATE VERIFICATION IS DISABLED (" + section + ".tls.insecure_skip_verify=true): " +
+			"the peer is NOT authenticated at the transport layer; set " + section + ".tls.ca instead")
 		cfg.InsecureSkipVerify = true
 	}
 	return cfg, nil
@@ -105,7 +106,7 @@ func dial(ctx context.Context, rawURL string, tlsCfg *tls.Config, timeout time.D
 	}
 	if err != nil {
 		if resp != nil {
-			return nil, fmt.Errorf("%w (HTTP %d)", err, resp.StatusCode)
+			return nil, &statusError{err: err, status: resp.StatusCode}
 		}
 		return nil, err
 	}
@@ -113,21 +114,24 @@ func dial(ctx context.Context, rawURL string, tlsCfg *tls.Config, timeout time.D
 }
 
 // listen opens a TCP listener, TLS-wrapped when cert and key are configured.
-func listen(addr string, c config.TLSConfig) (net.Listener, error) {
+// section is the config section of addr and c (sectionAgent or sectionConnect).
+func listen(addr string, c config.TLSConfig, section string) (net.Listener, error) {
 	if err := validateTLSPair(c); err != nil {
-		return nil, fmt.Errorf("agent: %w", err)
+		return nil, fmt.Errorf("agent: %s.%w", section, err)
 	}
 	var tlsCfg *tls.Config
 	if c.Cert != "" {
 		cert, err := tls.LoadX509KeyPair(c.Cert, c.Key)
 		if err != nil {
-			return nil, fmt.Errorf("agent: load listener certificate: %w", err)
+			return nil, fmt.Errorf("agent: cannot load the listener certificate from %s and %s: %w",
+				config.KeyWithEnv(section+".tls.cert"), config.KeyWithEnv(section+".tls.key"), err)
 		}
 		tlsCfg = &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}
 	}
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		return nil, fmt.Errorf("agent: listen %s: %w", addr, err)
+		return nil, fmt.Errorf("agent: cannot listen on %s: %w; free the port or change %s",
+			addr, err, config.KeyWithEnv(section+".listen"))
 	}
 	if tlsCfg != nil {
 		return tls.NewListener(ln, tlsCfg), nil

@@ -92,12 +92,12 @@ func mainHandshake(ws *websocket.Conn, mode Mode, creds credentials, dummyKey st
 	var auth Auth
 	if err := readExpect(ws, MsgAuth, &auth); err != nil {
 		rejectDirect(ws, ErrBadRequest, "expected auth", t.write)
-		return Hello{}, err
+		return Hello{}, &authFailure{agentID: hello.AgentID, known: known, cause: err}
 	}
 	ok := VerifyMAC(token, RoleAgent, mode, hello.AgentID, hello.Nonce, nm, auth.MAC)
 	if !known || !ok {
 		rejectDirect(ws, ErrUnauthorized, "authentication failed", t.write)
-		return Hello{}, errAuth
+		return Hello{}, &authFailure{agentID: hello.AgentID, known: known}
 	}
 	return hello, nil
 }
