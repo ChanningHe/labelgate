@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/channinghe/labelgate/internal/config"
-	"github.com/channinghe/labelgate/internal/logchange"
 	"github.com/channinghe/labelgate/internal/model"
 	"github.com/channinghe/labelgate/internal/source"
 	"github.com/gorilla/websocket"
@@ -58,7 +57,7 @@ type Agent struct {
 	cur *agentSession // current authenticated main session
 
 	ipMu       sync.Mutex
-	ipProblems *logchange.Tracker // public IP detection failures, guarded by ipMu
+	ipProblems ipTrackers // public IP detection failures, guarded by ipMu
 }
 
 // agentSession is one authenticated main connection.
@@ -99,7 +98,7 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 		t:       defaultTimings(),
 		pending: newPendingLimiter(MaxPendingHandshakes, MaxPendingPerIP),
 
-		ipProblems: logchange.New(logchange.DefaultRepeat),
+		ipProblems: newIPTrackers(),
 	}, nil
 }
 
