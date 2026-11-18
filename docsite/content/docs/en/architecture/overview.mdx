@@ -1,165 +1,51 @@
 ---
 title: Architecture Overview
-description: How Labelgate is designed and how its components work together.
+description: What runs where, and how Labelgate, agents, cloudflared and Cloudflare fit together.
 ---
 
-## System Architecture
+A Labelgate setup has one **main instance** and, optionally, **agents** on other Docker hosts. Only the main instance talks to Cloudflare.
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Provider Layer                        │
-│           ┌────────────────────────────┐                │
-│           │      Docker Provider       │                │
-│           │     (unix socket / tcp)    │                │
-│           └──────────────┬─────────────┘                │
-└──────────────────────────┼──────────────────────────────┘
-           │ Container Events + Labels
+ Host A (main)                      Host B (agent)
+┌──────────────────────────┐       ┌───────────────────────┐
+│ containers with labels   │       │ containers with labels│
+│          │               │       │          │            │
+│          ▼               │  /ws  │          ▼            │
+│ Labelgate main  ◄────────┼───────┼── Labelgate agent     │
+│  - dashboard + API :8080 │       └───────────────────────┘
+│  - database              │
+└──────────┬───────────────┘
+           │ Cloudflare API
            ▼
-┌─────────────────────────────────────────────────────────┐
-│                      Core Engine                         │
-│  ┌──────────┐    ┌──────────┐    ┌──────────────┐       │
-│  │  Event   │ -> │  Label   │ -> │  Reconciler  │       │
-│  │ Watcher  │    │  Parser  │    │              │       │
-│  └──────────┘    └──────────┘    └──────┬───────┘       │
-└─────────────────────────────────────────┼───────────────┘
-           │                              │
-           ▼                              ▼
-┌──────────────────┐     ┌────────────────────────────────┐
-│   SQLite Storage │     │        Operator Layer          │
-│                  │     │  ┌─────┐ ┌───────┐ ┌───────┐  │
-│ - Resource state │     │  │ DNS │ │Tunnel │ │Access │  │
-│ - Ownership      │     │  └──┬──┘ └──┬────┘ └──┬────┘  │
-│ - Conflict data  │     └─────┼───────┼─────────┼───────┘
-└──────────────────┘           │       │         │
-                               ▼       ▼         ▼
-                        ┌─────────────────────────────┐
-                        │    Cloudflare API Client     │
-                        │  ┌───────────────────────┐   │
-                        │  │ Credential Manager    │   │
-                        │  │ (multi-token + zones) │   │
-                        │  └───────────────────────┘   │
-                        └─────────────────────────────┘
+     Cloudflare: DNS, Tunnel routes, Access
+           ▲
+           │ tunnel traffic
+     cloudflared (any host)
 ```
 
-## Components
+## What runs where
 
-### Provider Layer
+| Part | Where | What it does |
+|------|-------|--------------|
+| Labelgate main | One host | Reads labels, changes Cloudflare, keeps the database, serves the dashboard and API |
+| Labelgate agent | Each extra Docker host (optional) | Reads that host's labels and public IP and sends them to main. Holds no Cloudflare token |
+| cloudflared | Any host that can reach your apps | Cloudflare's own tunnel client. Carries the traffic. Labelgate only sets up its routes |
 
-Providers are the source of container data. The Docker provider connects to the Docker daemon and:
+## Ports and data
 
-- **Watches events** in real-time (container start, stop, die)
-- **Lists running containers** on startup and periodically (`docker.poll_interval`) as a fallback; stopped containers and, with `docker.filter_label`, containers without that label are ignored
-- Re-subscribes with backoff after errors and does a full resync after reconnecting; the event watch starts before the initial listing, so no event is lost
-- Supports two connection methods: Unix socket and TCP (with TLS). `ssh://` was removed in v0.3
+| What | Default | Setting |
+|------|---------|---------|
+| Dashboard and API | `:8080` | `api.address` (`LABELGATE_API_ADDRESS`) |
+| Agent listener on main | `:8081`, path `/ws` | `agent.listen` (`LABELGATE_AGENT_LISTEN`), on with `agent.enabled` (`LABELGATE_AGENT_ENABLED`) |
+| Database | `/app/config/labelgate.db` | `db.path` (`LABELGATE_DB_PATH`) |
 
-### Label Parser
+Back up the `/app/config` volume. It holds what Labelgate has created (see [Ownership & Conflicts](/docs/ownership#recovering-from-database-loss)).
 
-The parser extracts structured configuration from container labels. It:
+## What happens when
 
-- Validates label format, service names and values; invalid values and unknown properties are errors
-- Separates DNS, Tunnel, and Access labels
-- Normalises hostnames and produces services in a stable, sorted order
-- Applies defaults and inheritance rules
+- **A container starts:** Labelgate creates or updates its Cloudflare resources within seconds.
+- **A container stops:** its resources are deleted 30 minutes later (`sync.remove_delay`), unless the container returns first or has `cleanup: "false"`.
+- **Every 5 minutes** (`sync.interval`): Labelgate checks everything again and fixes anything that drifted.
+- **An agent goes offline:** its resources stay for 24 hours (`sync.agent_grace`), so a reboot or network outage does not remove them.
 
-### Reconciler
-
-The reconciler is the brain of Labelgate. A single goroutine runs one cycle at a time, so Cloudflare is never modified concurrently:
-
-1. **Collect** desired state from local Docker and from agents that are within their grace period
-2. **Validate** agent-sourced claims against their allow-lists and the SSRF guard
-3. **Resolve conflicts**: the existing owner of a hostname wins, newcomers are rejected
-4. **Plan** the actions (create, update, delete, skip) as a pure function of desired state and tracked state
-5. **Execute** them, persisting status and the last error for every resource
-
-Errors are recorded per resource and never swallowed; the overall sync status is `error` if anything failed in the cycle (including label errors, conflicts and rejected agent claims) and `pending` before the first sync. A service that disappears because of a label error is held, not orphaned.
-
-### Operators
-
-Each operator manages one type of Cloudflare resource:
-
-| Operator | Responsibility |
-|----------|---------------|
-| **DNS** | Create, update, and delete DNS records |
-| **Tunnel** | Add and remove only the Tunnel ingress rules Labelgate owns, preserving manual rules, the catch-all rule and global settings |
-| **Access** | Create and manage Zero Trust Access applications and policies |
-
-### Credential Manager
-
-Handles multi-token authentication:
-
-- **Label override** - A `credential` label selects that credential, or errors if it does not exist
-- **Zone matching** - Otherwise selects the credential whose zone is the longest case-insensitive suffix of the hostname
-- **Root fallback** - Otherwise uses the default API token; if nothing applies, the service errors
-
-Zones are listed with full pagination, cached per credential, and refreshed on a miss and periodically.
-
-### State Persistence (SQLite)
-
-All managed resources are tracked in SQLite:
-
-- **Instance ID** - A random ID generated once; written into DNS comments and Access tags as the ownership marker
-- **Resource ownership** - Links Cloudflare resources to containers and agents, including tunnel rules and Access policy IDs
-- **Conflict state** - Persists which claim owns a hostname and which claims were rejected
-- **Recovery** - Enables graceful restart without recreating resources, and holds agent state
-- **Orphan detection** - Identifies resources whose containers no longer exist
-
-SQLite runs in WAL mode with versioned, transactional migrations; timestamps are stored as UTC unix seconds. A v0.2 database is migrated automatically (see [Upgrading to v0.3](/docs/upgrading#database-migration)).
-
-## Event Flow
-
-### 1. Container Starts
-
-```
-Docker Event (start)
-  → Watcher receives event
-  → Parser extracts labels
-  → Reconciler compares desired vs actual state
-  → Operator creates/updates Cloudflare resources
-  → Storage records ownership
-```
-
-### 2. Container Stops
-
-```
-Docker Event (stop/die)
-  → Watcher receives event
-  → Reconciler marks the owner's resources as orphaned
-  → If cleanup=true (default): after sync.remove_delay (30m) the owned resources are deleted and their records removed
-  → If cleanup=false: the resources stay on Cloudflare, marked orphaned
-  → If the container returns first, the resources are reactivated
-```
-
-### 3. Periodic Sync
-
-```
-Timer fires (docker.poll_interval, default 2m, for Docker re-listing; sync.interval, default 5m, for full reconciliation)
-  → Provider lists all running containers
-  → Parser extracts all labels
-  → Reconciler compares full desired state vs actual state
-  → Fixes any drift or missed events
-```
-
-## Agent Mode
-
-In multi-host deployments, Agents extend Labelgate's reach:
-
-```
-┌──────────┐  WebSocket   ┌──────────┐
-│  Agent   │ ──────────>  │  Main    │ ──> Cloudflare
-│ (Host A) │              │ Instance │
-└──────────┘              └──────────┘
-┌──────────┐  WebSocket        ▲
-│  Agent   │ ──────────────────┘
-│ (Host B) │
-└──────────┘
-```
-
-- Agents are lightweight: they only collect container labels and public IP
-- The main instance handles all Cloudflare API operations
-- Communication is via WebSocket (`/ws`), preferably `wss://` with verified TLS
-- Both sides authenticate with a mutual HMAC challenge-response over a shared token; the token is never sent
-- Supports both outbound (agent→main) and inbound (main→agent) connections with the same protocol
-- Per-agent allow-lists (`hostnames`, `tunnels`) and an SSRF guard limit what an agent can claim
-- An agent's resources are held for `sync.agent_grace` (default 24h) after it was last seen, so disconnects and restarts never orphan them
-
-See [Multi-Host](/docs/examples/multi-host) for details.
+To set up agents, see [Multi-Host (Agent Mode)](/docs/examples/multi-host).

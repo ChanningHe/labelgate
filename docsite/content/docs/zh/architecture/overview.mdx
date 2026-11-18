@@ -1,165 +1,51 @@
 ---
 title: 架构概览
-description: Labelgate 的设计原理及其组件如何协同工作。
+description: 各部分运行在哪里，以及 Labelgate、agent、cloudflared 和 Cloudflare 之间的关系。
 ---
 
-## 系统架构
+一套 Labelgate 部署包含一个 **main 实例**，以及可选的、运行在其他 Docker 主机上的 **agent**。只有 main 实例会和 Cloudflare 打交道。
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Provider Layer                        │
-│           ┌────────────────────────────┐                │
-│           │      Docker Provider       │                │
-│           │     (unix socket / tcp)    │                │
-│           └──────────────┬─────────────┘                │
-└──────────────────────────┼──────────────────────────────┘
-           │ Container Events + Labels
+ 主机 A（main）                     主机 B（agent）
+┌──────────────────────────┐       ┌───────────────────────┐
+│ 带标签的容器             │       │ 带标签的容器          │
+│          │               │       │          │            │
+│          ▼               │  /ws  │          ▼            │
+│ Labelgate main  ◄────────┼───────┼── Labelgate agent     │
+│  - dashboard + API :8080 │       └───────────────────────┘
+│  - 数据库                │
+└──────────┬───────────────┘
+           │ Cloudflare API
            ▼
-┌─────────────────────────────────────────────────────────┐
-│                      Core Engine                         │
-│  ┌──────────┐    ┌──────────┐    ┌──────────────┐       │
-│  │  Event   │ -> │  Label   │ -> │  Reconciler  │       │
-│  │ Watcher  │    │  Parser  │    │              │       │
-│  └──────────┘    └──────────┘    └──────┬───────┘       │
-└─────────────────────────────────────────┼───────────────┘
-           │                              │
-           ▼                              ▼
-┌──────────────────┐     ┌────────────────────────────────┐
-│   SQLite Storage │     │        Operator Layer          │
-│                  │     │  ┌─────┐ ┌───────┐ ┌───────┐  │
-│ - Resource state │     │  │ DNS │ │Tunnel │ │Access │  │
-│ - Ownership      │     │  └──┬──┘ └──┬────┘ └──┬────┘  │
-│ - Conflict data  │     └─────┼───────┼─────────┼───────┘
-└──────────────────┘           │       │         │
-                               ▼       ▼         ▼
-                        ┌─────────────────────────────┐
-                        │    Cloudflare API Client     │
-                        │  ┌───────────────────────┐   │
-                        │  │ Credential Manager    │   │
-                        │  │ (multi-token + zones) │   │
-                        │  └───────────────────────┘   │
-                        └─────────────────────────────┘
+     Cloudflare：DNS、Tunnel 路由、Access
+           ▲
+           │ tunnel 流量
+     cloudflared（任意主机）
 ```
 
-## 组件
+## 各部分运行在哪里 [#what-runs-where]
 
-### Provider Layer
+| 组件 | 运行位置 | 作用 |
+|------|----------|------|
+| Labelgate main | 一台主机 | 读取标签、修改 Cloudflare、保存数据库、提供 dashboard 和 API |
+| Labelgate agent | 每台额外的 Docker 主机（可选） | 读取本机的标签和公网 IP，发送给 main。不持有 Cloudflare token |
+| cloudflared | 任意能访问到你应用的主机 | Cloudflare 官方的 tunnel 客户端，负责转发流量。Labelgate 只负责配置它的路由 |
 
-Providers 是容器数据的来源。Docker provider 连接到 Docker daemon 并：
+## 端口和数据 [#ports-and-data]
 
-- **实时监听事件**（容器启动、停止、退出）
-- **在启动时和定期（`docker.poll_interval`）列出正在运行的容器**作为备用方案；已停止的容器，以及设置了 `docker.filter_label` 时不带该标签的容器都会被忽略
-- 出错后会带退避地重新订阅，并在重连后做一次完整重新同步；事件监听先于初次列表启动，因此不会丢失事件
-- 支持两种连接方式：Unix socket 和 TCP（配合 TLS）。v0.3 已移除 `ssh://`
+| 项目 | 默认值 | 配置项 |
+|------|--------|--------|
+| dashboard 和 API | `:8080` | `api.address`（`LABELGATE_API_ADDRESS`） |
+| main 上的 agent 监听 | `:8081`，路径 `/ws` | `agent.listen`（`LABELGATE_AGENT_LISTEN`），需开启 `agent.enabled`（`LABELGATE_AGENT_ENABLED`） |
+| 数据库 | `/app/config/labelgate.db` | `db.path`（`LABELGATE_DB_PATH`） |
 
-### Label Parser
+请备份 `/app/config` 卷，里面记录了 Labelgate 创建过哪些资源（参见[所有权与冲突](/zh/docs/ownership#recovering-from-database-loss)）。
 
-解析器从容器标签中提取结构化配置。它：
+## 什么时候发生什么 [#what-happens-when]
 
-- 验证标签格式、服务名称和取值；非法的值和未知的属性都会报错
-- 分离 DNS、Tunnel 和 Access 标签
-- 规范化主机名，并以稳定的有序方式产出服务
-- 应用默认值和继承规则
+- **容器启动：** Labelgate 在几秒内创建或更新它的 Cloudflare 资源。
+- **容器停止：** 30 分钟后（`sync.remove_delay`）删除它的资源，除非容器在此之前回来，或设置了 `cleanup: "false"`。
+- **每 5 分钟**（`sync.interval`）：Labelgate 全面检查一遍，修正任何偏差。
+- **agent 离线：** 它的资源保留 24 小时（`sync.agent_grace`），所以重启或断网不会导致资源被删。
 
-### Reconciler
-
-Reconciler 是 Labelgate 的核心。由单个 goroutine 一次只运行一个周期，因此不会并发修改 Cloudflare：
-
-1. **收集**来自本地 Docker，以及仍在宽限期内的 agent 的期望状态
-2. **校验**来自 agent 的声明是否符合其允许列表和 SSRF 防护
-3. **解决冲突**：主机名的现有拥有者胜出，后来者被拒绝
-4. **制定计划**：把动作（create、update、delete、skip）作为期望状态和已跟踪状态的纯函数计算出来
-5. **执行**计划，并为每个资源持久化状态和最近一次错误
-
-错误会按资源记录，从不被吞掉；只要周期内有任何失败（包括标签错误、冲突和被拒绝的 agent 声明），整体同步状态就是 `error`，首次同步之前则是 `pending`。因标签错误而消失的服务会被保留，而不会变成孤立状态。
-
-### Operators
-
-每个 operator 管理一种类型的 Cloudflare 资源：
-
-| Operator | Responsibility |
-|----------|---------------|
-| **DNS** | 创建、更新和删除 DNS 记录 |
-| **Tunnel** | 只添加和删除 Labelgate 自己拥有的 Tunnel ingress 规则，保留手工规则、catch-all 规则和全局设置 |
-| **Access** | 创建和管理 Zero Trust Access 应用程序和策略 |
-
-### Credential Manager
-
-处理多令牌认证：
-
-- **Label override** - `credential` 标签指定的凭据会被直接使用；若不存在则报错
-- **Zone matching** - 否则选择 zone 是主机名最长后缀（不区分大小写）的那个凭据
-- **Root fallback** - 否则使用默认 API token；都不适用则该服务报错
-
-Zone 通过完整分页获取，按凭据缓存，并在未命中时以及定期刷新。
-
-### State Persistence (SQLite)
-
-所有托管资源都在 SQLite 中跟踪：
-
-- **Instance ID** - 只生成一次的随机 ID，写入 DNS 备注和 Access 标签，作为所有权标记
-- **Resource ownership** - 将 Cloudflare 资源链接到容器和 agent，包括 tunnel 规则和 Access 策略 ID
-- **Conflict state** - 持久化哪个声明拥有主机名、哪些声明被拒绝
-- **Recovery** - 支持优雅重启而无需重新创建资源，并保存 agent 的状态
-- **Orphan detection** - 识别其容器不再存在的资源
-
-SQLite 运行在 WAL 模式下，使用带版本号、基于事务的迁移；时间戳以 UTC unix 秒存储。v0.2 的数据库会被自动迁移（参见[升级到 v0.3](/zh/docs/upgrading#database-migration)）。
-
-## 事件流程
-
-### 1. 容器启动
-
-```
-Docker Event (start)
-  → Watcher receives event
-  → Parser extracts labels
-  → Reconciler compares desired vs actual state
-  → Operator creates/updates Cloudflare resources
-  → Storage records ownership
-```
-
-### 2. 容器停止
-
-```
-Docker Event (stop/die)
-  → Watcher receives event
-  → Reconciler marks the owner's resources as orphaned
-  → If cleanup=true (default): after sync.remove_delay (30m) the owned resources are deleted and their records removed
-  → If cleanup=false: the resources stay on Cloudflare, marked orphaned
-  → If the container returns first, the resources are reactivated
-```
-
-### 3. 定期同步
-
-```
-Timer fires（Docker 重新列举：docker.poll_interval，默认 2m；完整协调：sync.interval，默认 5m）
-  → Provider lists all running containers
-  → Parser extracts all labels
-  → Reconciler compares full desired state vs actual state
-  → Fixes any drift or missed events
-```
-
-## Agent Mode
-
-在多主机部署中，Agents 扩展了 Labelgate 的覆盖范围：
-
-```
-┌──────────┐  WebSocket   ┌──────────┐
-│  Agent   │ ──────────>  │  Main    │ ──> Cloudflare
-│ (Host A) │              │ Instance │
-└──────────┘              └──────────┘
-┌──────────┐  WebSocket        ▲
-│  Agent   │ ──────────────────┘
-│ (Host B) │
-└──────────┘
-```
-
-- Agents 是轻量级的：它们只收集容器标签和公共 IP
-- 主实例处理所有 Cloudflare API 操作
-- 通信通过 WebSocket（`/ws`）进行，推荐使用带有效 TLS 校验的 `wss://`
-- 双方使用基于共享 token 的双向 HMAC 挑战—应答完成认证；token 本身不会被发送
-- 支持出站（agent→main）和入站（main→agent）连接，两者使用同一套协议
-- 按 agent 设置的允许列表（`hostnames`、`tunnels`）和 SSRF 防护限制 agent 能声明的内容
-- Agent 的资源在其最后一次被看到之后会保留 `sync.agent_grace`（默认 24h），因此断线和重启都不会使它们变成孤立
-
-详见[多主机](/zh/docs/examples/multi-host)。
+agent 的配置方法参见[多主机（Agent 模式）](/zh/docs/examples/multi-host)。
