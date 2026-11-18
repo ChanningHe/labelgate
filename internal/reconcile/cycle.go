@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"slices"
 	"time"
 
 	"github.com/channinghe/labelgate/internal/model"
@@ -20,16 +21,25 @@ func (r *Reconciler) runCycle(ctx context.Context) time.Time {
 		issues = append([]problem{{subjectCycle, err.Error()}}, issues...)
 	}
 	r.logProblems(r.now(), issues, err == nil)
-	st := SyncStatus{State: SyncSuccess, LastSync: r.now()}
-	if len(issues) > 0 {
-		st.State = SyncError
-		st.Error = issues[0].Text
-		if len(issues) > 1 {
-			st.Error = fmt.Sprintf("%d problems (see the resource list and the labelgate log); first: %s", len(issues), issues[0].Text)
-		}
-	}
-	r.setStatus(st)
+	r.setStatus(syncStatus(r.now(), issues))
 	return deadline
+}
+
+// syncStatus summarizes a completed cycle's problems. The status keeps its
+// own copy of at most MaxStatusProblems of them.
+func syncStatus(now time.Time, issues []problem) SyncStatus {
+	st := SyncStatus{State: SyncSuccess, LastSync: now}
+	if len(issues) == 0 {
+		return st
+	}
+	st.State, st.ProblemCount = SyncError, len(issues)
+	st.Problems = slices.Clone(issues[:min(len(issues), MaxStatusProblems)])
+	st.Error = issues[0].Text
+	if len(issues) > 1 {
+		st.Error = fmt.Sprintf("%d problems (listed under Sync problems on the dashboard overview and in the labelgate log); first: %s",
+			len(issues), issues[0].Text)
+	}
+	return st
 }
 
 // cycle runs collect -> resolve -> observe -> plan -> execute.

@@ -155,3 +155,34 @@ func TestIPWrongFamilyIsAFailure(t *testing.T) {
 		t.Fatalf("wrong family: %q", got)
 	}
 }
+
+func TestIPv6FailureIsInfoAndNeverRepeats(t *testing.T) {
+	h := newIPHarness(t)
+	h.v6Err = errors.New("dial tcp [2606:4700::6810:84e5]:443: connect: network is unreachable")
+	got := h.report()
+	if len(got) != 1 {
+		t.Fatalf("first IPv6 failure: %q", got)
+	}
+	for _, want := range []string{"level=INFO", "IPv6", "network is unreachable", "no IPv6"} {
+		if !strings.Contains(got[0], want) {
+			t.Errorf("IPv6 line lacks %q: %s", want, got[0])
+		}
+	}
+	h.now = h.now.Add(3 * logchange.DefaultRepeat)
+	if got := h.report(); len(got) != 0 {
+		t.Fatalf("IPv6 failure repeated: %q", got)
+	}
+}
+
+func TestIPv4FailureStaysWarnNextToIPv6Info(t *testing.T) {
+	h := newIPHarness(t)
+	h.v4Err = errors.New("timeout")
+	h.v6Err = errors.New("no route")
+	got := strings.Join(h.report(), "\n")
+	if !strings.Contains(got, `level=WARN msg="cannot detect this host's public IPv4`) {
+		t.Errorf("IPv4 must be WARN: %s", got)
+	}
+	if !strings.Contains(got, `level=INFO msg="cannot detect this host's public IPv6`) {
+		t.Errorf("IPv6 must be INFO: %s", got)
+	}
+}

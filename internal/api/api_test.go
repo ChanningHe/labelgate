@@ -334,6 +334,32 @@ func TestOverviewSyncStates(t *testing.T) {
 	}
 }
 
+func TestOverviewSyncProblems(t *testing.T) {
+	st := reconcile.SyncStatus{State: reconcile.SyncError, Error: "3 problems", ProblemCount: 3, Problems: []reconcile.Problem{
+		{Subject: "local container bad label labelgate.dns.web.hostname", Text: "local container bad: label labelgate.dns.web.hostname: is required"},
+		{Subject: "local container bad label labelgate.dns.web.type", Text: "local container bad: label labelgate.dns.web.type: unknown type"},
+	}}
+	f := newFixture(t, func(d *Deps) { d.Sync = fakeSync{st} })
+	body := f.get(t, "/api/overview").Body.String()
+	for _, want := range []string{
+		`"problems":[{"subject":"local container bad label labelgate.dns.web.hostname","text":"local container bad: label labelgate.dns.web.hostname: is required"}`,
+		`"problems_total":3`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("overview lacks %s:\n%s", want, body)
+		}
+	}
+}
+
+func TestOverviewSyncProblemsEmptyOnSuccess(t *testing.T) {
+	st := reconcile.SyncStatus{State: reconcile.SyncSuccess, ProblemCount: 2, Problems: []reconcile.Problem{{Subject: "s", Text: "stale"}}}
+	f := newFixture(t, func(d *Deps) { d.Sync = fakeSync{st} })
+	body := f.get(t, "/api/overview").Body.String()
+	if !strings.Contains(body, `"problems":[]`) || !strings.Contains(body, `"problems_total":0`) || strings.Contains(body, "stale") {
+		t.Fatalf("overview: %s", body)
+	}
+}
+
 func TestOverviewNilAgentPresence(t *testing.T) {
 	f := newFixture(t, func(d *Deps) { d.Agents = nil })
 	f.store.agents = []model.AgentRecord{{ID: "a1", LastSeen: testNow}}

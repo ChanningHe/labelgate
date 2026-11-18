@@ -32,10 +32,21 @@ type OverviewAgentsDTO struct {
 // OverviewSyncDTO mirrors OverviewData.sync. Status is "pending", "success"
 // or "error" (client.ts union gains 'pending'); Error is "" on success and
 // "waiting for first sync" while pending.
+// Problems lists the latest cycle's problems (at most
+// reconcile.MaxStatusProblems, [] unless Status is "error"); ProblemsTotal
+// counts all of them, so the client can show "+N more".
 type OverviewSyncDTO struct {
-	LastSync time.Time `json:"last_sync"`
-	Status   string    `json:"status"`
-	Error    string    `json:"error"`
+	LastSync      time.Time        `json:"last_sync"`
+	Status        string           `json:"status"`
+	Error         string           `json:"error"`
+	Problems      []SyncProblemDTO `json:"problems"`
+	ProblemsTotal int              `json:"problems_total"`
+}
+
+// SyncProblemDTO mirrors SyncProblem: what the problem concerns and its full text.
+type SyncProblemDTO struct {
+	Subject string `json:"subject"`
+	Text    string `json:"text"`
 }
 
 // OverviewCloudflareDTO mirrors OverviewData.cloudflare.

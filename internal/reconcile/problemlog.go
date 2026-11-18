@@ -16,12 +16,8 @@ const (
 	subjectCycle       = "reconcile cycle"
 )
 
-// problem is one thing wrong in a cycle. Subject identifies it across
-// cycles; Text is the full message shown to people and may change.
-type problem struct {
-	Subject string
-	Text    string
-}
+// problem is the package-internal name of Problem.
+type problem = Problem
 
 // logProblems logs the problems that appeared, changed or were resolved
 // since the previous cycle, plus the occasional reminder of persisting ones.

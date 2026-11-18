@@ -55,7 +55,9 @@ func TestNotOwnedMessages(t *testing.T) {
 	}
 
 	rec.Comment = model.DNSComment("old0001", "note")
-	mustContain(t, notOwnedRecord(rec, "abcd1234"), `labelgate instance "old0001"`, `instance_id (env LABELGATE_INSTANCE_ID) to "old0001"`)
+	mustContain(t, notOwnedRecord(rec, "abcd1234"), `labelgate instance "old0001"`, `instance_id (env LABELGATE_INSTANCE_ID) to "old0001"`,
+		"only if that instance is permanently gone", "never while it still runs",
+		"both would claim the same records and overwrite or delete each other's")
 
 	mustContain(t, markerRemoved(rec, "abcd1234"), model.ConflictNotOwned, `"labelgate:abcd1234"`, "or delete the record")
 	app := cloudflare.AccessApp{ID: "a1", Domain: "app.example.com"}

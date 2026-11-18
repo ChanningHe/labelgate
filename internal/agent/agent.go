@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/channinghe/labelgate/internal/config"
-	"github.com/channinghe/labelgate/internal/logchange"
 	"github.com/channinghe/labelgate/internal/model"
 	"github.com/channinghe/labelgate/internal/source"
 	"github.com/gorilla/websocket"
@@ -58,7 +57,7 @@ type Agent struct {
 	cur *agentSession // current authenticated main session
 
 	ipMu       sync.Mutex
-	ipProblems *logchange.Tracker // public IP detection failures, guarded by ipMu
+	ipProblems ipTrackers // public IP detection failures, guarded by ipMu
 }
 
 // agentSession is one authenticated main connection.
@@ -99,7 +98,7 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 		t:       defaultTimings(),
 		pending: newPendingLimiter(MaxPendingHandshakes, MaxPendingPerIP),
 
-		ipProblems: logchange.New(logchange.DefaultRepeat),
+		ipProblems: newIPTrackers(),
 	}, nil
 }
 
@@ -134,7 +133,8 @@ func (a *Agent) ID() string { return a.id }
 // Run runs until ctx is cancelled. Returns nil on cancellation; an error if
 // the inbound listener cannot start or the source fails unrecoverably.
 func (a *Agent) Run(ctx context.Context) error {
-	logAgentID(a.log, a.id, a.idSrc)
+	// a.log already carries agent_id; the startup line names it itself.
+	logAgentID(a.opts.Log.With("component", "agent"), a.id, a.idSrc, a.opts.Connect.Mode)
 	if a.opts.Connect.Mode == config.ConnectInbound {
 		ln, err := listen(a.opts.Connect.Listen, a.opts.Connect.TLS, sectionConnect)
 		if err != nil {
@@ -190,7 +190,7 @@ func (a *Agent) dialer(tlsCfg *tls.Config) func(context.Context) (*websocket.Con
 // runOutbound keeps a session to the main instance until ctx is done.
 func (a *Agent) runOutbound(ctx context.Context, dialFn func(context.Context) (*websocket.Conn, error)) {
 	target := redactURL(a.opts.Connect.Endpoint)
-	where := dialTarget{urlKey: config.KeyWithEnv("connect.endpoint"), section: sectionConnect, peer: "the main instance"}
+	where := dialTarget{url: a.opts.Connect.Endpoint, urlKey: config.KeyWithEnv("connect.endpoint"), section: sectionConnect, peer: "the main instance"}
 	bo := newBackoff(a.opts.Retry)
 	for {
 		ws, err := dialFn(ctx)

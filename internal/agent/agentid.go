@@ -50,10 +50,11 @@ func resolveAgentID(explicit string, machineID, hostname func() (string, error))
 	return "", "", errors.New("agent: cannot derive an agent ID from /etc/machine-id or the hostname; set connect.agent_id (env LABELGATE_CONNECT_AGENT_ID)")
 }
 
-// logAgentID logs where the agent ID came from, and warns when it is the
+// logAgentID logs the startup line with the resolved agent ID, where it came
+// from and the connect mode, and warns when the ID is the
 // hostname: a container hostname changes on every recreate.
-func logAgentID(log *slog.Logger, id string, src agentIDSource) {
-	log.Info("agent ID resolved", "source", string(src))
+func logAgentID(log *slog.Logger, id string, src agentIDSource, mode config.ConnectMode) {
+	log.Info("Agent mode", "agent_id", id, "agent_id_source", string(src), "connect_mode", string(mode))
 	if src != idFromHostname {
 		return
 	}

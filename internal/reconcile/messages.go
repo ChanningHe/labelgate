@@ -61,6 +61,8 @@ func notOwnedRecord(rec cloudflare.DNSRecord, instanceID string) string {
 
 // otherInstanceHint recognises another labelgate instance's ownership
 // marker; after a lost database, reusing the old ID re-adopts the records.
+// Two running instances sharing an ID fight over the same records, so the
+// hint says to do this only when the other instance is gone for good.
 func otherInstanceHint(comment, instanceID string) string {
 	rest, ok := strings.CutPrefix(comment, model.DNSMarker(""))
 	if !ok {
@@ -70,7 +72,8 @@ func otherInstanceHint(comment, instanceID string) string {
 	if id == instanceID || !model.ValidInstanceID(id) {
 		return ""
 	}
-	return fmt.Sprintf("; it was created by labelgate instance %q, so if that was this installation before its database was lost, set %s to %q",
+	return fmt.Sprintf("; it was created by labelgate instance %q. If that was this installation before its database was lost, set %s to %q, "+
+		"but only if that instance is permanently gone: never while it still runs, or both would claim the same records and overwrite or delete each other's",
 		id, config.KeyWithEnv("instance_id"), id)
 }
 

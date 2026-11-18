@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/channinghe/labelgate/internal/config"
@@ -19,6 +20,7 @@ const (
 
 // dialTarget names the config keys behind one outgoing connection, for hints.
 type dialTarget struct {
+	url     string // the dialed URL; its scheme and path refine the hints
 	urlKey  string // e.g. "connect.endpoint (env LABELGATE_CONNECT_ENDPOINT)"
 	section string // TLS settings: sectionAgent or sectionConnect
 	peer    string // "the main instance" or "the agent"
@@ -65,15 +67,13 @@ func dialHint(err error, t dialTarget) string {
 			t.peer, config.KeyWithEnv(t.section+".tls.ca"), config.KeyWithEnv(t.section+".tls.insecure_skip_verify"))
 	case isHostnameMismatch(err):
 		return fmt.Sprintf("%s's TLS certificate does not list the host in %s: use a host name the certificate is issued for", t.peer, t.urlKey)
-	case errors.As(err, &se) && se.status == http.StatusNotFound:
-		return fmt.Sprintf("nothing serves agent connections at that path: %s must end in %s", t.urlKey, PathWS)
-	case errors.As(err, &se) && se.status != http.StatusServiceUnavailable:
-		return fmt.Sprintf("the address does not belong to labelgate's agent port: check the host, port and path in %s", t.urlKey)
+	case errors.As(err, &se):
+		return statusHint(se.status, t)
 	case strings.Contains(msg, "first record does not look like a TLS handshake"):
 		return fmt.Sprintf("%s does not use TLS: use ws:// in %s, or give it a certificate (%s.tls.cert and %s.tls.key)",
 			t.peer, t.urlKey, peerSection(t.section), peerSection(t.section))
-	case strings.Contains(msg, "malformed HTTP response"):
-		return fmt.Sprintf("%s uses TLS: use wss:// in %s", t.peer, t.urlKey)
+	case strings.Contains(msg, "malformed HTTP response") && t.isPlain():
+		return expectsTLSHint(t)
 	case strings.Contains(msg, "connection refused"):
 		return fmt.Sprintf("nothing listens there: check the host and port in %s, that %s is running and that the port is published%s",
 			t.urlKey, t.peer, enabledHint(t.section))
@@ -81,6 +81,58 @@ func dialHint(err error, t dialTarget) string {
 		return fmt.Sprintf("the host name in %s does not resolve", t.urlKey)
 	}
 	return ""
+}
+
+// statusHint explains an HTTP status answering the WebSocket upgrade.
+func statusHint(status int, t dialTarget) string {
+	switch {
+	case status == http.StatusBadRequest && t.isPlain():
+		// Go's TLS server and nginx answer a plain request on a TLS port with 400.
+		return expectsTLSHint(t)
+	case status == http.StatusNotFound && !strings.HasSuffix(t.path(), PathWS):
+		return fmt.Sprintf("nothing serves agent connections at that path: %s must end in %s", t.urlKey, PathWS)
+	case status == http.StatusNotFound:
+		return notListenerHint(t)
+	case status == http.StatusBadGateway || status == http.StatusGatewayTimeout:
+		return proxyHint(t)
+	case status == http.StatusServiceUnavailable:
+		return proxyHint(t) + fmt.Sprintf(", or %s has too many pending connections", t.peer)
+	}
+	return fmt.Sprintf("the address does not belong to labelgate's agent port: check the host, port and path in %s", t.urlKey)
+}
+
+func expectsTLSHint(t dialTarget) string {
+	return fmt.Sprintf("%s likely expects TLS: use wss:// in %s", t.peer, t.urlKey)
+}
+
+func proxyHint(t dialTarget) string {
+	return fmt.Sprintf("the reverse proxy in front of %s cannot reach it: check that %s is running and the proxy's upstream address", t.peer, t.peer)
+}
+
+// notListenerHint explains a 404 on the right path: another HTTP server,
+// typically labelgate's own dashboard/API port, answered.
+func notListenerHint(t dialTarget) string {
+	if t.section == sectionConnect {
+		return fmt.Sprintf("this port is not labelgate's agent listener (it may be the main instance's dashboard/API port, default 28111): "+
+			"use the port of %s on the main instance (default 28112) in %s", config.KeyWithEnv("agent.listen"), t.urlKey)
+	}
+	return fmt.Sprintf("this port is not labelgate's agent listener: use the port of %s on the agent in %s",
+		config.KeyWithEnv("connect.listen"), t.urlKey)
+}
+
+// isPlain reports whether the target URL uses ws:// (no TLS).
+func (t dialTarget) isPlain() bool {
+	u, err := url.Parse(t.url)
+	return err == nil && u.Scheme == "ws"
+}
+
+// path is the path of the target URL, or "" if it cannot be parsed.
+func (t dialTarget) path() string {
+	u, err := url.Parse(t.url)
+	if err != nil {
+		return ""
+	}
+	return u.Path
 }
 
 // peerSection is the config section of the other side of a connection.
@@ -138,10 +190,14 @@ func peerErrorHint(agentID string, code ErrorCode) string {
 	return ""
 }
 
-// tokenMismatchHint names the two keys that must hold the same token.
+// tokenMismatchHint explains a rejected agent. The protocol deliberately
+// hides from the agent whether its ID is unknown or its token is wrong, so
+// both causes are named with equal weight. Token values are never included.
 func tokenMismatchHint(agentID string) string {
-	return fmt.Sprintf("tokens do not match: %s on this agent must equal agent.agents.%s.token in the main instance config "+
-		"(or agent.accept_token there if %q is not listed under agent.agents)", config.KeyWithEnv("connect.token"), agentID, agentID)
+	return fmt.Sprintf("main rejected this agent: either agent %q is not configured on the main instance "+
+		"(add agent.agents.%s with this agent's token there, or set %s), "+
+		"or the tokens do not match: %s on this agent must equal agent.agents.%s.token (or agent.accept_token) in the main instance config",
+		agentID, agentID, config.KeyAndEnv("agent.accept_token"), config.KeyWithEnv("connect.token"), agentID)
 }
 
 // mainAuthHint explains, on the main instance, a failed agent authentication.
