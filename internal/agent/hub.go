@@ -54,6 +54,7 @@ type Hub struct {
 	t        timings
 	dummyKey string // challenge key for IDs without credentials
 	pending  *pendingLimiter
+	failLog  *logThrottle // failed handshake warnings per remote address and claimed ID
 
 	mu       sync.Mutex
 	sessions map[string]*hubSession
@@ -95,6 +96,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		t:        defaultTimings(),
 		dummyKey: hex.EncodeToString(newNonce()),
 		pending:  newPendingLimiter(MaxPendingHandshakes, MaxPendingPerIP),
+		failLog:  newLogThrottle(handshakeLogWindow, maxHandshakeLogKeys),
 		sessions: make(map[string]*hubSession),
 	}, nil
 }
@@ -204,7 +206,7 @@ func (h *Hub) runConn(ctx context.Context, ws *websocket.Conn, mode Mode, creds 
 
 	hello, err := mainHandshake(ws, mode, creds, h.dummyKey, h.t)
 	if err != nil {
-		log.Warn("agent handshake failed", "error", h.explainAuth(err, mode))
+		h.logHandshakeFailure(log, remote, mode, err)
 		return false
 	}
 	log = log.With("agent_id", hello.AgentID)
@@ -226,6 +228,26 @@ func (h *Hub) runConn(ctx context.Context, ws *websocket.Conn, mode Mode, creds 
 	h.serveSession(ctx, s, log)
 	log.Info("agent disconnected")
 	return true
+}
+
+// logHandshakeFailure warns about a failed handshake, at most once per
+// handshakeLogWindow for each remote address and claimed agent ID, and says
+// how many were suppressed since the previous warning.
+func (h *Hub) logHandshakeFailure(log *slog.Logger, remote string, mode Mode, err error) {
+	claimed := ""
+	var f *authFailure
+	if errors.As(err, &f) {
+		claimed = f.agentID
+	}
+	ok, suppressed := h.failLog.allow(h.now(), peerKey(remote)+" "+claimed)
+	if !ok {
+		return
+	}
+	args := []any{"error", h.explainAuth(err, mode)}
+	if suppressed > 0 {
+		args = append(args, "suppressed", fmt.Sprintf("%d more failed handshakes from this address with this agent ID since the last warning", suppressed))
+	}
+	log.Warn("agent handshake failed", args...)
 }
 
 // register adds s unless a live session with the same ID exists.
