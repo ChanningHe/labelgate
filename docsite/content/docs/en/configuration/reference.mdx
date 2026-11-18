@@ -103,7 +103,7 @@ A `tcp://` endpoint uses TLS only when a `docker.tls.*` key is set. Without one,
 | Key | Env var | Default | Meaning |
 |-----|---------|---------|---------|
 | `api.enabled` | `LABELGATE_API_ENABLED` | `true` | Serve the API and the dashboard. |
-| `api.address` | `LABELGATE_API_ADDRESS` | `:8080` | Listen address. |
+| `api.address` | `LABELGATE_API_ADDRESS` | `:28111` | Listen address. |
 | `api.base_path` | `LABELGATE_API_BASE_PATH` | `/api` | API path. Starts with `/`, no trailing `/`, not `/dashboard`. |
 | `api.token` | `LABELGATE_API_TOKEN` | - | **Required** for the API and the dashboard. At least 16 characters. If empty, both are off. |
 
@@ -151,7 +151,7 @@ Settings on the main instance for accepting [agents](/docs/examples/multi-host).
 | Key | Env var | Default | Meaning |
 |-----|---------|---------|---------|
 | `agent.enabled` | `LABELGATE_AGENT_ENABLED` | `false` | Accept agents. |
-| `agent.listen` | `LABELGATE_AGENT_LISTEN` | `:8081` | Listen address. Agents connect to `wss://<host>:8081/ws`. |
+| `agent.listen` | `LABELGATE_AGENT_LISTEN` | `:28112` | Listen address. Agents connect to `wss://<host>:28112/ws`. |
 | `agent.accept_token` | `LABELGATE_AGENT_ACCEPT_TOKEN` | - | One shared token for agents not listed in `agent.agents`. See [Agent tokens](#agent-tokens). |
 | `agent.accept_hostnames` | `LABELGATE_AGENT_ACCEPT_HOSTNAMES` | any | Hostnames those agents may use, as globs: `*.edge.example.com`. A wildcard hostname needs an identical entry. |
 | `agent.accept_tunnels` | `LABELGATE_AGENT_ACCEPT_TUNNELS` | default tunnel | Tunnels those agents may use: `default`, a name from `cloudflare.tunnels`, or a tunnel ID. |
@@ -200,10 +200,10 @@ Used only with `mode: agent`. In agent mode, only these, `log_*`, `docker` and `
 | Key | Env var | Default | Meaning |
 |-----|---------|---------|---------|
 | `connect.mode` | `LABELGATE_CONNECT_MODE` | `outbound` | `outbound`: the agent dials the main. `inbound`: the main dials the agent. |
-| `connect.endpoint` | `LABELGATE_CONNECT_ENDPOINT` | - | **Required** for outbound. Main URL including `/ws`: `wss://main.example.com:8081/ws`. |
-| `connect.listen` | `LABELGATE_CONNECT_LISTEN` | - | **Required** for inbound. Listen address, e.g. `:8082`. |
+| `connect.endpoint` | `LABELGATE_CONNECT_ENDPOINT` | - | **Required** for outbound. Main URL including `/ws`: `wss://main.example.com:28112/ws`. |
+| `connect.listen` | `LABELGATE_CONNECT_LISTEN` | - | **Required** for inbound. Listen address, e.g. `:28113`. |
 | `connect.token` | `LABELGATE_CONNECT_TOKEN` | - | **Required.** Same token as on the main. See [Agent tokens](#agent-tokens). |
-| `connect.agent_id` | `LABELGATE_CONNECT_AGENT_ID` | from machine ID | Agent ID. Derived from `/etc/machine-id`, else the hostname. Set it to match the main. |
+| `connect.agent_id` | `LABELGATE_CONNECT_AGENT_ID` | from machine ID | Agent ID. Takes priority over `/etc/machine-id` (mount it into the container; the first 12 hex characters are used). With neither, the container hostname is used, which is not stable and logs a warning. A named agent must set it to match the main. |
 | `connect.heartbeat_interval` | `LABELGATE_CONNECT_HEARTBEAT_INTERVAL` | `30s` | How often the agent sends a full report. Minimum `1s`. |
 | `connect.tls.ca` | `LABELGATE_CONNECT_TLS_CA` | system CAs | CA to check the main's certificate. |
 | `connect.tls.cert` | `LABELGATE_CONNECT_TLS_CERT` | - | Inbound only: server certificate. Set together with `key`. |

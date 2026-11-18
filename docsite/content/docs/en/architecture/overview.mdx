@@ -12,7 +12,7 @@ A Labelgate setup has one **main instance** and, optionally, **agents** on other
 │          │               │       │          │            │
 │          ▼               │  /ws  │          ▼            │
 │ Labelgate main  ◄────────┼───────┼── Labelgate agent     │
-│  - dashboard + API :8080 │       └───────────────────────┘
+│  - dashboard/API :28111  │       └───────────────────────┘
 │  - database              │
 └──────────┬───────────────┘
            │ Cloudflare API
@@ -35,8 +35,8 @@ A Labelgate setup has one **main instance** and, optionally, **agents** on other
 
 | What | Default | Setting |
 |------|---------|---------|
-| Dashboard and API | `:8080` | `api.address` (`LABELGATE_API_ADDRESS`) |
-| Agent listener on main | `:8081`, path `/ws` | `agent.listen` (`LABELGATE_AGENT_LISTEN`), on with `agent.enabled` (`LABELGATE_AGENT_ENABLED`) |
+| Dashboard and API | `:28111` | `api.address` (`LABELGATE_API_ADDRESS`) |
+| Agent listener on main | `:28112`, path `/ws` | `agent.listen` (`LABELGATE_AGENT_LISTEN`), on with `agent.enabled` (`LABELGATE_AGENT_ENABLED`) |
 | Database | `/app/config/labelgate.db` | `db.path` (`LABELGATE_DB_PATH`) |
 
 Back up the `/app/config` volume. It holds what Labelgate has created (see [Ownership & Conflicts](/docs/ownership#recovering-from-database-loss)).

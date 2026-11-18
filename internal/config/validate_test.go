@@ -25,7 +25,7 @@ func validAgent() Config {
 	cfg := Defaults()
 	cfg.Mode = ModeAgent
 	cfg.Connect.Token = agentToken
-	cfg.Connect.Endpoint = "wss://main.example.com:8081/ws"
+	cfg.Connect.Endpoint = "wss://main.example.com:28112/ws"
 	return cfg
 }
 
@@ -153,7 +153,7 @@ func TestValidate_API(t *testing.T) {
 		{"under dashboard", m, func(c *Config) { c.API.BasePath = "/dashboard/api" }, "api.base_path", "reserved"},
 		{"dashboard lookalike ok", m, func(c *Config) { c.API.BasePath = "/dashboards" }, "", ""},
 		{"nested base path ok", m, func(c *Config) { c.API.BasePath = "/v1/lg" }, "", ""},
-		{"bad address", m, func(c *Config) { c.API.Address = "8080" }, "api.address", "[host]:port"},
+		{"bad address", m, func(c *Config) { c.API.Address = "28111" }, "api.address", "[host]:port"},
 		{"bad address port", m, func(c *Config) { c.API.Address = ":http" }, "api.address", "invalid port"},
 		{"disabled api skips checks", m, func(c *Config) { c.API.Enabled = false; c.API.Address = "x"; c.API.BasePath = "x" }, "", ""},
 		{"empty token ok (api disabled at runtime)", m, func(c *Config) { c.API.Token = "" }, "", ""},
@@ -283,7 +283,7 @@ func TestValidate_AgentServer(t *testing.T) {
 		{"agent full ok", base, func(c *Config) {
 			entry(c, "web-1", AgentEntry{
 				Token: agentToken, Name: "Web", DefaultTunnel: "sec", Tunnels: []string{"sec"},
-				Hostnames: []string{"*.example.com"}, ConnectTo: "wss://agent:8081/ws",
+				Hostnames: []string{"*.example.com"}, ConnectTo: "wss://agent:28113/ws",
 			})
 		}, "", ""},
 		{"agent deterministic first error", base, func(c *Config) {
@@ -300,10 +300,10 @@ func TestValidate_AgentMode(t *testing.T) {
 		{"low-variety token", a, func(c *Config) { c.Connect.Token = strings.Repeat("0123", 10) }, "connect.token", "openssl rand -hex 32"},
 		{"outbound missing endpoint", a, func(c *Config) { c.Connect.Endpoint = "" }, "connect.endpoint", "required"},
 		{"outbound http endpoint", a, func(c *Config) { c.Connect.Endpoint = "https://main/ws" }, "connect.endpoint", "ws:// or wss://"},
-		{"outbound endpoint without path", a, func(c *Config) { c.Connect.Endpoint = "wss://main.example.com:8081" }, "connect.endpoint", "did you mean wss://main.example.com:8081/ws?"},
-		{"outbound endpoint root path", a, func(c *Config) { c.Connect.Endpoint = "ws://main:8081/" }, "connect.endpoint", "did you mean ws://main:8081/ws?"},
+		{"outbound endpoint without path", a, func(c *Config) { c.Connect.Endpoint = "wss://main.example.com:28112" }, "connect.endpoint", "did you mean wss://main.example.com:28112/ws?"},
+		{"outbound endpoint root path", a, func(c *Config) { c.Connect.Endpoint = "ws://main:28112/" }, "connect.endpoint", "did you mean ws://main:28112/ws?"},
 		{"outbound endpoint custom path ok", a, func(c *Config) { c.Connect.Endpoint = "wss://proxy.example.com/labelgate/ws" }, "", ""},
-		{"outbound ws ok", a, func(c *Config) { c.Connect.Endpoint = "ws://main:8081/ws" }, "", ""},
+		{"outbound ws ok", a, func(c *Config) { c.Connect.Endpoint = "ws://main:28112/ws" }, "", ""},
 		{"inbound missing listen", a, func(c *Config) { c.Connect.Mode = ConnectInbound }, "connect.listen", "required"},
 		{"inbound bad listen", a, func(c *Config) { c.Connect.Mode = ConnectInbound; c.Connect.Listen = "x" }, "connect.listen", "[host]:port"},
 		{"inbound ok without endpoint", a, func(c *Config) { c.Connect.Mode = ConnectInbound; c.Connect.Listen = ":9000" }, "", ""},
@@ -333,6 +333,16 @@ func TestValidationError_Error(t *testing.T) {
 	err := &ValidationError{Field: "a.b", Message: "bad"}
 	if err.Error() != "config: a.b: bad" {
 		t.Errorf("got %q", err.Error())
+	}
+}
+
+func TestDefaults_ListenPorts(t *testing.T) {
+	cfg := Defaults()
+	if cfg.API.Address != ":28111" {
+		t.Errorf("api.address = %q, want :28111", cfg.API.Address)
+	}
+	if cfg.Agent.Listen != ":28112" {
+		t.Errorf("agent.listen = %q, want :28112", cfg.Agent.Listen)
 	}
 }
 

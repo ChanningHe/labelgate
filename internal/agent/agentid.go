@@ -3,10 +3,21 @@ package agent
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 
+	"github.com/channinghe/labelgate/internal/config"
 	"github.com/channinghe/labelgate/internal/model"
+)
+
+// agentIDSource says where the agent ID came from.
+type agentIDSource string
+
+const (
+	idExplicit      agentIDSource = "explicit"   // connect.agent_id
+	idFromMachineID agentIDSource = "machine-id" // /etc/machine-id
+	idFromHostname  agentIDSource = "hostname"   // container hostname: not stable
 )
 
 const (
@@ -17,25 +28,39 @@ const (
 
 // resolveAgentID returns the explicit ID if set (it must be valid as given),
 // else the first 12 hex chars of the machine ID, else the sanitized hostname.
-func resolveAgentID(explicit string, machineID, hostname func() (string, error)) (string, error) {
+// The source reports which of the three was used.
+func resolveAgentID(explicit string, machineID, hostname func() (string, error)) (string, agentIDSource, error) {
 	if explicit != "" {
 		if !model.ValidAgentID(explicit) {
-			return "", fmt.Errorf("agent: connect.agent_id %q is invalid: use up to 63 lower-case letters, digits, dots, hyphens or underscores, starting with a letter or digit", explicit)
+			return "", "", fmt.Errorf("agent: connect.agent_id %q is invalid: use up to 63 lower-case letters, digits, dots, hyphens or underscores, starting with a letter or digit", explicit)
 		}
-		return explicit, nil
+		return explicit, idExplicit, nil
 	}
 	if raw, err := machineID(); err == nil {
 		id := strings.ToLower(strings.TrimSpace(raw))
 		if len(id) >= machineIDPrefix && isHex(id[:machineIDPrefix]) {
-			return id[:machineIDPrefix], nil
+			return id[:machineIDPrefix], idFromMachineID, nil
 		}
 	}
 	if raw, err := hostname(); err == nil {
 		if id := sanitizeAgentID(raw); model.ValidAgentID(id) {
-			return id, nil
+			return id, idFromHostname, nil
 		}
 	}
-	return "", errors.New("agent: cannot derive an agent ID from /etc/machine-id or the hostname; set connect.agent_id (env LABELGATE_CONNECT_AGENT_ID)")
+	return "", "", errors.New("agent: cannot derive an agent ID from /etc/machine-id or the hostname; set connect.agent_id (env LABELGATE_CONNECT_AGENT_ID)")
+}
+
+// logAgentID logs where the agent ID came from, and warns when it is the
+// hostname: a container hostname changes on every recreate.
+func logAgentID(log *slog.Logger, id string, src agentIDSource) {
+	log.Info("agent ID resolved", "source", string(src))
+	if src != idFromHostname {
+		return
+	}
+	log.Warn(fmt.Sprintf("agent ID %s comes from the container hostname, which changes when the container is recreated; "+
+		"the main instance then sees a new agent and removes the old agent's resources after %s. "+
+		"Fix: mount /etc/machine-id:/etc/machine-id:ro into the agent container, or set %s, which takes priority",
+		id, config.KeyWithEnv("sync.agent_grace"), config.KeyWithEnv("connect.agent_id")))
 }
 
 func isHex(s string) bool {

@@ -231,7 +231,7 @@ agent:
       tunnels: [default]
       hostnames: ["web.example.com"]
       services: ["web", "10.0.0.0/8"]
-      connect_to: wss://web-1:8081/ws
+      connect_to: wss://web-1:28113/ws
 `)
 	cfg := mustLoad(t, path, env("LABELGATE_AGENT_ACCEPT_TUNNELS", "default, t1 ,", "LABELGATE_AGENT_ACCEPT_SERVICES", "web, 10.0.0.0/8"))
 	a := cfg.Agent
@@ -247,7 +247,7 @@ agent:
 	e := a.Agents["web-1"]
 	want := AgentEntry{
 		Token: "x0x1x2x3x4x5x6x7x8x9xaxbxcxdxexf", Name: "Web One", DefaultTunnel: "default", Tunnels: []string{"default"},
-		Hostnames: []string{"web.example.com"}, Services: []string{"web", "10.0.0.0/8"}, ConnectTo: "wss://web-1:8081/ws",
+		Hostnames: []string{"web.example.com"}, Services: []string{"web", "10.0.0.0/8"}, ConnectTo: "wss://web-1:28113/ws",
 	}
 	if !reflect.DeepEqual(e, want) {
 		t.Errorf("entry: %+v", e)

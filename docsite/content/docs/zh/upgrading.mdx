@@ -26,7 +26,14 @@ v0.3 下你的标签照常可用，但升级前有几项设置必须先改好。
 
    只要还留着任何一项，Labelgate 就不会启动，并一次性列出所有问题。
 
-4. **启动 Labelgate，打开 dashboard。** 有报错就逐一修复（参见[下文](#what-changes-you-may-notice)）。
+4. **更新端口。** dashboard 和 API 现在监听 `28111`（原来是 `8080`），agent 监听端口改为 `28112`（原来是 `8081`）。请修改端口映射和 agent 的连接地址；想保留旧端口，就设置 `api.address`（`LABELGATE_API_ADDRESS`）和 `agent.listen`（`LABELGATE_AGENT_LISTEN`）。
+
+   ```yaml
+   ports:
+     - "127.0.0.1:28111:28111"
+   ```
+
+5. **启动 Labelgate，打开 dashboard。** 有报错就逐一修复（参见[下文](#what-changes-you-may-notice)）。
 
 ### 如果你在用 agent [#agents]
 
@@ -41,7 +48,7 @@ v0.3 下你的标签照常可用，但升级前有几项设置必须先改好。
 3. **agent 连接地址必须以 `/ws` 结尾。**
 
    ```bash
-   LABELGATE_CONNECT_ENDPOINT=wss://main.example.com:8081/ws
+   LABELGATE_CONNECT_ENDPOINT=wss://main.example.com:28112/ws
    ```
 
 4. **自签名证书要配置 CA。** 现在会校验证书。在 agent 上设置 `connect.tls.ca`（`LABELGATE_CONNECT_TLS_CA`）；如果是 main 主动连接 agent（inbound 模式），在 main 上设置 `agent.tls.ca`（`LABELGATE_AGENT_TLS_CA`），指向你的 CA 文件。

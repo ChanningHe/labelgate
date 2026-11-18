@@ -68,7 +68,7 @@ services:
       - LABELGATE_CLOUDFLARE_TUNNEL_ID
       - LABELGATE_API_TOKEN
     ports:
-      - "127.0.0.1:8080:8080"     # dashboard and API, local only
+      - "127.0.0.1:28111:28111"     # dashboard and API, local only
 
   cloudflared:
     image: cloudflare/cloudflared:latest
@@ -101,7 +101,7 @@ docker compose up -d
 
 Within a few seconds Labelgate adds a tunnel rule and a DNS record for `app.example.com`. Open `https://app.example.com` and you should see the nginx welcome page.
 
-To see what Labelgate manages, open `http://localhost:8080/dashboard/` and sign in with your `LABELGATE_API_TOKEN`. To see errors, run `docker compose logs labelgate`.
+To see what Labelgate manages, open `http://localhost:28111/dashboard/` and sign in with your `LABELGATE_API_TOKEN`. To see errors, run `docker compose logs labelgate`.
 
 If `app.example.com` already exists on Cloudflare, Labelgate does not overwrite it. It shows a `conflict` error instead. See [Ownership & Conflicts](/docs/ownership).
 

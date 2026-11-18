@@ -97,7 +97,7 @@ func checkAgentEntry(p *ValidationErrors, cf CloudflareConfig, id string, e Agen
 func checkWebSocketURL(field, raw string) *ValidationError {
 	u, err := url.Parse(raw)
 	if err != nil || (u.Scheme != "ws" && u.Scheme != "wss") || u.Host == "" {
-		return fail(field, "%q must be a ws:// or wss:// URL with a host, e.g. wss://host:8081/ws", raw)
+		return fail(field, "%q must be a ws:// or wss:// URL with a host, e.g. wss://host:28112/ws", raw)
 	}
 	return nil
 }
@@ -124,7 +124,7 @@ func checkConnect(p *ValidationErrors, cfg Config) {
 
 func checkConnectListen(listen string) *ValidationError {
 	if listen == "" {
-		return fail("connect.listen", "required when connect.mode is inbound: the address the main instance dials, e.g. :8081")
+		return fail("connect.listen", "required when connect.mode is inbound: the address the main instance dials, e.g. :28113")
 	}
 	return checkListen("connect.listen", listen)
 }
@@ -132,7 +132,7 @@ func checkConnectListen(listen string) *ValidationError {
 func checkConnectEndpoint(endpoint string) *ValidationError {
 	const field = "connect.endpoint"
 	if endpoint == "" {
-		return fail(field, "required when connect.mode is outbound: the main instance's agent URL, e.g. wss://main.example.com:8081/ws")
+		return fail(field, "required when connect.mode is outbound: the main instance's agent URL, e.g. wss://main.example.com:28112/ws")
 	}
 	if ve := checkWebSocketURL(field, endpoint); ve != nil {
 		return ve

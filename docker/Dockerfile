@@ -62,9 +62,9 @@ COPY --from=builder --chown=65532:65532 /app/config-skel /app/config
 
 USER nonroot
 
-# 8080: API Server + Dashboard
-# 8081: Agent Server (WebSocket)
-EXPOSE 8080 8081
+# 28111: API Server + Dashboard
+# 28112: Agent Server (WebSocket)
+EXPOSE 28111 28112
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD ["/app/labelgate", "healthcheck"]

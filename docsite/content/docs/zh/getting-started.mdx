@@ -68,7 +68,7 @@ services:
       - LABELGATE_CLOUDFLARE_TUNNEL_ID
       - LABELGATE_API_TOKEN
     ports:
-      - "127.0.0.1:8080:8080"     # dashboard 和 API，仅本机访问
+      - "127.0.0.1:28111:28111"     # dashboard 和 API，仅本机访问
 
   cloudflared:
     image: cloudflare/cloudflared:latest
@@ -101,7 +101,7 @@ docker compose up -d
 
 几秒钟内，Labelgate 会为 `app.example.com` 添加一条 tunnel 规则和一条 DNS 记录。打开 `https://app.example.com`，应该能看到 nginx 欢迎页。
 
-想看 Labelgate 管理了哪些资源，打开 `http://localhost:8080/dashboard/`，用 `LABELGATE_API_TOKEN` 登录。想看报错，执行 `docker compose logs labelgate`。
+想看 Labelgate 管理了哪些资源，打开 `http://localhost:28111/dashboard/`，用 `LABELGATE_API_TOKEN` 登录。想看报错，执行 `docker compose logs labelgate`。
 
 如果 `app.example.com` 在 Cloudflare 上已经存在，Labelgate 不会覆盖它，而是显示 `conflict` 错误。参见[所有权与冲突](/zh/docs/ownership)。
 

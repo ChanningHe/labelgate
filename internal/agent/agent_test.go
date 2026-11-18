@@ -559,24 +559,26 @@ func TestResolveAgentID(t *testing.T) {
 		machine   func() (string, error)
 		host      func() (string, error)
 		want      string
+		wantSrc   agentIDSource
 		wantError bool
 	}{
-		{"explicit", "edge-1", fail, fail, "edge-1", false},
-		{"explicit invalid", "Edge 1", ok("0123456789abcdef"), ok("h"), "", true},
-		{"machine id", "", ok("0123456789ABCDEF0123\n"), ok("h"), "0123456789ab", false},
-		{"machine id not hex", "", ok("zzzzzzzzzzzzzzzz"), ok("My.Host"), "my.host", false},
-		{"machine id short", "", ok("abc"), ok("host_1"), "host_1", false},
-		{"hostname sanitized", "", fail, ok("--Web Server.local"), "web-server.local", false},
-		{"hostname lower-cased, dots kept", "", fail, ok("NAS.lan"), "nas.lan", false},
-		{"hostname truncated", "", fail, ok(strings.Repeat("a", 80)), strings.Repeat("a", 63), false},
-		{"nothing usable", "", fail, ok("..."), "", true},
-		{"all fail", "", fail, fail, "", true},
+		{"explicit", "edge-1", fail, fail, "edge-1", idExplicit, false},
+		{"explicit wins over machine id", "edge-1", ok("0123456789abcdef"), ok("h"), "edge-1", idExplicit, false},
+		{"explicit invalid", "Edge 1", ok("0123456789abcdef"), ok("h"), "", "", true},
+		{"machine id", "", ok("0123456789ABCDEF0123\n"), ok("h"), "0123456789ab", idFromMachineID, false},
+		{"machine id not hex", "", ok("zzzzzzzzzzzzzzzz"), ok("My.Host"), "my.host", idFromHostname, false},
+		{"machine id short", "", ok("abc"), ok("host_1"), "host_1", idFromHostname, false},
+		{"hostname sanitized", "", fail, ok("--Web Server.local"), "web-server.local", idFromHostname, false},
+		{"hostname lower-cased, dots kept", "", fail, ok("NAS.lan"), "nas.lan", idFromHostname, false},
+		{"hostname truncated", "", fail, ok(strings.Repeat("a", 80)), strings.Repeat("a", 63), idFromHostname, false},
+		{"nothing usable", "", fail, ok("..."), "", "", true},
+		{"all fail", "", fail, fail, "", "", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := resolveAgentID(tc.explicit, tc.machine, tc.host)
-			if (err != nil) != tc.wantError || got != tc.want {
-				t.Fatalf("got %q, %v; want %q (error %v)", got, err, tc.want, tc.wantError)
+			got, src, err := resolveAgentID(tc.explicit, tc.machine, tc.host)
+			if (err != nil) != tc.wantError || got != tc.want || src != tc.wantSrc {
+				t.Fatalf("got %q (%q), %v; want %q (%q) (error %v)", got, src, err, tc.want, tc.wantSrc, tc.wantError)
 			}
 		})
 	}

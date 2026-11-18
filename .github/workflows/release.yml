@@ -262,7 +262,7 @@ jobs:
                 - LABELGATE_CLOUDFLARE_ACCOUNT_ID
                 - LABELGATE_CLOUDFLARE_TUNNEL_ID
               ports:
-                - "28111:8080"
+                - "28111:28111"
               network_mode: bridge
           ```
           COMPOSE

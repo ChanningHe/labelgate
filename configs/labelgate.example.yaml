@@ -90,14 +90,14 @@ db:
 # The dashboard follows base_path automatically (the server injects it into the page).
 api:
   enabled: true                           # LABELGATE_API_ENABLED
-  address: ":8080"                        # LABELGATE_API_ADDRESS
+  address: ":28111"                       # LABELGATE_API_ADDRESS
   base_path: /api                         # LABELGATE_API_BASE_PATH (starts with "/", no trailing "/")
   token: "change-me-to-a-long-random-string"   # LABELGATE_API_TOKEN (prefer the environment variable)
 
 # Agent management (for the main instance)
 agent:
   enabled: false                          # LABELGATE_AGENT_ENABLED
-  listen: ":8081"                         # LABELGATE_AGENT_LISTEN (agents connect to wss://<host>:8081/ws)
+  listen: ":28112"                        # LABELGATE_AGENT_LISTEN (agents connect to wss://<host>:28112/ws)
   # Shared token for agents not listed under "agents". Prefer per-agent tokens.
   # All agent tokens must be >= 32 characters with >= 12 distinct characters (openssl rand -hex 32).
   # accept_token: ""                      # LABELGATE_AGENT_ACCEPT_TOKEN
@@ -121,15 +121,15 @@ agent:
   #     tunnels: ["default"]              # tunnels this agent may target (empty = only its default tunnel)
   #     hostnames: ["*.remote.example.com"]  # hostnames this agent may claim (empty = unrestricted; wildcard hostnames need an exact entry)
   #     services: ["web", "172.20.0.0/16"]  # tunnel origins beyond IP literals (hostname globs, IPs, CIDRs)
-  #     connect_to: "wss://remote-host-1:8082/ws"  # inbound mode: the main dials the agent
+  #     connect_to: "wss://remote-host-1:28113/ws"  # inbound mode: the main dials the agent
 
 # Agent connection (when mode: agent)
 # connect:
 #   mode: outbound                        # LABELGATE_CONNECT_MODE  (outbound, inbound)
-#   endpoint: wss://main.example.com:8081/ws   # LABELGATE_CONNECT_ENDPOINT (outbound; the /ws path is required)
-#   # listen: ":8082"                     # LABELGATE_CONNECT_LISTEN  (inbound)
+#   endpoint: wss://main.example.com:28112/ws   # LABELGATE_CONNECT_ENDPOINT (outbound; the /ws path is required)
+#   # listen: ":28113"                     # LABELGATE_CONNECT_LISTEN  (inbound)
 #   token: "replace-with-openssl-rand-hex-32"      # LABELGATE_CONNECT_TOKEN   (required)
-#   agent_id: ""                          # LABELGATE_CONNECT_AGENT_ID (default: first 12 hex chars of /etc/machine-id, else sanitized hostname)
+#   agent_id: ""                          # LABELGATE_CONNECT_AGENT_ID (takes priority; default: first 12 hex chars of /etc/machine-id, mounted into the container, else the hostname: not stable, warns)
 #   heartbeat_interval: 30s               # LABELGATE_CONNECT_HEARTBEAT_INTERVAL (>= 1s)
 #   tls:
 #     ca: /path/to/ca.pem                 # LABELGATE_CONNECT_TLS_CA    (verifies the main when dialing it; default: system roots)

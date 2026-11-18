@@ -66,14 +66,14 @@ path = "/app/config/labelgate.db"
 # The dashboard follows base_path automatically (the server injects it into the page).
 [api]
 enabled = true
-address = ":8080"
+address = ":28111"
 base_path = "/api"
 token = "change-me-to-a-long-random-string"   # prefer LABELGATE_API_TOKEN
 
 # Agent management (for the main instance)
 [agent]
 enabled = false
-listen = ":8081"           # agents connect to wss://<host>:8081/ws
+listen = ":28112"          # agents connect to wss://<host>:28112/ws
 # accept_token = ""        # shared token, >= 32 characters, >= 12 distinct; prefer per-agent tokens
 # accept_hostnames = ["*.remote.example.com"]
 # accept_tunnels = []
@@ -93,15 +93,15 @@ listen = ":8081"           # agents connect to wss://<host>:8081/ws
 # tunnels = ["default"]
 # hostnames = ["*.remote.example.com"]
 # services = ["web", "172.20.0.0/16"]        # tunnel origins beyond IP literals
-# connect_to = "wss://remote-host-1:8082/ws"   # inbound mode
+# connect_to = "wss://remote-host-1:28113/ws"   # inbound mode
 
 # Agent connection (when mode = "agent")
 # [connect]
 # mode = "outbound"                              # outbound, inbound
-# endpoint = "wss://main.example.com:8081/ws"    # outbound; the /ws path is required
-# listen = ":8082"                               # inbound
+# endpoint = "wss://main.example.com:28112/ws"    # outbound; the /ws path is required
+# listen = ":28113"                               # inbound
 # token = "replace-with-openssl-rand-hex-32"              # required
-# agent_id = ""                                  # default: first 12 hex chars of /etc/machine-id
+# agent_id = ""                                  # default: first 12 hex chars of /etc/machine-id (mount it into the container), else the hostname (not stable, warns)
 # heartbeat_interval = "30s"
 
 # [connect.tls]

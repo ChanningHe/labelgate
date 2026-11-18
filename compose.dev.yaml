@@ -50,10 +50,10 @@ services:
     ports:
       # HTTP API and dashboard (authenticated with LABELGATE_API_TOKEN).
       # Bound to localhost on purpose: put TLS, a VPN or Cloudflare Access in front before exposing it.
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:28111:28111"
       
-      # Agent server (needs agent.enabled; agents connect to wss://<host>:8081/ws)
-      # - "8081:8081"
+      # Agent server (needs agent.enabled; agents connect to wss://<host>:28112/ws)
+      # - "28112:28112"
     
     healthcheck:
       test: ["CMD", "/app/labelgate", "healthcheck"]

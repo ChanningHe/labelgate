@@ -80,7 +80,7 @@ services:
       LABELGATE_CLOUDFLARE_API_TOKEN: ${CF_API_TOKEN}
       LABELGATE_API_TOKEN: ${LABELGATE_API_TOKEN}
     ports:
-      - "127.0.0.1:8080:8080"   # Dashboard 和 API
+      - "127.0.0.1:28111:28111"   # Dashboard 和 API
 ```
 
 ## 最小 agent 配置 [#minimal-agent-config]
@@ -98,14 +98,17 @@ services:
       - "999"   # Docker socket 的属组：stat -c '%g' /var/run/docker.sock
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /etc/machine-id:/etc/machine-id:ro   # 稳定的 agent ID
     environment:
       LABELGATE_MODE: agent
-      LABELGATE_CONNECT_ENDPOINT: wss://main.example.com:8081/ws
-      LABELGATE_CONNECT_AGENT_ID: edge1
+      LABELGATE_CONNECT_ENDPOINT: wss://main.example.com:28112/ws
+      LABELGATE_CONNECT_AGENT_ID: edge1      # 可选，优先于 machine-id
       LABELGATE_CONNECT_TOKEN: ${AGENT_TOKEN}   # openssl rand -hex 32
 ```
 
-在 main 实例上，把这个 agent 以相同的 ID 和 token 加进 `labelgate.yaml`，并开放 `8081` 端口：
+容器重建后，agent ID 必须保持不变。请挂载 `/etc/machine-id`，或设置 `LABELGATE_CONNECT_AGENT_ID`（优先级更高）。在 `agent.agents.<id>` 里命名的 agent，必须把 `LABELGATE_CONNECT_AGENT_ID` 设成同一个 `<id>`。
+
+在 main 实例上，把这个 agent 以相同的 ID 和 token 加进 `labelgate.yaml`，并开放 `28112` 端口：
 
 ```yaml
 agent:

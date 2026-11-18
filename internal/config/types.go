@@ -184,7 +184,7 @@ type AgentEntry struct {
 // ConnectConfig configures agent mode.
 type ConnectConfig struct {
 	Mode     ConnectMode `mapstructure:"mode"`
-	Endpoint string      `mapstructure:"endpoint"` // outbound: ws(s)://main:8081/ws
+	Endpoint string      `mapstructure:"endpoint"` // outbound: ws(s)://main:28112/ws
 	Listen   string      `mapstructure:"listen"`   // inbound: listen address
 	Token    string      `mapstructure:"token"`
 	// AgentID: "" = derived from /etc/machine-id (first 12 hex chars), else hostname (sanitized).
@@ -218,9 +218,9 @@ func Defaults() Config {
 			AgentGrace:  24 * time.Hour,
 		},
 		DB:  DBConfig{Path: "/app/config/labelgate.db"},
-		API: APIConfig{Enabled: true, Address: ":8080", BasePath: "/api"},
+		API: APIConfig{Enabled: true, Address: ":28111", BasePath: "/api"},
 		Agent: AgentServerConfig{
-			Listen: ":8081",
+			Listen: ":28112",
 		},
 		Connect: ConnectConfig{
 			Mode:              ConnectOutbound,
