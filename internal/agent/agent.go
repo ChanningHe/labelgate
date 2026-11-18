@@ -190,7 +190,7 @@ func (a *Agent) dialer(tlsCfg *tls.Config) func(context.Context) (*websocket.Con
 // runOutbound keeps a session to the main instance until ctx is done.
 func (a *Agent) runOutbound(ctx context.Context, dialFn func(context.Context) (*websocket.Conn, error)) {
 	target := redactURL(a.opts.Connect.Endpoint)
-	where := dialTarget{urlKey: config.KeyWithEnv("connect.endpoint"), section: sectionConnect, peer: "the main instance"}
+	where := dialTarget{url: a.opts.Connect.Endpoint, urlKey: config.KeyWithEnv("connect.endpoint"), section: sectionConnect, peer: "the main instance"}
 	bo := newBackoff(a.opts.Retry)
 	for {
 		ws, err := dialFn(ctx)

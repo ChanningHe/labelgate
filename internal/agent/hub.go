@@ -314,7 +314,7 @@ func (h *Hub) dialLoop(ctx context.Context, id string, e config.AgentEntry, tlsC
 		return e.Token, true
 	}
 	target := redactURL(e.ConnectTo)
-	where := dialTarget{urlKey: "agent.agents." + id + ".connect_to", section: sectionAgent, peer: "the agent"}
+	where := dialTarget{url: e.ConnectTo, urlKey: "agent.agents." + id + ".connect_to", section: sectionAgent, peer: "the agent"}
 	bo := newBackoff(h.opts.Retry)
 	for {
 		ws, err := dial(ctx, e.ConnectTo, tlsCfg, h.t.handshake)
