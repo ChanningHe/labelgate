@@ -30,7 +30,8 @@ func removedProblems(v *viper.Viper, env envLookup) ValidationErrors {
 	keys := sortedKeys(RemovedKeys)
 	present := map[string]bool{}
 	for _, key := range keys {
-		if _, inEnv := env(envName(key)); inEnv || v.IsSet(viperKey(key)) {
+		// An empty variable counts as unset, like in applyEnv.
+		if val, _ := env(envName(key)); val != "" || v.IsSet(viperKey(key)) {
 			present[key] = true
 		}
 	}

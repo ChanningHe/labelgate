@@ -183,6 +183,23 @@ func TestLoad_EmptyEnvValueIsIgnored(t *testing.T) {
 	}
 }
 
+func TestLoad_EmptyRemovedKeyEnvValueIsIgnored(t *testing.T) {
+	e := env(tokenEnv, "tok")
+	for key := range RemovedKeys {
+		base := e
+		name := envName(key)
+		e = func(k string) (string, bool) {
+			if k == name {
+				return "", true
+			}
+			return base(k)
+		}
+	}
+	if _, err := load("", e, nil); err != nil {
+		t.Fatalf("empty removed-key env vars must count as unset: %v", err)
+	}
+}
+
 func TestLoad_CloudflareFlatEnvCoexistsWithFileMaps(t *testing.T) {
 	path := writeFile(t, t.TempDir(), "c.yaml", `
 cloudflare:
