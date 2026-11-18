@@ -190,10 +190,14 @@ func peerErrorHint(agentID string, code ErrorCode) string {
 	return ""
 }
 
-// tokenMismatchHint names the two keys that must hold the same token.
+// tokenMismatchHint explains a rejected agent. The protocol deliberately
+// hides from the agent whether its ID is unknown or its token is wrong, so
+// both causes are named with equal weight. Token values are never included.
 func tokenMismatchHint(agentID string) string {
-	return fmt.Sprintf("tokens do not match: %s on this agent must equal agent.agents.%s.token in the main instance config "+
-		"(or agent.accept_token there if %q is not listed under agent.agents)", config.KeyWithEnv("connect.token"), agentID, agentID)
+	return fmt.Sprintf("main rejected this agent: either agent %q is not configured on the main instance "+
+		"(add agent.agents.%s with this agent's token there, or set %s), "+
+		"or the tokens do not match: %s on this agent must equal agent.agents.%s.token (or agent.accept_token) in the main instance config",
+		agentID, agentID, config.KeyAndEnv("agent.accept_token"), config.KeyWithEnv("connect.token"), agentID)
 }
 
 // mainAuthHint explains, on the main instance, a failed agent authentication.

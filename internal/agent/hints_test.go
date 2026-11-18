@@ -132,8 +132,19 @@ func TestMalformedResponseHintNeedsPlainURL(t *testing.T) {
 }
 
 func TestAgentAuthHint(t *testing.T) {
-	wantAll(t, agentAuthHint("edge1", errAuth),
-		"connect.token (env LABELGATE_CONNECT_TOKEN)", "agent.agents.edge1.token", "agent.accept_token")
+	for _, err := range []error{errAuth, &PeerError{Code: ErrUnauthorized}} {
+		got := agentAuthHint("edge1", err)
+		// Both causes carry equal weight: the agent cannot tell them apart.
+		wantAll(t, got,
+			"main rejected this agent: either",
+			`agent "edge1" is not configured on the main instance`,
+			"add agent.agents.edge1",
+			"agent.accept_token, env LABELGATE_AGENT_ACCEPT_TOKEN",
+			"or the tokens do not match: connect.token (env LABELGATE_CONNECT_TOKEN) on this agent must equal agent.agents.edge1.token")
+		if strings.Contains(got, "if \"edge1\" is not listed") {
+			t.Errorf("the unconfigured-agent case must not be a parenthetical: %q", got)
+		}
+	}
 	wantAll(t, agentAuthHint("edge1", &PeerError{Code: ErrDuplicateAgent}),
 		"already connected", "connect.agent_id (env LABELGATE_CONNECT_AGENT_ID)")
 	wantAll(t, agentAuthHint("edge1", &PeerError{Code: ErrUnsupportedVersion}), "same release")
