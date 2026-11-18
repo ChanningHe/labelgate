@@ -14,6 +14,7 @@ import { collectAttention, describeProblem, type AttentionItem } from '../resour
 import { KIND_IDS, KIND_META } from '../resources/meta';
 import { useResourceIndex } from '../resources/useResourceIndex';
 import { formatRelative, formatVersion } from '../utils/format';
+import { SyncProblems } from './SyncProblems';
 import { syncDisplay, type SyncTone } from './syncStatus';
 import classes from './Overview.module.css';
 
@@ -274,6 +275,7 @@ export function Overview() {
       {data ? (
         <div className={classes.stack}>
           <StatusStrip data={data} agents={agentList?.agents ?? []} />
+          <SyncProblems sync={data.sync} />
           <Tiles data={data} />
           <div className={classes.columns}>
             <AttentionList items={attention} />

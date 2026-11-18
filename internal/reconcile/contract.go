@@ -96,13 +96,29 @@ const (
 	SyncError SyncState = "error"
 )
 
-// SyncStatus is a snapshot of the reconciler state for the API.
+// MaxStatusProblems bounds SyncStatus.Problems; ProblemCount keeps the total.
+const MaxStatusProblems = 200
+
+// Problem is one thing wrong in a cycle. Subject identifies it across
+// cycles; Text is the full message shown to people and may change.
+type Problem struct {
+	Subject string
+	Text    string
+}
+
+// SyncStatus is a snapshot of the reconciler state for the API. It is never
+// mutated after it is published.
 type SyncStatus struct {
 	State    SyncState
 	LastSync time.Time // end of the latest completed cycle; zero while pending
 	// Error summarizes the latest cycle's failures ("" on success): the only
 	// problem, or "3 problems (...); first: <problem>".
 	Error string
+	// Problems lists the latest cycle's problems in report order, at most
+	// MaxStatusProblems of them; nil on success.
+	Problems []Problem
+	// ProblemCount is the number of problems, which may exceed len(Problems).
+	ProblemCount int
 }
 
 // Engine is the exported surface of *Reconciler used by cmd and api.

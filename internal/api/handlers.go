@@ -122,12 +122,22 @@ func countsDTO(byStatus map[model.Status]int) ResourceCountsDTO {
 }
 
 func syncDTO(st reconcile.SyncStatus) OverviewSyncDTO {
-	out := OverviewSyncDTO{LastSync: st.LastSync, Status: string(st.State), Error: st.Error}
+	out := OverviewSyncDTO{LastSync: st.LastSync, Status: string(st.State), Error: st.Error, Problems: []SyncProblemDTO{}}
 	switch st.State {
 	case reconcile.SyncPending:
 		out.Error = waitingForFirstSync
 	case reconcile.SyncSuccess:
 		out.Error = ""
+	case reconcile.SyncError:
+		out.Problems, out.ProblemsTotal = problemDTOs(st.Problems), st.ProblemCount
+	}
+	return out
+}
+
+func problemDTOs(ps []reconcile.Problem) []SyncProblemDTO {
+	out := make([]SyncProblemDTO, 0, len(ps))
+	for _, p := range ps {
+		out = append(out, SyncProblemDTO{Subject: p.Subject, Text: p.Text})
 	}
 	return out
 }

@@ -92,6 +92,12 @@ export interface ResourceCounts {
   error: number;
 }
 
+// One problem of the latest sync: what it concerns and its full message.
+export interface SyncProblem {
+  subject: string;
+  text: string;
+}
+
 export interface OverviewData {
   resources: {
     dns: ResourceCounts;
@@ -107,6 +113,10 @@ export interface OverviewData {
     last_sync: string;
     status: 'pending' | 'success' | 'error';
     error: string;
+    // Every problem of the latest cycle, bounded by the server (200);
+    // problems_total counts all of them. Absent from older servers.
+    problems?: SyncProblem[];
+    problems_total?: number;
   };
   cloudflare: {
     reachable: boolean;

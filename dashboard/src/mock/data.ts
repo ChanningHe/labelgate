@@ -83,7 +83,7 @@ export const MOCK: MockData = {
       connected: agents.filter((a) => a.connected).length,
       disconnected: agents.filter((a) => !a.connected).length,
     },
-    sync: { last_sync: minutesAgo(0.1), status: 'success', error: '' },
+    sync: { last_sync: minutesAgo(0.1), status: 'success', error: '', problems: [], problems_total: 0 },
     cloudflare: { reachable: true, last_check: minutesAgo(0.3) },
     version: 'dev',
     uptime: '3d 4h 12m',
