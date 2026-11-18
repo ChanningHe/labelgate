@@ -1,102 +1,129 @@
 ---
-title: Tunnel Labels
-description: Labelgate Tunnel 标签属性的完整参考。
+title: Tunnel 标签
+description: 用标签通过 Cloudflare Tunnel 发布容器服务。
 ---
 
-## Format
+两个标签就能通过 tunnel 发布一个服务：
 
+```yaml
+services:
+  web:
+    image: nginx:alpine
+    labels:
+      labelgate.tunnel.web.hostname: "app.example.com"
+      labelgate.tunnel.web.service: "http://web:80"
 ```
-labelgate.tunnel.<service_name>.<property>=<value>
-```
 
-非法的值和未知的属性都会报错，参见[严格校验](/zh/docs/labels#strict-validation)。
+Labelgate 会在 tunnel 上添加一条路由 `app.example.com → http://web:80`，并创建一条把 `app.example.com` 指向该 tunnel 的 DNS 记录。
 
-## Properties
+使用前请确认：
 
-| 属性 | 必填 | 默认值 | 说明 |
-|------|------|--------|------|
-| `hostname` | 是 | - | 服务的公开主机名（会规范化为小写） |
-| `service` | 是 | - | 后端服务地址：`protocol://host:port`（参见[服务协议](#service-protocols)） |
-| `tunnel` | 否 | 默认 tunnel | Tunnel 名称（`cloudflare.tunnels` 的键）或 Tunnel ID。为空表示 `default_tunnel` / 根 tunnel。未知的 tunnel 会报错 |
-| `path` | 否 | - | 要匹配的路径正则（例如 `\.(jpg\|png)$`）。必须能编译为 Go（RE2）正则表达式，否则该服务会被丢弃，错误为 `invalid path regex` |
-| `credential` | 否 | 自动 | 用于 tunnel 的 CNAME 记录和 Access 的凭据。为空表示先按 zone 匹配，再用根凭据 |
-| `cleanup` | 否 | `true` | 容器消失且超过 `sync.remove_delay` 后，移除 ingress 规则（及其 CNAME）。只会移除自己拥有的规则 |
-| `access` | 否 | - | 要应用的 [Access 策略定义](/zh/docs/labels/access)名称（小写字母、数字和连字符） |
+- 已配置 tunnel：`cloudflare.tunnel_id`（`LABELGATE_CLOUDFLARE_TUNNEL_ID`）以及 `cloudflare.account_id`。
+- 该 tunnel 的 `cloudflared` 正在运行，参见 [cloudflared 配置](/zh/docs/examples/cloudflared)。
+- `cloudflared` 能访问 `service` 地址。连接服务的是 cloudflared，不是 Labelgate。对 `http://web:80` 来说，要把 `web` 和 cloudflared 放在同一个 Docker 网络里。
 
-## Service Protocols
+## 标签 [#properties]
 
-`service` 的协议必须是以下之一（协议名不区分大小写）。`http`、`https`、`ssh`、`rdp`、`tcp`、`udp` 需要带主机（`scheme://host[:port]`），端口不会被 Labelgate 检查；`unix:` 和 `unix+tls:` 需要 socket 路径；`http_status:` 需要 100 到 599 的状态码。其他协议会以 `unsupported service scheme` 被拒绝。
+标签格式都是 `labelgate.tunnel.<name>.<property>`。`<name>` 由你自己定，参见[名字部分](/zh/docs/labels#service-names)。
 
-| 协议 | 格式 | 说明 |
+| 属性 | 必填 | 默认值 | 示例 | 含义 |
+|------|------|--------|------|------|
+| `hostname` | 是 | - | `app.example.com` | 公开访问的主机名。 |
+| `service` | 是 | - | `http://web:80` | cloudflared 把流量转发到哪里。参见[服务格式](#service-protocols)。 |
+| `path` | 否 | - | `^/api/` | 只匹配路径符合该正则表达式的请求。 |
+| `tunnel` | 否 | 默认 tunnel | `secondary` | `cloudflare.tunnels` 中的名字，或 tunnel ID。默认用 `default_tunnel`，未设置时用 `cloudflare.tunnel_id`。 |
+| `cleanup` | 否 | `true` | `false` | 容器删除后是否删除路由及其 DNS 记录。`false` 表示保留。 |
+| `credential` | 否 | 自动 | `company` | 主机名的 DNS 记录和 Access 应用使用哪个 [API token](/zh/docs/configuration/reference#multi-credential-setup)。 |
+| `access` | 否 | - | `team` | 在主机名前加一道 [Access 策略](/zh/docs/labels/access)。 |
+| `origin.<setting>` | 否 | - | `origin.no_tls_verify: "true"` | 调整到服务的连接。参见[源站设置](#origin-request-configuration)。 |
+
+## 服务格式 [#service-protocols]
+
+| `service` | 用途 |
+|-----------|------|
+| `http://host:port`、`https://host:port` | Web 应用 |
+| `ssh://host:port`、`rdp://host:port` | SSH、远程桌面 |
+| `tcp://host:port`、`udp://host:port` | 其他 TCP 或 UDP 服务 |
+| `unix:/path/to.sock`、`unix+tls:/path/to.sock` | cloudflared 所在主机上的 Unix socket |
+| `http_status:404` | 固定返回某个 HTTP 状态码（100-599） |
+| `hello_world` | Cloudflare 的测试页面 |
+| `bastion` | Cloudflare bastion 模式 |
+
+## 源站设置 [#origin-request-configuration]
+
+写法是 `labelgate.tunnel.<name>.origin.<setting>`。不写某项就使用 cloudflared 的默认值。
+
+| 设置 | 示例 | 含义 |
 |------|------|------|
-| HTTP | `http://host:port` | HTTP 服务 |
-| HTTPS | `https://host:port` | HTTPS 服务 |
-| SSH | `ssh://host:port` | SSH 访问 |
-| RDP | `rdp://host:port` | 远程桌面 |
-| TCP | `tcp://host:port` | 原始 TCP |
-| UDP | `udp://host:port` | UDP（需要 WARP） |
-| Unix | `unix:/path/to/socket` | Unix socket |
-| Unix + TLS | `unix+tls:/path/to/socket` | 带 TLS 的 Unix socket |
-| Hello World | `hello_world` | 测试端点 |
-| HTTP Status | `http_status:404` | 返回固定状态码 |
-| Bastion | `bastion` | 浏览器渲染的堡垒机 |
+| `connect_timeout` | `30s` | 连接服务的超时时间。 |
+| `tls_timeout` | `10s` | 与服务 TLS 握手的超时时间。 |
+| `tcp_keepalive` | `30s` | TCP keep-alive 间隔。 |
+| `keep_alive_connections` | `100` | 最多保留的空闲连接数。 |
+| `keep_alive_timeout` | `90s` | 空闲连接保留多久。 |
+| `no_tls_verify` | `true` | 接受服务的任何证书（如自签名证书）。 |
+| `origin_server_name` | `app.internal` | 服务证书上应有的主机名。 |
+| `ca_pool` | `/certs/ca.pem` | cloudflared 校验服务证书用的 CA 文件。 |
+| `http_host_header` | `app.internal` | 发给服务的 `Host` 头。 |
+| `no_happy_eyeballs` | `true` | 关闭 Happy Eyeballs（IPv4/IPv6 回退）。 |
+| `disable_chunked_encoding` | `true` | 关闭分块传输编码。 |
+| `proxy_type` | `socks` | `socks`，或留空表示不用代理。 |
 
-<Callout type="info">
-对于每个 tunnel 主机名，Labelgate 会创建一条指向 `<tunnel-id>.cfargotunnel.com` 的 CNAME 记录，并像其他 DNS 记录一样标记为自己拥有。不要再为同一个主机名另外添加 DNS 服务，那会造成[冲突](/zh/docs/labels#dns-and-tunnel-on-the-same-hostname)。
-</Callout>
+时间必须是整秒：`30s`、`2m`，或直接写 `30`。
 
-<Callout type="warn">
-由 [agent](/zh/docs/examples/multi-host#ssrf-guard) 上报的服务会经过 SSRF 防护检查：`localhost` 与 `*.localhost`、回环 IP、链路本地 IP、未指定 IP、组播 IP、`unix:` / `unix+tls:` socket 以及 `bastion` 都会被拒绝，并且 tunnel 必须在该 agent 的允许列表中。
-</Callout>
+## 常用示例 [#examples]
 
-## Ingress 规则的所有权
-
-Labelgate 只管理自己创建的 ingress 规则，规则以（tunnel、hostname、path）标识。你手工创建的规则、catch-all 规则、全局 `originRequest` 和 `warp-routing` 设置都会原样保留。如果你给一个已有手工规则的主机名加了标签，该服务会报 `conflict: existing record not owned by labelgate`，手工规则保持不动。参见[所有权与冲突](/zh/docs/ownership#coexisting-with-manually-managed-tunnel-ingress)。
-
-## Origin Request Configuration
-
-微调 cloudflared 和你的源服务之间的连接。时长类的值既可以写 `30s` 这样的形式，也可以直接写秒数（`30`），并且必须是非负的整数秒（`1500ms` 会报错）。`keep_alive_connections` 是 0 到 1048576 的整数，布尔值的写法与 DNS 的 `proxied` 标签相同，未知的设置项（`origin.foo`）会被报告为未知属性。未设置或为空的设置项会从规则中移除；Labelgate 没有建模的设置项则会被保留。
-
-### Connection Settings
+### 一个容器多条路由
 
 ```yaml
 labels:
-  labelgate.tunnel.web.origin.connect_timeout: "30s"
-  labelgate.tunnel.web.origin.tls_timeout: "10s"
-  labelgate.tunnel.web.origin.tcp_keepalive: "30s"
-  labelgate.tunnel.web.origin.keep_alive_connections: "100"
-  labelgate.tunnel.web.origin.keep_alive_timeout: "90s"
+  labelgate.tunnel.web.hostname: "www.example.com"
+  labelgate.tunnel.web.service: "http://app:80"
+  labelgate.tunnel.api.hostname: "api.example.com"
+  labelgate.tunnel.api.service: "http://app:3000"
 ```
 
-### TLS Settings
+### 同一主机名按路径分流
 
 ```yaml
 labels:
-  labelgate.tunnel.web.origin.no_tls_verify: "false"
-  labelgate.tunnel.web.origin.origin_server_name: ""
-  labelgate.tunnel.web.origin.ca_pool: ""
+  labelgate.tunnel.api.hostname: "example.com"
+  labelgate.tunnel.api.service: "http://api:3000"
+  labelgate.tunnel.api.path: "^/api/"
+  labelgate.tunnel.site.hostname: "example.com"
+  labelgate.tunnel.site.service: "http://site:80"
 ```
 
-### HTTP Settings
+`/api/...` 的请求转发到 `api`，其余请求转发到 `site`。
+
+### 使用自签名证书的 HTTPS 服务
 
 ```yaml
 labels:
-  labelgate.tunnel.web.origin.http_host_header: ""
-  labelgate.tunnel.web.origin.no_happy_eyeballs: "false"
-  labelgate.tunnel.web.origin.disable_chunked_encoding: "false"
+  labelgate.tunnel.nas.hostname: "nas.example.com"
+  labelgate.tunnel.nas.service: "https://nas:5001"
+  labelgate.tunnel.nas.origin.no_tls_verify: "true"
 ```
 
-### Proxy Settings
+### SSH
 
 ```yaml
 labels:
-  # Empty string or "socks"
-  labelgate.tunnel.web.origin.proxy_type: ""
+  labelgate.tunnel.ssh.hostname: "ssh.example.com"
+  labelgate.tunnel.ssh.service: "ssh://dev-server:22"
 ```
 
-## 容器级默认值 [#per-container-defaults]
+### 使用另一个 tunnel
 
-`labelgate.tunnel.default.<property>` 可以为该容器的所有 tunnel 服务设置 `tunnel`、`credential` 和 `cleanup` 的默认值（`default` 块中的其他属性会被报告为未知属性）：
+```yaml
+labels:
+  labelgate.tunnel.app.hostname: "internal.example.com"
+  labelgate.tunnel.app.service: "http://internal:8080"
+  labelgate.tunnel.app.tunnel: "secondary"   # cloudflare.tunnels 中的名字
+```
+
+### 容器级默认值 [#per-container-defaults]
+
+`labelgate.tunnel.default.<property>` 为同一容器里的所有 tunnel 名字设置默认值。可用的属性：`tunnel`、`credential`、`cleanup`。
 
 ```yaml
 labels:
@@ -107,70 +134,8 @@ labels:
   labelgate.tunnel.api.service: "http://app:3000"
 ```
 
-## Examples
+## 注意事项
 
-### Basic web service
-
-```yaml
-services:
-  webapp:
-    image: nginx:alpine
-    labels:
-      labelgate.tunnel.web.hostname: "app.example.com"
-      labelgate.tunnel.web.service: "http://webapp:80"
-```
-
-### Multiple services on one container
-
-```yaml
-services:
-  app:
-    image: myapp:1.0
-    labels:
-      labelgate.tunnel.web.hostname: "www.example.com"
-      labelgate.tunnel.web.service: "http://app:80"
-
-      labelgate.tunnel.api.hostname: "api.example.com"
-      labelgate.tunnel.api.service: "http://app:3000"
-```
-
-### SSH access through tunnel
-
-```yaml
-services:
-  dev-server:
-    image: ubuntu:latest
-    labels:
-      labelgate.tunnel.ssh.hostname: "ssh.example.com"
-      labelgate.tunnel.ssh.service: "ssh://dev-server:22"
-```
-
-### Using a specific tunnel
-
-```yaml
-services:
-  internal:
-    image: internal-app:latest
-    labels:
-      labelgate.tunnel.app.hostname: "internal.company.io"
-      labelgate.tunnel.app.service: "http://internal:8080"
-      labelgate.tunnel.app.tunnel: "secondary"
-      labelgate.tunnel.app.credential: "company"
-```
-
-### Path-based routing
-
-基于路径的规则是一等公民：规则的标识是（tunnel、hostname、path），因此多个服务可以用不同的 path 共用同一个主机名。同一主机名下，更具体的 path 会写在不太具体的前面。
-
-```yaml
-services:
-  static:
-    image: nginx:alpine
-    labels:
-      labelgate.tunnel.static.hostname: "example.com"
-      labelgate.tunnel.static.service: "http://static:80"
-      labelgate.tunnel.static.path: "\\.(jpg|png|css|js)$"
-      labelgate.tunnel.api.hostname: "example.com"
-      labelgate.tunnel.api.service: "http://api:3000"
-      labelgate.tunnel.api.path: "^/api/"
-```
+- 不要为 tunnel 主机名再加 [DNS 标签](/zh/docs/labels/dns)。Tunnel 会自己创建 DNS 记录，再加一条就是[冲突](/zh/docs/labels#dns-and-tunnel-on-the-same-hostname)。
+- 你在 Cloudflare 上手动添加的路由会被保留。如果已有路由用了相同的主机名和路径，你的标签会报 `conflict: existing record not owned by labelgate`。参见[所有权与冲突](/zh/docs/ownership)。
+- 出于安全考虑，[agent](/zh/docs/examples/multi-host) 上的容器有限制：`service` 只能是 `http`、`https`、`tcp`、`ssh` 或 `rdp`（以及 `hello_world`、`http_status:`）；主机部分必须是公网或内网 IP 地址，或者已在 main 实例上该 agent 的 `services` 列表中放行。回环地址、Unix socket、`udp` 和 `bastion` 一律拒绝。

@@ -1,318 +1,224 @@
 ---
 title: 配置参考
-description: Labelgate 所有配置项、默认值与已移除配置项的完整参考。
+description: Labelgate 的所有设置、对应的环境变量和默认值。
 ---
 
-## 命名规则
+每张表列出配置文件中的键、对应的环境变量、默认值和作用。设置方式见[配置](/zh/docs/configuration)。
 
-配置文件中的每个键都直接对应一个环境变量：
+- 时长要带单位：`30s`、`5m`、`24h`。零请写 `0s`。
+- 环境变量中的列表用逗号分隔：`a.example.com,b.example.com`。
+- 带 `<name>` 或 `<id>` 的键属于映射部分，只能写在配置文件里。
 
-- 将点号（`.`）替换为下划线（`_`）
-- 全部转为大写
-- 添加 `LABELGATE_` 前缀
-- 列表使用逗号分隔（`a.example.com,b.example.com`）
+## 基础设置 [#basic-settings]
 
-| 配置文件 | 环境变量 |
-|----------|----------|
-| `log_level` | `LABELGATE_LOG_LEVEL` |
-| `docker.endpoint` | `LABELGATE_DOCKER_ENDPOINT` |
-| `sync.remove_delay` | `LABELGATE_SYNC_REMOVE_DELAY` |
-| `api.base_path` | `LABELGATE_API_BASE_PATH` |
+| 键 | 环境变量 | 默认值 | 作用 |
+|----|----------|--------|------|
+| `mode` | `LABELGATE_MODE` | `main` | `main`，远程 Docker 主机上用 `agent`。 |
+| `log_level` | `LABELGATE_LOG_LEVEL` | `info` | `debug`、`info`、`warn` 或 `error`。 |
+| `log_format` | `LABELGATE_LOG_FORMAT` | `text` | `text` 或 `json`。 |
+| `label_prefix` | `LABELGATE_LABEL_PREFIX` | `labelgate` | 所有标签键的第一段。可用小写字母、数字、`.`、`_`、`-`。 |
+| `default_tunnel` | `LABELGATE_DEFAULT_TUNNEL` | - | 标签没写 `tunnel` 时使用的 tunnel。留空表示 `cloudflare.tunnel_id`，否则填 `cloudflare.tunnels` 中的名字。 |
+| `instance_id` | `LABELGATE_INSTANCE_ID` | - | 仅在数据库丢失后恢复时使用。4-32 位小写字母和数字。参见[所有权](/zh/docs/ownership)。 |
+| `skip_credential_validation` | `LABELGATE_SKIP_CREDENTIAL_VALIDATION` | `false` | 启动时不校验 Cloudflare token，也不要求必须配置 token。 |
+| - | `LABELGATE_CONFIG` | - | 配置文件路径。 |
 
-优先级：**环境变量 > 配置文件 > 默认值**。map 类型的配置段（`cloudflare.credentials`、`cloudflare.tunnels`、`agent.agents`）只能写在配置文件中。已设置但为空的环境变量会被忽略（不会把配置文件里的值清空）。map 的键不区分大小写，并会被转为小写。配置文件不是模板：不会展开 `${VAR}`，所以请通过环境变量传入密钥（适用于标量配置项），或者直接写进文件。
+## Cloudflare [#cloudflare-credentials]
 
-**时长**必须是带单位的字符串：`30s`、`5m`、`24h`。任何地方写裸数字都会报错：`sync.interval: 30` 和 `LABELGATE_SYNC_INTERVAL=30` 会以 `invalid duration` 失败（YAML 里的 `orphan_ttl: 0` 会以 `duration must be a string` 失败）。表示零请写 `0s`。
+| 键 | 环境变量 | 默认值 | 作用 |
+|----|----------|--------|------|
+| `cloudflare.api_token` | `LABELGATE_CLOUDFLARE_API_TOKEN` | - | **必填**，除非使用 `cloudflare.credentials`。主 API token。 |
+| `cloudflare.account_id` | `LABELGATE_CLOUDFLARE_ACCOUNT_ID` | - | tunnel 所属账户。设置了 `tunnel_id` 时**必填**。 |
+| `cloudflare.tunnel_id` | `LABELGATE_CLOUDFLARE_TUNNEL_ID` | - | tunnel 标签使用的默认 tunnel。使用 `cloudflare.api_token` 管理。 |
+| `cloudflare.credentials.<name>.api_token` | 仅配置文件 | - | **必填。** 额外的 API token。 |
+| `cloudflare.credentials.<name>.zones` | 仅配置文件 | 所有 zone | 该 token 用于哪些 zone，如 `example.com`。 |
+| `cloudflare.tunnels.<name>.account_id` | 仅配置文件 | - | **必填。** 额外 tunnel 所属账户。 |
+| `cloudflare.tunnels.<name>.tunnel_id` | 仅配置文件 | - | **必填。** 额外 tunnel 的 ID。 |
+| `cloudflare.tunnels.<name>.credential` | 仅配置文件 | `cloudflare.api_token` | 用 `credentials` 中的哪个名字管理这个 tunnel。 |
 
-**校验范围取决于运行模式。** `mode: main` 时，Labelgate 校验 Cloudflare、同步、数据库、API 和 agent 服务端的设置。`mode: agent` 时只校验日志、`docker`、`retry` 和 `connect` 的设置，其余部分被忽略。键本身在两种模式下都必须合法：未知的键始终是错误。
+`credentials` 和 `tunnels` 下的名字只能用小写字母、数字、`-` 和 `_`。`default` 是保留名。
 
-<Callout type="warn">
-配置解析是严格的：**未知的键会导致启动失败**，非法的值同样如此（例如未知的 `mode`、`log_level`、`log_format`，或值为 0 的 `docker.poll_interval`）。Labelgate 不会对你显式设置的值静默回退到默认值。
-</Callout>
+tunnel 的连接器 token（`TUNNEL_TOKEN`）不是 Labelgate 的设置，它属于 cloudflared，参见 [cloudflared 配置](/zh/docs/examples/cloudflared)。
 
-## 基础设置
+### 多个 API token [#multi-credential-setup]
 
-| 环境变量 | 配置文件路径 | 默认值 | 说明 |
-|----------|--------------|--------|------|
-| `LABELGATE_LABEL_PREFIX` | `label_prefix` | `labelgate` | 容器标签前缀（`^[a-z0-9][a-z0-9._-]*$`） |
-| `LABELGATE_LOG_LEVEL` | `log_level` | `info` | `debug`、`info`、`warn`、`error` |
-| `LABELGATE_LOG_FORMAT` | `log_format` | `text` | `text` 或 `json` |
-| `LABELGATE_MODE` | `mode` | `main` | 运行模式：`main` 或 `agent` |
-| `LABELGATE_INSTANCE_ID` | `instance_id` | - | 覆盖持久化的[实例 ID](/zh/docs/ownership#instance-id)，仅用于数据库丢失后的恢复。4-32 位 `[a-z0-9]` |
-| `LABELGATE_DEFAULT_TUNNEL` | `default_tunnel` | - | 标签省略 `tunnel` 时使用的 tunnel。为空或 `default` 表示根 tunnel（`cloudflare.tunnel_id`），否则为 `cloudflare.tunnels` 中的键 |
-| `LABELGATE_SKIP_CREDENTIAL_VALIDATION` | `skip_credential_validation` | `false` | 跳过启动时的 Cloudflare 凭据校验，以及“至少需要一个凭据”的检查 |
-| `LABELGATE_CONFIG` | - | - | 配置文件路径（参见[配置概览](/zh/docs/configuration)） |
+当你的 zone 分属不同 Cloudflare 账户，或需要使用不同 token 时使用。
 
-## Docker 提供者
+```yaml
+cloudflare:
+  api_token: main-token
+  credentials:
+    company:
+      api_token: company-token
+      zones: [company.io]
+  tunnels:
+    secondary:
+      account_id: company-account-id
+      tunnel_id: company-tunnel-id
+      credential: company
+```
 
-| 环境变量 | 配置文件路径 | 默认值 | 说明 |
-|----------|--------------|--------|------|
-| `LABELGATE_DOCKER_ENDPOINT` | `docker.endpoint` | `unix:///var/run/docker.sock` | Docker 守护进程地址，仅支持 `unix://` 和 `tcp://` |
-| `LABELGATE_DOCKER_POLL_INTERVAL` | `docker.poll_interval` | `2m` | 兜底轮询间隔（必须大于 0） |
-| `LABELGATE_DOCKER_FILTER_LABEL` | `docker.filter_label` | - | 只监控带有此标签的容器（`key` 或 `key=value`） |
-| `LABELGATE_DOCKER_TLS_CA` | `docker.tls.ca` | - | 校验守护进程证书的 CA（用于 `tcp://`） |
-| `LABELGATE_DOCKER_TLS_CERT` | `docker.tls.cert` | - | TLS 客户端证书（必须与 `key` 同时设置） |
-| `LABELGATE_DOCKER_TLS_KEY` | `docker.tls.key` | - | TLS 客户端密钥 |
-| `LABELGATE_DOCKER_TLS_INSECURE_SKIP_VERIFY` | `docker.tls.insecure_skip_verify` | `false` | 跳过对守护进程证书的校验。**不推荐**，启动时会输出警告 |
+Labelgate 为主机名选择 token 的方式：
 
-`tcp://` 地址只有在设置了至少一个 `docker.tls.*` 键时才会使用 TLS，否则就是明文、无认证的 TCP 连接。
+1. 优先使用 `credential` 标签。`credential: default` 表示 `cloudflare.api_token`。
+2. 否则选能看到该主机名所在 zone 的 token。有多个时，zone 名最长的胜出；长度相同时 `cloudflare.api_token` 胜出。
+3. 没有合适的 token 时，标签会显示错误。
 
-只考虑正在运行的容器。设置了 `docker.filter_label` 时，不带该标签（或该值）的容器会被完全忽略。
+在 `zones` 中，`example.com` 表示这个 zone 本身。`*.example.com` 匹配它下面的 zone（如 `dev.example.com`），但不包括 `example.com`。
 
-## Cloudflare 凭据
+`tunnel` 标签必须引用已配置的 tunnel（名字或 ID）。未知的 tunnel 会报错。
 
-| 环境变量 | 配置文件路径 | 默认值 | 说明 |
-|----------|--------------|--------|------|
-| `LABELGATE_CLOUDFLARE_API_TOKEN` | `cloudflare.api_token` | - | 根（“default”）API Token **（main 模式必填）** |
-| `LABELGATE_CLOUDFLARE_ACCOUNT_ID` | `cloudflare.account_id` | - | 根 tunnel 所属账户 |
-| `LABELGATE_CLOUDFLARE_TUNNEL_ID` | `cloudflare.tunnel_id` | - | 根（“default”）Tunnel ID，需要同时设置 `account_id` |
-| - | `cloudflare.credentials.<name>.api_token` | - | 额外的命名凭据（仅配置文件） |
-| - | `cloudflare.credentials.<name>.zones` | - | 此凭据适用的 zone 匹配模式（为空表示该 token 能列出的所有 zone） |
-| - | `cloudflare.tunnels.<name>.account_id` | - | 额外的命名 tunnel：账户（仅配置文件） |
-| - | `cloudflare.tunnels.<name>.tunnel_id` | - | 额外的命名 tunnel：Tunnel ID |
-| - | `cloudflare.tunnels.<name>.credential` | 根凭据 | 管理此 tunnel 所用的命名凭据 |
+## 同步与清理 [#sync]
 
-凭据名和 tunnel 名只能包含小写字母、数字、`-` 和 `_`。`default` 是根凭据/根 tunnel 的保留名。
+| 键 | 环境变量 | 默认值 | 作用 |
+|----|----------|--------|------|
+| `sync.interval` | `LABELGATE_SYNC_INTERVAL` | `5m` | 在 Docker 事件之外，定期与 Cloudflare 完整核对一次。最小 `10s`。 |
+| `sync.remove_delay` | `LABELGATE_SYNC_REMOVE_DELAY` | `30m` | 容器消失后等待多久再删除它的资源（`cleanup: true`）。`0s` 表示立即删除。 |
+| `sync.orphan_ttl` | `LABELGATE_SYNC_ORPHAN_TTL` | `0s` | 被保留的资源（`cleanup: false`）多久后被遗忘。只删除数据库条目，从不删除 Cloudflare 上的对象。`0s` 表示永不。 |
+| `sync.agent_grace` | `LABELGATE_SYNC_AGENT_GRACE` | `24h` | 离线 agent 的资源保留多久。最小 `5m`。 |
 
-<Callout type="info">
-cloudflared 用来建立隧道连接的 `TUNNEL_TOKEN` **不是** Labelgate 的配置项，它直接配置在 cloudflared 服务上。详见 [cloudflared 部署](/zh/docs/examples/cloudflared)。
-</Callout>
+Labelgate 只会删除自己创建的资源，参见[所有权与冲突](/zh/docs/ownership)。
 
-## 同步与生命周期
+## Docker [#docker-provider]
 
-Labelgate 只会删除**它自己拥有**的 Cloudflare 资源（参见[所有权与冲突](/zh/docs/ownership)）。`cleanup` 标签**默认为 `true`**：容器停止（或标签被移除）后，它拥有的资源会变为“孤立”状态，并在 `sync.remove_delay` 之后被删除。如果想保留资源，在服务上设置 `cleanup: "false"`；这些资源会被标记为 `orphaned`，但不会被删除。
+| 键 | 环境变量 | 默认值 | 作用 |
+|----|----------|--------|------|
+| `docker.endpoint` | `LABELGATE_DOCKER_ENDPOINT` | `unix:///var/run/docker.sock` | Docker daemon 地址：`unix:///path` 或 `tcp://host:port`。 |
+| `docker.poll_interval` | `LABELGATE_DOCKER_POLL_INTERVAL` | `2m` | 在 Docker 事件之外，每隔多久重新列出所有容器。必须大于 `0s`。 |
+| `docker.filter_label` | `LABELGATE_DOCKER_FILTER_LABEL` | - | 只读取带有该标签的容器：`key` 或 `key=value`。 |
+| `docker.tls.ca` | `LABELGATE_DOCKER_TLS_CA` | - | 校验 `tcp://` daemon 证书用的 CA 文件。 |
+| `docker.tls.cert` | `LABELGATE_DOCKER_TLS_CERT` | - | 客户端证书。需与 `key` 同时设置。 |
+| `docker.tls.key` | `LABELGATE_DOCKER_TLS_KEY` | - | 客户端私钥。 |
+| `docker.tls.insecure_skip_verify` | `LABELGATE_DOCKER_TLS_INSECURE_SKIP_VERIFY` | `false` | 不校验 daemon 的证书。仅用于测试。 |
 
-| 环境变量 | 配置文件路径 | 默认值 | 说明 |
-|----------|--------------|--------|------|
-| `LABELGATE_SYNC_INTERVAL` | `sync.interval` | `5m` | 周期性完整协调（与 Docker 事件、agent 上报并行触发），最小 `10s` |
-| `LABELGATE_SYNC_REMOVE_DELAY` | `sync.remove_delay` | `30m` | `cleanup=true` 的孤立资源被删除前的延迟。`0s` 表示资源变为孤立的那个周期就立即删除。必须 >= 0 |
-| `LABELGATE_SYNC_ORPHAN_TTL` | `sync.orphan_ttl` | `0` | `cleanup=false` 的孤立资源，超过此时间后仅删除数据库记录（绝不动 Cloudflare 对象）。`0s` 表示永不。必须 >= 0 |
-| `LABELGATE_SYNC_AGENT_GRACE` | `sync.agent_grace` | `24h` | agent 最后一次被看到之后，其最近上报的容器继续保持“期望”状态的时长。必须 >= `5m`；处于连接状态的 agent 始终视为在线。参见[多主机](/zh/docs/examples/multi-host#agent-grace) |
+`tcp://` 地址只有在设置了任一 `docker.tls.*` 时才使用 TLS，否则是明文、无认证的连接。
 
-<Callout type="warn">
-`remove_delay` 为 `0` 表示“资源一旦不再被期望就立即删除”。不要照搬旧版示例文件里的 `0s`，除非有明确理由，否则请保持 `30m` 的默认值。
-</Callout>
+## 数据库 [#database]
 
-## 数据库
+| 键 | 环境变量 | 默认值 | 作用 |
+|----|----------|--------|------|
+| `db.path` | `LABELGATE_DB_PATH` | `/app/config/labelgate.db` | SQLite 文件。把 `/app/config` 放在 volume 上并做好备份。 |
 
-| 环境变量 | 配置文件路径 | 默认值 | 说明 |
-|----------|--------------|--------|------|
-| `LABELGATE_DB_PATH` | `db.path` | `/app/config/labelgate.db` | SQLite 数据库路径 |
+## API 与 Dashboard [#api-server--dashboard]
 
-数据库保存实例 ID、所有权记录和 agent 状态。请做好备份，并把 `/app/config` 挂载到持久卷。
+| 键 | 环境变量 | 默认值 | 作用 |
+|----|----------|--------|------|
+| `api.enabled` | `LABELGATE_API_ENABLED` | `true` | 提供 API 和 Dashboard。 |
+| `api.address` | `LABELGATE_API_ADDRESS` | `:8080` | 监听地址。 |
+| `api.base_path` | `LABELGATE_API_BASE_PATH` | `/api` | API 路径。以 `/` 开头，不能以 `/` 结尾，不能是 `/dashboard`。 |
+| `api.token` | `LABELGATE_API_TOKEN` | - | 使用 API 和 Dashboard 时**必填**。至少 16 个字符。留空则两者都关闭。 |
 
-## API 服务与 Dashboard
+用 `openssl rand -hex 32` 生成 token。Dashboard 地址是 `/dashboard/`。不要把端口直接暴露到公网，请放在 VPN、带 TLS 的反向代理或 Cloudflare Access 后面。
 
-| 环境变量 | 配置文件路径 | 默认值 | 说明 |
-|----------|--------------|--------|------|
-| `LABELGATE_API_ENABLED` | `api.enabled` | `true` | 启用 HTTP API 和 dashboard |
-| `LABELGATE_API_ADDRESS` | `api.address` | `:8080` | 监听地址（`[host]:port`）。仅在启用 API 时校验 |
-| `LABELGATE_API_BASE_PATH` | `api.base_path` | `/api` | API 基础路径。必须以 `/` 开头、不能以 `/` 结尾、不能包含空白字符、`?` 或 `#`，且不能是 `/dashboard` 或其子路径。Dashboard 会自动跟随该值 |
-| `LABELGATE_API_TOKEN` | `api.token` | - | Bearer Token，至少 16 个字符。**必填**：为空时 API **和** dashboard 都会被禁用 |
+### 接口 [#endpoints]
 
-<Callout type="warn">
-**`api.token` 是必填项。** 没有它时，Labelgate 会输出醒目的错误日志、继续执行同步，但**既不提供 API 也不提供 dashboard**。不存在“无认证模式”。长度至少 16 个字符；请使用足够长的随机值（`openssl rand -hex 32`），并优先通过 `LABELGATE_API_TOKEN` 传入。
-</Callout>
+除 `/health` 外，所有接口都需要请求头 `Authorization: Bearer <api.token>`。下面的路径使用默认的 `/api`。
 
-除 `GET {base_path}/health` 外，所有接口都需要 `Authorization: Bearer <token>`（缺少或错误的 token 会得到 `401` 和 `{"error":"unauthorized"}`，对 base path 下的未知路径也是如此）。只接受 `GET` 和 `HEAD`，其他方法返回 `405`。`/` 和 `/dashboard` 会重定向到 `/dashboard/`。Dashboard 位于 `/dashboard/`。服务端会在 dashboard 的 `index.html` 中注入一个携带当前 `api.base_path` 的 `<meta name="labelgate-api-base">` 标签，因此 dashboard 会自动采用自定义的基础路径，无需任何构建期或客户端配置。即使设置了 token，也不要把端口直接暴露到公网；请放在 VPN、带 TLS 的反向代理或 Cloudflare Access 之后。
-
-### 接口列表
-
-| 接口 | 说明 |
+| 接口 | 返回 |
 |------|------|
-| `GET {base}/health` | 存活检查，无需认证，返回 `{"status":"ok"}` |
-| `GET {base}/overview` | 资源计数、同步状态、agent 概况 |
-| `GET {base}/resources/dns` | DNS 记录 |
-| `GET {base}/resources/tunnels` | Tunnel ingress 规则 |
-| `GET {base}/resources/access` | Access 应用 |
-| `GET {base}/agents` | Agent 列表（`active`、宽限期内的 `disconnected`、`removed`） |
-| `GET {base}/version` | 版本信息 |
+| `GET /api/health` | `{"status":"ok"}`。无需 token。 |
+| `GET /api/overview` | 资源数量、同步状态和 agent 概况。 |
+| `GET /api/resources/dns` | DNS 记录。 |
+| `GET /api/resources/tunnels` | Tunnel 路由。 |
+| `GET /api/resources/access` | Access 应用。 |
+| `GET /api/agents` | Agent 列表。 |
+| `GET /api/version` | 版本信息。 |
 
-资源列表支持 `status`、`agent_id`、`hostname`、`limit`（默认 `500`，最大 `1000`）和 `offset` 参数。`total` 是过滤后的真实总数。参数非法时返回 `400`。被拒绝的[冲突声明](/zh/docs/ownership#conflicts-between-claims)会以 `error` 状态出现在资源列表中，冲突原因在 `last_error` 里。
+资源列表支持 `status`、`agent_id`、`hostname`、`limit`（默认 `500`，最大 `1000`）和 `offset` 参数。
 
 ### 健康检查 [#healthcheck]
 
-容器镜像使用 `labelgate healthcheck` 作为 `HEALTHCHECK`，它读取与守护进程相同的配置：
+镜像会运行 `labelgate healthcheck`。它读取同一份配置，所以自定义的 `api.address` 或 `api.base_path` 无需额外设置。
 
-- **main 模式，API 已启用且设置了 token：** 请求 `GET http://127.0.0.1:<port>{base_path}/health`（`:8080`、`0.0.0.0` 等通配监听地址会映射到回环地址；`192.168.1.5:8080` 这样的具体地址则原样使用），超时 2 秒。返回 HTTP 200 即为健康。
-- **main 模式，API 被禁用或没有 token：** 视为健康（退出码 0）。进程存活由 Docker 负责，不会因为 API 关闭而把容器标记为 unhealthy。
-- **agent 模式，inbound：** 能 TCP 连通 `connect.listen` 即为健康。
-- **agent 模式，outbound：** 视为健康（退出码 0）。
+- main，API 开启且设置了 `api.token`：`/health` 在 2 秒内响应即为健康。
+- main，API 关闭或没有 `api.token`：始终健康。
+- agent：inbound 模式检查 `connect.listen` 能否连接；outbound 模式始终健康。
 
-自定义的 `api.address` 和 `api.base_path` 会被自动识别。健康时命令以 `0` 退出；不健康或配置无法加载时以 `1` 退出（原因输出到 stderr）。它需要与守护进程相同的环境变量和配置文件，所以短于 16 个字符的 token 会让健康检查和启动一样失败。
+## 重试 [#retry-settings]
 
-## 重试设置
+用于 Cloudflare 调用和 agent 重连。
 
-| 环境变量 | 配置文件路径 | 默认值 | 说明 |
-|----------|--------------|--------|------|
-| `LABELGATE_RETRY_ATTEMPTS` | `retry.attempts` | `3` | 最大尝试次数（>= 1） |
-| `LABELGATE_RETRY_DELAY` | `retry.delay` | `1s` | 初始重试延迟（> 0） |
-| `LABELGATE_RETRY_MAX_DELAY` | `retry.max_delay` | `30s` | 最大重试延迟（>= `delay`） |
-| `LABELGATE_RETRY_BACKOFF` | `retry.backoff` | `2` | 退避倍数（>= 1） |
+| 键 | 环境变量 | 默认值 | 作用 |
+|----|----------|--------|------|
+| `retry.attempts` | `LABELGATE_RETRY_ATTEMPTS` | `3` | 最多尝试次数。至少 `1`。 |
+| `retry.delay` | `LABELGATE_RETRY_DELAY` | `1s` | 第一次重试前的等待时间。必须大于 `0s`。 |
+| `retry.max_delay` | `LABELGATE_RETRY_MAX_DELAY` | `30s` | 最长等待时间。不小于 `retry.delay`。 |
+| `retry.backoff` | `LABELGATE_RETRY_BACKOFF` | `2` | 每次重试后等待时间乘以该倍数。至少 `1`。 |
 
-## Agent 服务端（Main 实例）
+## Agent：main 实例 [#agent-server-main-instance]
 
-各项如何配合使用，参见[多主机](/zh/docs/examples/multi-host)。
+main 实例上用于接入 [agent](/zh/docs/examples/multi-host) 的设置。
 
-| 环境变量 | 配置文件路径 | 默认值 | 说明 |
-|----------|--------------|--------|------|
-| `LABELGATE_AGENT_ENABLED` | `agent.enabled` | `false` | 启动 agent WebSocket 监听，并拨号 inbound agent |
-| `LABELGATE_AGENT_LISTEN` | `agent.listen` | `:8081` | 监听地址。Agent 连接到 `<scheme>://<host>:8081/ws`；`GET /health` 无需认证，返回 `{"status":"ok"}` |
-| `LABELGATE_AGENT_ACCEPT_TOKEN` | `agent.accept_token` | - | 接受**未**在 `agent.agents` 中列出的 agent 所用的共享 token。设置后必须符合 [token 规则](#agent-tokens) |
-| `LABELGATE_AGENT_ACCEPT_HOSTNAMES` | `agent.accept_hostnames` | - | 限制 `accept_token` agent 可声明的主机名（glob 列表，参见[允许列表](/zh/docs/examples/multi-host#allow-lists)）。为空表示不限制，但通配符主机名需要完全相同的条目 |
-| `LABELGATE_AGENT_ACCEPT_TUNNELS` | `agent.accept_tunnels` | - | `accept_token` agent 可使用的 tunnel：`default`、`cloudflare.tunnels` 中的键或 tunnel ID。为空表示只能用默认 tunnel |
-| `LABELGATE_AGENT_ACCEPT_SERVICES` | `agent.accept_services` | - | 除 IP 字面量外，`accept_token` agent 可使用的 tunnel 源站：主机名 glob、IP 地址或 CIDR（参见 [SSRF 防护](/zh/docs/examples/multi-host#ssrf-guard)）。为空表示只允许 IP 字面量 |
-| `LABELGATE_AGENT_TLS_CERT` | `agent.tls.cert` | - | agent 监听端的服务端证书（启用 `wss://`） |
-| `LABELGATE_AGENT_TLS_KEY` | `agent.tls.key` | - | 服务端密钥（必须与 `cert` 同时设置） |
-| `LABELGATE_AGENT_TLS_CA` | `agent.tls.ca` | 系统根证书 | main 拨号 inbound agent 时用来校验对端的 CA |
-| `LABELGATE_AGENT_TLS_INSECURE_SKIP_VERIFY` | `agent.tls.insecure_skip_verify` | `false` | 拨号 inbound agent 时跳过证书校验。**不推荐**，启动时会输出警告 |
+| 键 | 环境变量 | 默认值 | 作用 |
+|----|----------|--------|------|
+| `agent.enabled` | `LABELGATE_AGENT_ENABLED` | `false` | 接受 agent 连接。 |
+| `agent.listen` | `LABELGATE_AGENT_LISTEN` | `:8081` | 监听地址。agent 连接 `wss://<host>:8081/ws`。 |
+| `agent.accept_token` | `LABELGATE_AGENT_ACCEPT_TOKEN` | - | 给未列在 `agent.agents` 中的 agent 使用的共享 token。参见 [Agent token](#agent-tokens)。 |
+| `agent.accept_hostnames` | `LABELGATE_AGENT_ACCEPT_HOSTNAMES` | 任意 | 这些 agent 可用的主机名，支持通配：`*.edge.example.com`。通配符主机名需要完全相同的条目。 |
+| `agent.accept_tunnels` | `LABELGATE_AGENT_ACCEPT_TUNNELS` | 默认 tunnel | 这些 agent 可用的 tunnel：`default`、`cloudflare.tunnels` 中的名字或 tunnel ID。 |
+| `agent.accept_services` | `LABELGATE_AGENT_ACCEPT_SERVICES` | IP 地址 | 这些 agent 在 tunnel `service` 中额外可用的主机：主机名通配、IP 或 CIDR。 |
+| `agent.tls.cert` | `LABELGATE_AGENT_TLS_CERT` | - | 服务端证书，用于开启 `wss://`。需与 `key` 同时设置。 |
+| `agent.tls.key` | `LABELGATE_AGENT_TLS_KEY` | - | 服务端私钥。 |
+| `agent.tls.ca` | `LABELGATE_AGENT_TLS_CA` | 系统 CA | 校验 inbound agent 证书用的 CA。 |
+| `agent.tls.insecure_skip_verify` | `LABELGATE_AGENT_TLS_INSECURE_SKIP_VERIFY` | `false` | 不校验 inbound agent 的证书。仅用于测试。 |
 
-### 单个 agent 条目（`agent.agents.<id>`，仅配置文件） [#per-agent-entries]
+### 单个 agent 条目 [#per-agent-entries]
 
-map 的键就是 agent ID，必须匹配 `^[a-z0-9][a-z0-9._-]{0,62}$`（小写字母、数字、`.`、`_` 和 `-`）。
+`agent.agents.<id>` 只能写在配置文件里。`<id>` 是 agent ID：小写字母、数字、`.`、`_` 和 `-`，最长 63 个字符，必须与 agent 的 `connect.agent_id` 一致。带点的 ID 要写成一个键：YAML 写 `nas.lan:`，TOML 写 `[agent.agents."nas.lan"]`。
 
-<Callout type="warn">
-含点的 agent ID 可以直接用作 map 键，写成一个完整的键即可（YAML `nas.lan:`，TOML `[agent.agents."nas.lan"]`，JSON `"nas.lan": {...}`）。
-</Callout>
+| 键 | 默认值 | 作用 |
+|----|--------|------|
+| `token` | - | **必填。** 该 agent 的 token。参见 [Agent token](#agent-tokens)。 |
+| `name` | - | 在 Dashboard 中显示的名称。 |
+| `default_tunnel` | `default_tunnel` | 该 agent 的标签没写 `tunnel` 时使用的 tunnel。 |
+| `tunnels` | 它的默认 tunnel | 该 agent 可用的 tunnel。 |
+| `hostnames` | 任意 | 该 agent 可用的主机名，支持通配。通配符主机名需要完全相同的条目。 |
+| `services` | IP 地址 | 该 agent 在 tunnel `service` 中额外可用的主机：主机名通配、IP 或 CIDR。 |
+| `connect_to` | - | 以 `/ws` 结尾的 `ws://` 或 `wss://` 地址。由 main 主动连接 agent（inbound 模式）。 |
 
-| 键 | 必填 | 说明 |
-|----|------|------|
-| `token` | 是 | 该 agent 专属的共享密钥（见 [Agent token](#agent-tokens)） |
-| `name` | 否 | 在 dashboard 中显示的名称 |
-| `default_tunnel` | 否 | 该 agent 的标签省略 `tunnel` 时使用的 tunnel。为空表示全局默认 |
-| `tunnels` | 否 | 该 agent 可使用的 tunnel。为空表示只能用它的默认 tunnel |
-| `hostnames` | 否 | 该 agent 可声明的主机名 glob 列表。为空表示不限制，但通配符主机名（`*.x`）需要完全相同的条目 |
-| `services` | 否 | 除 IP 字面量外，该 agent 可使用的 tunnel 源站：主机名 glob（`web`、`*.svc.internal`）、IP 地址或 CIDR。为空表示只允许 IP 字面量（参见 [SSRF 防护](/zh/docs/examples/multi-host#ssrf-guard)） |
-| `connect_to` | 否 | `ws://` 或 `wss://` 地址，需包含 `/ws`。为该 agent 启用 [inbound 模式](/zh/docs/examples/multi-host#inbound-mode-example) |
+```yaml
+agent:
+  enabled: true
+  agents:
+    edge1:
+      token: "<openssl rand -hex 32>"
+      hostnames: ["*.edge1.example.com"]
+      services: ["web", "172.20.0.0/16"]
+```
 
 ### Agent token [#agent-tokens]
 
-所有 agent token（`agent.agents.<id>.token`、`agent.accept_token` 和 `connect.token`）都必须**至少 32 个字符**，且**至少包含 12 个不同的字符**；`api.token` 至少 16 个字符。否则 Labelgate 会拒绝启动。token 本身不会在网络上传输，但任何截获握手的人都可以离线地对它进行猜测，因此 token 必须具有足够高的熵。可以这样生成：
+`agent.agents.<id>.token`、`agent.accept_token` 和 `connect.token` 至少要有 32 个字符，且至少包含 12 个不同的字符，否则 Labelgate 无法启动。用下面的命令生成：
 
 ```bash
 openssl rand -hex 32
 ```
 
-## Agent 连接（Agent 实例）
+## Agent：agent 实例 [#agent-connection-agent-instance]
 
-| 环境变量 | 配置文件路径 | 默认值 | 说明 |
-|----------|--------------|--------|------|
-| `LABELGATE_CONNECT_MODE` | `connect.mode` | `outbound` | `outbound`（agent 连接 main）或 `inbound`（main 连接 agent） |
-| `LABELGATE_CONNECT_ENDPOINT` | `connect.endpoint` | - | Main 实例地址，例如 `wss://main.example.com:8081/ws`。outbound 必填，必须是 `ws://` 或 `wss://` 地址。**必须包含路径**：没有路径的地址（如 `wss://main:8081`）会在校验时被拒绝，并提示补上 `/ws` |
-| `LABELGATE_CONNECT_LISTEN` | `connect.listen` | - | 监听地址（`[host]:port`）。inbound 必填。提供 `/ws` 和无需认证的 `/health` |
-| `LABELGATE_CONNECT_TOKEN` | `connect.token` | - | 认证 token，规则见 [Agent token](#agent-tokens) **（必填）** |
-| `LABELGATE_CONNECT_AGENT_ID` | `connect.agent_id` | `/etc/machine-id` 的前 12 位十六进制字符，否则取转为小写并清洗后的 hostname | Agent 标识，`^[a-z0-9][a-z0-9._-]{0,62}$`。允许包含点，不允许大写，显式设置的值不会被改写。默认值取 `/etc/machine-id` 的前 12 个字符（要求是十六进制），否则取 hostname，非法字符替换为 `-` 并截断到 63 个字符 |
-| `LABELGATE_CONNECT_HEARTBEAT_INTERVAL` | `connect.heartbeat_interval` | `30s` | 完整状态上报周期（>= 1s）。连接建立时以及容器变化后不久也会上报 |
-| `LABELGATE_CONNECT_TLS_CA` | `connect.tls.ca` | 系统根证书 | 拨号 main 时用来校验 main 的 CA |
-| `LABELGATE_CONNECT_TLS_CERT` | `connect.tls.cert` | - | agent inbound 监听端的服务端证书 |
-| `LABELGATE_CONNECT_TLS_KEY` | `connect.tls.key` | - | inbound 监听端的服务端密钥 |
-| `LABELGATE_CONNECT_TLS_INSECURE_SKIP_VERIFY` | `connect.tls.insecure_skip_verify` | `false` | 拨号 main 时跳过证书校验。**不推荐**，启动时会输出警告 |
+只在 `mode: agent` 下使用。agent 模式下只使用这些设置以及 `log_*`、`docker` 和 `retry`。
 
-<Callout type="info">
-`connect.tls.cert` / `key` 不再表示“客户端证书”。Agent 通过基于共享 token 的 HMAC 握手完成认证（参见[多主机](/zh/docs/examples/multi-host#authentication)）；`cert` / `key` 只是 inbound agent 监听端的服务端证书。
-</Callout>
+| 键 | 环境变量 | 默认值 | 作用 |
+|----|----------|--------|------|
+| `connect.mode` | `LABELGATE_CONNECT_MODE` | `outbound` | `outbound`：agent 连接 main。`inbound`：main 连接 agent。 |
+| `connect.endpoint` | `LABELGATE_CONNECT_ENDPOINT` | - | outbound 时**必填**。main 的地址，要带 `/ws`：`wss://main.example.com:8081/ws`。 |
+| `connect.listen` | `LABELGATE_CONNECT_LISTEN` | - | inbound 时**必填**。监听地址，如 `:8082`。 |
+| `connect.token` | `LABELGATE_CONNECT_TOKEN` | - | **必填。** 与 main 上的 token 相同。参见 [Agent token](#agent-tokens)。 |
+| `connect.agent_id` | `LABELGATE_CONNECT_AGENT_ID` | 由机器 ID 生成 | Agent ID。默认取自 `/etc/machine-id`，否则用主机名。请设置成与 main 上一致。 |
+| `connect.heartbeat_interval` | `LABELGATE_CONNECT_HEARTBEAT_INTERVAL` | `30s` | agent 多久发送一次完整上报。最小 `1s`。 |
+| `connect.tls.ca` | `LABELGATE_CONNECT_TLS_CA` | 系统 CA | 校验 main 证书用的 CA。 |
+| `connect.tls.cert` | `LABELGATE_CONNECT_TLS_CERT` | - | 仅 inbound：服务端证书。需与 `key` 同时设置。 |
+| `connect.tls.key` | `LABELGATE_CONNECT_TLS_KEY` | - | 仅 inbound：服务端私钥。 |
+| `connect.tls.insecure_skip_verify` | `LABELGATE_CONNECT_TLS_INSECURE_SKIP_VERIFY` | `false` | 不校验 main 的证书。仅用于测试。 |
 
 ## 已移除的配置项 [#removed-keys]
 
-以下 v0.2 配置项现在会在校验时报明确的错误。请从配置文件和环境变量中删除它们。
+下列 v0.2 配置项现在会导致无法启动，请从配置文件和环境变量中删除：
 
-| 配置项 | 环境变量 | 原因 |
-|--------|----------|------|
-| `docker.ssh.host` | `LABELGATE_DOCKER_SSH_HOST` | `ssh://` Docker 地址已移除 |
-| `docker.ssh.key` | `LABELGATE_DOCKER_SSH_KEY` | `ssh://` Docker 地址已移除 |
-| `docker.ssh.key_passphrase` | `LABELGATE_DOCKER_SSH_KEY_PASSPHRASE` | `ssh://` Docker 地址已移除 |
-| `docker.ssh.known_hosts` | `LABELGATE_DOCKER_SSH_KNOWN_HOSTS` | `ssh://` Docker 地址已移除 |
-| `db.retention` | `LABELGATE_DB_RETENTION` | 从未真正实现；已删除的记录不再保留 |
-| `db.vacuum_interval` | `LABELGATE_DB_VACUUM_INTERVAL` | 从未真正实现 |
+- `docker.ssh.host`（`LABELGATE_DOCKER_SSH_HOST`）
+- `docker.ssh.key`（`LABELGATE_DOCKER_SSH_KEY`）
+- `docker.ssh.key_passphrase`（`LABELGATE_DOCKER_SSH_KEY_PASSPHRASE`）
+- `docker.ssh.known_hosts`（`LABELGATE_DOCKER_SSH_KNOWN_HOSTS`）
+- `db.retention`（`LABELGATE_DB_RETENTION`）
+- `db.vacuum_interval`（`LABELGATE_DB_VACUUM_INTERVAL`）
 
-单独的 `docker.ssh` 配置段同样会被拒绝，以 `ssh://` 开头的 `docker.endpoint` 也是如此。请使用本地 unix socket、带 TLS 的 `tcp://`（`docker.tls.*`），或在远程主机上运行 Labelgate [agent](/zh/docs/examples/multi-host)。
-
-`sync.interval` 仍然存在，并且现在真正生效（默认 `5m`；此前文档写的是 `1h`，但实际未被使用）。
-
-## 多凭据配置
-
-如需使用不同 token 管理多个 Cloudflare 账户或 zone，请使用配置文件：
-
-```yaml
-cloudflare:
-  api_token: your-default-token
-
-  credentials:
-    personal:
-      api_token: your-personal-token
-      zones:
-        - example.com
-        - "*.example.com"
-    company:
-      api_token: your-company-token
-      zones:
-        - company.io
-        - company.com
-
-  tunnels:
-    secondary:
-      account_id: your-account-id-2
-      tunnel_id: your-tunnel-id-2
-      credential: company
-```
-
-敏感信息仍应尽量通过环境变量传入，参见[混合模式](/zh/docs/configuration#3-hybrid-mode)。
-
-### 凭据选择顺序
-
-1. `credential` 标签指定了凭据名：使用该凭据；如果它不存在或看不到对应 zone，则该服务报错。
-2. 否则，在所有凭据中按**最长后缀 zone 匹配**（不区分大小写），长度相同时根凭据优先。`zones` 模式会限制命名凭据参与匹配的 zone（`credential` 标签显式指定该凭据时，`zones` 会被忽略）。如果任何一个凭据的 zone 列表无法加载，查找会失败，而不是去猜。
-3. 否则使用根凭据（`cloudflare.api_token`）。
-4. 都不满足则服务报错，不存在隐藏的回退。
-
-标签的 `credential` 不再默认为 `"default"`，留空表示上述“自动选择”。如需强制使用根 token，请写 `credential: default`。
-
-### Tunnel 解析
-
-`tunnel` 标签（名称或 Tunnel ID）会被解析为 tunnel ID。**未知的 tunnel 会报错**，Labelgate 不会回退到其他 tunnel。省略该标签时使用 `default_tunnel`（或根 tunnel）。规则按*解析后*的 tunnel ID 分组，所以同一个 tunnel 的两个名字不会互相覆盖。
-
-### Zone 匹配规则
-
-- **精确匹配**：`example.com` 匹配 `example.com`
-- **后缀匹配**：`example.com` 同样匹配 `www.example.com` 和 `a.b.example.com`，取最长匹配的 zone（所以 `badexample.com` 不会匹配 `example.com`）
-- `zones` 中的**通配模式**：`*.example.com` 匹配 `example.com` 之下的 zone（`a.example.com`、`a.b.example.com`），但不匹配 `example.com` 本身，所以两个都要写
-- Zone 通过 Cloudflare API 完整分页获取，按凭据缓存，并在未命中时以及定期刷新。
-
-## 完整 YAML 配置示例
-
-```yaml
-label_prefix: labelgate
-log_level: info
-log_format: text
-
-docker:
-  endpoint: unix:///var/run/docker.sock
-  poll_interval: 2m
-
-cloudflare:
-  # 通过 LABELGATE_CLOUDFLARE_API_TOKEN 环境变量设置
-  api_token: ""
-  account_id: ""
-  tunnel_id: ""
-
-sync:
-  interval: 5m
-  remove_delay: 30m
-  orphan_ttl: 0s
-  agent_grace: 24h
-
-db:
-  path: /app/config/labelgate.db
-
-retry:
-  attempts: 3
-  delay: 1s
-  max_delay: 30s
-  backoff: 2
-
-api:
-  enabled: true
-  address: ":8080"
-  base_path: /api
-  # 通过 LABELGATE_API_TOKEN 环境变量设置（必填）
-  token: ""
-```
+`docker.endpoint` 中的 `ssh://` 地址同样会被拒绝。要管理远程 Docker 主机，请在那里运行一个 Labelgate [agent](/zh/docs/examples/multi-host)，或使用 `tcp://` 加 `docker.tls.*`。

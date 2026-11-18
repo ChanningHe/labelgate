@@ -1,111 +1,99 @@
 ---
 title: DNS Labels
-description: Complete reference for Labelgate DNS label properties.
+description: Create Cloudflare DNS records from container labels.
 ---
 
-## Format
+One label is enough. This creates a proxied `A` record for `app.example.com` that points to this host's public IP:
 
+```yaml
+services:
+  web:
+    image: nginx:alpine
+    labels:
+      labelgate.dns.web.hostname: "app.example.com"
 ```
-labelgate.dns.<service_name>.<property>=<value>
-```
 
-Invalid values and unknown properties are errors; see [Strict Validation](/docs/labels#strict-validation).
+When the container is removed, the record is deleted 30 minutes later (`sync.remove_delay`).
 
-## Properties
+## Labels [#properties]
 
-| Property | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `hostname` | Yes | - | Full domain name for the DNS record (normalised to lower-case) |
-| `type` | No | `A` | Record type: `A`, `AAAA`, `CNAME`, `TXT`, `MX`, `SRV`, `CAA` (case-insensitive) |
-| `target` | `A`/`AAAA`: No. Other types: Yes | `auto` for `A`/`AAAA` | Record value. `auto` = detect public IP, `container` = container IP (both only for `A` and `AAAA`), or a literal value. `CNAME`, `MX`, `SRV`, `TXT` and `CAA` have no default and fail with `target is required for <type> records` when it is missing |
-| `proxied` | No | `true` | Enable Cloudflare proxy (orange cloud). Only effective for `A`, `AAAA`, `CNAME`; other types are never proxied. Accepts `true`/`false`, `1`/`0`, `yes`/`no`, `on`/`off` (case-insensitive); anything else is an error |
-| `ttl` | No | automatic | TTL in seconds, 0-86400. Omitted, `0` or `1` = automatic. Always automatic when proxied |
-| `credential` | No | automatic | Credential name. Empty = pick by zone match, then the root credential |
-| `cleanup` | No | `true` | Delete the record after the container is gone and `sync.remove_delay` has passed. Only ever deletes records Labelgate owns |
-| `comment` | No | - | Free text appended **after** the ownership marker in the record comment (the whole comment is cut at Cloudflare's 100-character limit) |
-| `priority` | No | `0` | Priority for `MX` and `SRV` (0-65535) |
-| `weight` | No | `0` | Weight for `SRV` (0-65535) |
-| `port` | No | `0` | Port for `SRV` (0-65535) |
-| `flags` | No | `0` | Flags for `CAA` (0-255) |
-| `tag` | No | `issue` | Tag for `CAA`: `issue`, `issuewild`, `iodef` |
-| `access` | No | - | Name of an [Access policy definition](/docs/labels/access) to apply (lowercase letters, digits and hyphens). A name that no definition provides is rejected with `access policy definition "<name>" not found` |
+Every label has the form `labelgate.dns.<name>.<property>`. The `<name>` is any name you choose; see [The name part](/docs/labels#service-names).
 
-<Callout type="info">
-`priority` is **not enforced**: if you omit it for an `MX` or `SRV` record, it is `0`. Set it explicitly (MX `10`, `20`, ...) whenever the value matters. `weight`, `port`, `flags` and `tag` only apply to the record types listed above.
-</Callout>
+| Property | Required | Default | Example | Meaning |
+|----------|----------|---------|---------|---------|
+| `hostname` | yes | - | `app.example.com` | Record name. |
+| `type` | no | `A` | `CNAME` | `A`, `AAAA`, `CNAME`, `TXT`, `MX`, `SRV` or `CAA`. |
+| `target` | `A`/`AAAA`: no, others: yes | `auto` | `203.0.113.10` | Record value. See [Targets](#targets). |
+| `proxied` | no | `true` | `false` | Orange cloud. Only `A`, `AAAA` and `CNAME` can be proxied. |
+| `ttl` | no | auto | `300` | TTL in seconds, up to `86400`. `0` or `1` means auto. Proxied records always use auto. |
+| `cleanup` | no | `true` | `false` | Delete the record when the container is gone. `false` keeps it. |
+| `credential` | no | auto | `company` | Which [API token](/docs/configuration/reference#multi-credential-setup) to use. `default` is `cloudflare.api_token`. |
+| `access` | no | - | `team` | Put an [Access policy](/docs/labels/access) in front of the hostname. |
+| `comment` | no | - | `blog` | Extra text for the record's comment in Cloudflare. |
+| `priority` | no | `0` | `10` | `MX` and `SRV` only. 0-65535. |
+| `weight` | no | `0` | `5` | `SRV` only. 0-65535. |
+| `port` | no | `0` | `5222` | `SRV` only. 0-65535. |
+| `flags` | no | `0` | `128` | `CAA` only. 0-255. |
+| `tag` | no | `issue` | `issuewild` | `CAA` only. `issue`, `issuewild` or `iodef`. |
 
-## Ownership and Cleanup
+## Targets [#targets]
 
-Labelgate writes the comment `labelgate:<instance_id>` on every record it creates, and a `comment` label is appended after it (`labelgate:a1b2c3d4 your text`). Only records carrying this marker are ever updated or deleted. If a record with the same name and type already exists and does not carry the marker, the service fails with `conflict: existing record not owned by labelgate`; Labelgate never takes over existing records. See [Ownership & Conflicts](/docs/ownership).
+For `A` and `AAAA` records:
 
-`cleanup` defaults to **`true`**: when the container stops, the record is deleted after `sync.remove_delay` (default 30 minutes). Set `cleanup: "false"` to keep the record on Cloudflare when the container is gone.
+| `target` | Result |
+|----------|--------|
+| `auto` (default) | The host's public IP: IPv4 for `A`, IPv6 for `AAAA`. For a container on an [agent](/docs/examples/multi-host), the agent host's public IP. |
+| `container` | The container's own IP address. |
+| An IP address | That address, e.g. `203.0.113.10` for `A` or `2001:db8::10` for `AAAA`. |
 
-## Record Types
+For other types, `target` is required:
 
-### A / AAAA Records
+- `CNAME`, `MX`, `SRV`: a hostname, e.g. `mail.example.com`.
+- `TXT`, `CAA`: the value, used as written.
 
-Point a hostname to an IP address.
+If `auto` or `container` finds no address (for example, no public IPv6), the record shows an error and Labelgate retries on every sync.
+
+## Recipes [#examples]
+
+### Fixed IP, DNS only (grey cloud)
 
 ```yaml
 labels:
   labelgate.dns.web.hostname: "app.example.com"
-  labelgate.dns.web.type: "A"
-  labelgate.dns.web.target: "203.0.113.1"
-  labelgate.dns.web.proxied: "true"
+  labelgate.dns.web.target: "203.0.113.10"
+  labelgate.dns.web.proxied: "false"
 ```
 
-**Special `target` values:**
-- `auto` - Automatically detect the host's public IP address (IPv4 for `A`, IPv6 for `AAAA`; for agent containers, the agent's public IP)
-- `container` - Use the container's IP address: for `A` the IPv4 address, for `AAAA` the global IPv6 address of the first network (by name) that has one
-- Any valid IPv4 (`A`) or IPv6 (`AAAA`) address. An address of the wrong family is an error.
-
-If `auto` or `container` cannot be resolved (no public IP of the right family, or the container has no address of that family), the service goes to the error state and is retried every cycle. Only one service can own the `A` (or `AAAA`) record of a hostname, so DNS round-robin through several services is not possible.
-
-### CNAME Records
-
-Create an alias pointing to another hostname.
+### Several records from one container
 
 ```yaml
 labels:
+  labelgate.dns.root.hostname: "example.com"
   labelgate.dns.www.hostname: "www.example.com"
   labelgate.dns.www.type: "CNAME"
   labelgate.dns.www.target: "example.com"
 ```
 
-The target is normalised like a hostname (lower-case, no trailing dot) and must be a valid hostname; `MX` and `SRV` targets follow the same rule, while `TXT` and `CAA` values are kept verbatim. A hostname can have only one CNAME and cannot have other records next to it. Conflicts are reported, not worked around.
-
-### TXT Records
-
-Add text records (SPF, DKIM, verification, etc.). TXT records are never proxied.
+### Mail: MX and SPF
 
 ```yaml
 labels:
+  labelgate.dns.mx.hostname: "example.com"
+  labelgate.dns.mx.type: "MX"
+  labelgate.dns.mx.target: "mail.example.com"
+  labelgate.dns.mx.priority: "10"
   labelgate.dns.spf.hostname: "example.com"
   labelgate.dns.spf.type: "TXT"
-  labelgate.dns.spf.target: "v=spf1 include:_spf.google.com ~all"
+  labelgate.dns.spf.target: "v=spf1 mx ~all"
 ```
 
-### MX Records
+`priority` defaults to `0`. Set it when it matters.
 
-Configure mail exchange records. `priority` defaults to `0`; set it explicitly.
+### SRV
 
 ```yaml
 labels:
-  labelgate.dns.mail.hostname: "example.com"
-  labelgate.dns.mail.type: "MX"
-  labelgate.dns.mail.target: "mail.provider.com"
-  labelgate.dns.mail.priority: "10"
-```
-
-Several MX records for one hostname are separate services; their identity includes priority and target.
-
-### SRV Records
-
-Service location records. Set `priority`, `weight` and `port` (all default to `0`).
-
-```yaml
-labels:
-  labelgate.dns.xmpp.hostname: "_xmpp._tcp.example.com"
+  labelgate.dns.xmpp.hostname: "_xmpp-client._tcp.example.com"
   labelgate.dns.xmpp.type: "SRV"
   labelgate.dns.xmpp.target: "xmpp.example.com"
   labelgate.dns.xmpp.priority: "10"
@@ -113,70 +101,26 @@ labels:
   labelgate.dns.xmpp.port: "5222"
 ```
 
-### CAA Records
-
-Certificate Authority Authorization records. The `target` is the value (the CA domain, or an `iodef` URL).
+### CAA
 
 ```yaml
 labels:
   labelgate.dns.caa.hostname: "example.com"
   labelgate.dns.caa.type: "CAA"
   labelgate.dns.caa.target: "letsencrypt.org"
-  labelgate.dns.caa.flags: "0"
-  labelgate.dns.caa.tag: "issue"   # issue (default), issuewild, iodef
 ```
 
-## Examples
-
-### Multiple DNS records from one container
+### Keep the record after the container is gone
 
 ```yaml
-services:
-  myapp:
-    image: myapp:1.0
-    labels:
-      labelgate.dns.root.hostname: "example.com"
-      labelgate.dns.root.type: "A"
-      labelgate.dns.root.target: "auto"
-
-      labelgate.dns.www.hostname: "www.example.com"
-      labelgate.dns.www.type: "CNAME"
-      labelgate.dns.www.target: "example.com"
-
-      labelgate.dns.mail.hostname: "example.com"
-      labelgate.dns.mail.type: "MX"
-      labelgate.dns.mail.target: "mail.example.com"
-      labelgate.dns.mail.priority: "10"
+labels:
+  labelgate.dns.web.hostname: "app.example.com"
+  labelgate.dns.web.cleanup: "false"
 ```
 
-### Keep the record when the container goes away
+### Per-container defaults [#per-container-defaults]
 
-```yaml
-services:
-  myapp:
-    image: myapp:1.0
-    labels:
-      labelgate.dns.app.hostname: "app.example.com"
-      labelgate.dns.app.target: "auto"
-      labelgate.dns.app.cleanup: "false"
-```
-
-### Temporary environments (default cleanup)
-
-```yaml
-services:
-  preview:
-    image: preview:1.0
-    labels:
-      labelgate.dns.preview.hostname: "preview.example.com"
-      labelgate.dns.preview.target: "auto"
-      # cleanup defaults to "true": the record is removed 30 minutes
-      # (sync.remove_delay) after the container stops
-```
-
-### Per-container defaults
-
-`labelgate.dns.default.<property>` sets defaults for `type`, `target`, `proxied`, `ttl`, `credential` and `cleanup` for every DNS service of the container. Any other property in a `default` block is reported as unknown, and an invalid value skips every DNS service of the container:
+`labelgate.dns.default.<property>` sets a default for every DNS name in the same container. Allowed properties: `type`, `target`, `proxied`, `ttl`, `credential`, `cleanup`.
 
 ```yaml
 labels:
@@ -184,3 +128,9 @@ labels:
   labelgate.dns.a.hostname: "a.example.com"
   labelgate.dns.b.hostname: "b.example.com"
 ```
+
+## Good to know
+
+- Labelgate only changes records it created. It marks them with `labelgate:<id>` at the start of the record comment; your `comment` text goes after it.
+- An existing record with the same name and type is never taken over. You get `conflict: existing record not owned by labelgate`. See [Ownership & Conflicts](/docs/ownership).
+- Do not add a DNS label for a hostname that a [tunnel label](/docs/labels/tunnel) already uses. The tunnel creates its own record.

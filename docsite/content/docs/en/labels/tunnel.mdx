@@ -1,102 +1,129 @@
 ---
 title: Tunnel Labels
-description: Complete reference for Labelgate Tunnel label properties.
+description: Publish container services through Cloudflare Tunnel with labels.
 ---
 
-## Format
+Two labels publish a service through your tunnel:
 
+```yaml
+services:
+  web:
+    image: nginx:alpine
+    labels:
+      labelgate.tunnel.web.hostname: "app.example.com"
+      labelgate.tunnel.web.service: "http://web:80"
 ```
-labelgate.tunnel.<service_name>.<property>=<value>
-```
 
-Invalid values and unknown properties are errors; see [Strict Validation](/docs/labels#strict-validation).
+Labelgate adds a route `app.example.com → http://web:80` to the tunnel, and a DNS record that points `app.example.com` to the tunnel.
 
-## Properties
+Before this works:
 
-| Property | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `hostname` | Yes | - | Public hostname for the service (normalised to lower-case) |
-| `service` | Yes | - | Backend service URL: `protocol://host:port` (see [Service Protocols](#service-protocols)) |
-| `tunnel` | No | default tunnel | Tunnel name (key of `cloudflare.tunnels`) or tunnel ID. Empty = `default_tunnel` / the root tunnel. An unknown tunnel is an error |
-| `path` | No | - | Path regex to match (e.g., `\.(jpg\|png)$`). Must compile as a Go (RE2) regular expression, otherwise the service is dropped with `invalid path regex` |
-| `credential` | No | automatic | Credential used for the tunnel's CNAME record and Access. Empty = zone match, then root credential |
-| `cleanup` | No | `true` | Remove the ingress rule (and its CNAME) after the container is gone and `sync.remove_delay` has passed. Only owned rules are ever removed |
-| `access` | No | - | Name of an [Access policy definition](/docs/labels/access) to apply (lowercase letters, digits and hyphens) |
+- A tunnel is configured: `cloudflare.tunnel_id` (`LABELGATE_CLOUDFLARE_TUNNEL_ID`) plus `cloudflare.account_id`.
+- `cloudflared` runs for that tunnel. See [cloudflared Setup](/docs/examples/cloudflared).
+- `cloudflared` can reach the `service` address. Labelgate never connects to it; cloudflared does. For `http://web:80`, put `web` and cloudflared on the same Docker network.
 
-## Service Protocols
+## Labels [#properties]
 
-The `service` scheme must be one of the following (schemes are case-insensitive). `http`, `https`, `ssh`, `rdp`, `tcp` and `udp` need a host (`scheme://host[:port]`); the port is not checked by Labelgate. `unix:` and `unix+tls:` need a socket path, and `http_status:` needs a code from 100 to 599. Anything else is rejected with `unsupported service scheme`.
+Every label has the form `labelgate.tunnel.<name>.<property>`. The `<name>` is any name you choose; see [The name part](/docs/labels#service-names).
 
-| Protocol | Format | Description |
-|----------|--------|-------------|
-| HTTP | `http://host:port` | HTTP service |
-| HTTPS | `https://host:port` | HTTPS service |
-| SSH | `ssh://host:port` | SSH access |
-| RDP | `rdp://host:port` | Remote Desktop |
-| TCP | `tcp://host:port` | Raw TCP |
-| UDP | `udp://host:port` | UDP (requires WARP) |
-| Unix | `unix:/path/to/socket` | Unix socket |
-| Unix + TLS | `unix+tls:/path/to/socket` | Unix socket with TLS |
-| Hello World | `hello_world` | Test endpoint |
-| HTTP Status | `http_status:404` | Return a fixed status code |
-| Bastion | `bastion` | Browser-rendered bastion |
+| Property | Required | Default | Example | Meaning |
+|----------|----------|---------|---------|---------|
+| `hostname` | yes | - | `app.example.com` | Public hostname. |
+| `service` | yes | - | `http://web:80` | Where cloudflared sends the traffic. See [Service formats](#service-protocols). |
+| `path` | no | - | `^/api/` | Only requests whose path matches this regular expression. |
+| `tunnel` | no | default tunnel | `secondary` | A name from `cloudflare.tunnels`, or a tunnel ID. Default: `default_tunnel`, else `cloudflare.tunnel_id`. |
+| `cleanup` | no | `true` | `false` | Remove the route and its DNS record when the container is gone. `false` keeps them. |
+| `credential` | no | auto | `company` | [API token](/docs/configuration/reference#multi-credential-setup) for the hostname's DNS record and Access app. |
+| `access` | no | - | `team` | Put an [Access policy](/docs/labels/access) in front of the hostname. |
+| `origin.<setting>` | no | - | `origin.no_tls_verify: "true"` | Fine-tune the connection to the service. See [Origin settings](#origin-request-configuration). |
 
-<Callout type="info">
-For each tunnel hostname Labelgate creates a CNAME record pointing to `<tunnel-id>.cfargotunnel.com`, marked as owned like every other DNS record. Do not add a separate DNS service for the same hostname: that is a [conflict](/docs/labels#dns-and-tunnel-on-the-same-hostname).
-</Callout>
+## Service formats [#service-protocols]
 
-<Callout type="warn">
-Services reported by [agents](/docs/examples/multi-host#ssrf-guard) are checked by an SSRF guard: `localhost` and `*.localhost`, loopback, link-local, unspecified and multicast IP addresses, `unix:` / `unix+tls:` sockets and `bastion` are rejected, and the tunnel must be on the agent's allow-list.
-</Callout>
+| `service` | Use for |
+|-----------|---------|
+| `http://host:port`, `https://host:port` | Web apps |
+| `ssh://host:port`, `rdp://host:port` | SSH, Remote Desktop |
+| `tcp://host:port`, `udp://host:port` | Other TCP or UDP services |
+| `unix:/path/to.sock`, `unix+tls:/path/to.sock` | A Unix socket on the cloudflared host |
+| `http_status:404` | A fixed HTTP status (100-599) |
+| `hello_world` | Cloudflare's test page |
+| `bastion` | Cloudflare bastion mode |
 
-## Ownership of Ingress Rules
+## Origin settings [#origin-request-configuration]
 
-Labelgate only manages the ingress rules it created, identified by (tunnel, hostname, path). Rules you created by hand, the catch-all rule, the global `originRequest` and `warp-routing` settings are preserved untouched. If you label a hostname that already has a manual rule, the service gets `conflict: existing record not owned by labelgate` and the manual rule is left alone. See [Ownership & Conflicts](/docs/ownership#coexisting-with-manually-managed-tunnel-ingress).
+Set them as `labelgate.tunnel.<name>.origin.<setting>`. Leave a setting out to use cloudflared's default.
 
-## Origin Request Configuration
+| Setting | Example | Meaning |
+|---------|---------|---------|
+| `connect_timeout` | `30s` | Timeout for connecting to the service. |
+| `tls_timeout` | `10s` | Timeout for the TLS handshake with the service. |
+| `tcp_keepalive` | `30s` | TCP keep-alive interval. |
+| `keep_alive_connections` | `100` | Maximum idle connections kept open. |
+| `keep_alive_timeout` | `90s` | How long an idle connection stays open. |
+| `no_tls_verify` | `true` | Accept any certificate from the service (e.g. self-signed). |
+| `origin_server_name` | `app.internal` | Hostname expected on the service's certificate. |
+| `ca_pool` | `/certs/ca.pem` | CA file cloudflared uses to check the service's certificate. |
+| `http_host_header` | `app.internal` | `Host` header sent to the service. |
+| `no_happy_eyeballs` | `true` | Turn off Happy Eyeballs (IPv4/IPv6 fallback). |
+| `disable_chunked_encoding` | `true` | Turn off chunked transfer encoding. |
+| `proxy_type` | `socks` | `socks`, or empty for none. |
 
-Fine-tune the connection between cloudflared and your origin service. Duration values accept `30s`-style durations or plain seconds (`30`) and must be whole, non-negative seconds (`1500ms` is an error). `keep_alive_connections` is an integer from 0 to 1048576, the booleans follow the same forms as the DNS `proxied` label, and an unknown setting (`origin.foo`) is reported as an unknown property. An unset or empty setting is removed from the rule; settings Labelgate does not model are preserved.
+Times are whole seconds: `30s`, `2m` or just `30`.
 
-### Connection Settings
+## Recipes [#examples]
+
+### Several routes on one container
 
 ```yaml
 labels:
-  labelgate.tunnel.web.origin.connect_timeout: "30s"
-  labelgate.tunnel.web.origin.tls_timeout: "10s"
-  labelgate.tunnel.web.origin.tcp_keepalive: "30s"
-  labelgate.tunnel.web.origin.keep_alive_connections: "100"
-  labelgate.tunnel.web.origin.keep_alive_timeout: "90s"
+  labelgate.tunnel.web.hostname: "www.example.com"
+  labelgate.tunnel.web.service: "http://app:80"
+  labelgate.tunnel.api.hostname: "api.example.com"
+  labelgate.tunnel.api.service: "http://app:3000"
 ```
 
-### TLS Settings
+### Split one hostname by path
 
 ```yaml
 labels:
-  labelgate.tunnel.web.origin.no_tls_verify: "false"
-  labelgate.tunnel.web.origin.origin_server_name: ""
-  labelgate.tunnel.web.origin.ca_pool: ""
+  labelgate.tunnel.api.hostname: "example.com"
+  labelgate.tunnel.api.service: "http://api:3000"
+  labelgate.tunnel.api.path: "^/api/"
+  labelgate.tunnel.site.hostname: "example.com"
+  labelgate.tunnel.site.service: "http://site:80"
 ```
 
-### HTTP Settings
+Requests to `/api/...` go to `api`. Everything else goes to `site`.
+
+### HTTPS service with a self-signed certificate
 
 ```yaml
 labels:
-  labelgate.tunnel.web.origin.http_host_header: ""
-  labelgate.tunnel.web.origin.no_happy_eyeballs: "false"
-  labelgate.tunnel.web.origin.disable_chunked_encoding: "false"
+  labelgate.tunnel.nas.hostname: "nas.example.com"
+  labelgate.tunnel.nas.service: "https://nas:5001"
+  labelgate.tunnel.nas.origin.no_tls_verify: "true"
 ```
 
-### Proxy Settings
+### SSH
 
 ```yaml
 labels:
-  # Empty string or "socks"
-  labelgate.tunnel.web.origin.proxy_type: ""
+  labelgate.tunnel.ssh.hostname: "ssh.example.com"
+  labelgate.tunnel.ssh.service: "ssh://dev-server:22"
 ```
 
-## Per-container defaults
+### Use another tunnel
 
-`labelgate.tunnel.default.<property>` sets defaults for `tunnel`, `credential` and `cleanup` for every tunnel service of the container (other properties in a `default` block are reported as unknown):
+```yaml
+labels:
+  labelgate.tunnel.app.hostname: "internal.example.com"
+  labelgate.tunnel.app.service: "http://internal:8080"
+  labelgate.tunnel.app.tunnel: "secondary"   # a name from cloudflare.tunnels
+```
+
+### Per-container defaults [#per-container-defaults]
+
+`labelgate.tunnel.default.<property>` sets a default for every tunnel name in the same container. Allowed properties: `tunnel`, `credential`, `cleanup`.
 
 ```yaml
 labels:
@@ -107,70 +134,8 @@ labels:
   labelgate.tunnel.api.service: "http://app:3000"
 ```
 
-## Examples
+## Good to know
 
-### Basic web service
-
-```yaml
-services:
-  webapp:
-    image: nginx:alpine
-    labels:
-      labelgate.tunnel.web.hostname: "app.example.com"
-      labelgate.tunnel.web.service: "http://webapp:80"
-```
-
-### Multiple services on one container
-
-```yaml
-services:
-  app:
-    image: myapp:latest
-    labels:
-      labelgate.tunnel.web.hostname: "www.example.com"
-      labelgate.tunnel.web.service: "http://app:80"
-
-      labelgate.tunnel.api.hostname: "api.example.com"
-      labelgate.tunnel.api.service: "http://app:3000"
-```
-
-### SSH access through tunnel
-
-```yaml
-services:
-  dev-server:
-    image: ubuntu:latest
-    labels:
-      labelgate.tunnel.ssh.hostname: "ssh.example.com"
-      labelgate.tunnel.ssh.service: "ssh://dev-server:22"
-```
-
-### Using a specific tunnel
-
-```yaml
-services:
-  internal:
-    image: internal-app:latest
-    labels:
-      labelgate.tunnel.app.hostname: "internal.company.io"
-      labelgate.tunnel.app.service: "http://internal:8080"
-      labelgate.tunnel.app.tunnel: "secondary"
-      labelgate.tunnel.app.credential: "company"
-```
-
-### Path-based routing
-
-Path rules are first-class: the identity of a rule is (tunnel, hostname, path), so several services can share a hostname with different paths. For the same hostname, more specific paths are written before less specific ones.
-
-```yaml
-services:
-  static:
-    image: nginx:alpine
-    labels:
-      labelgate.tunnel.static.hostname: "example.com"
-      labelgate.tunnel.static.service: "http://static:80"
-      labelgate.tunnel.static.path: "\\.(jpg|png|css|js)$"
-      labelgate.tunnel.api.hostname: "example.com"
-      labelgate.tunnel.api.service: "http://api:3000"
-      labelgate.tunnel.api.path: "^/api/"
-```
+- Do not add a [DNS label](/docs/labels/dns) for a tunnel hostname. The tunnel creates its own DNS record, so a second one is a [conflict](/docs/labels#dns-and-tunnel-on-the-same-hostname).
+- Routes you added by hand in Cloudflare are kept. If one already uses the same hostname and path, your label gets `conflict: existing record not owned by labelgate`. See [Ownership & Conflicts](/docs/ownership).
+- Containers on an [agent](/docs/examples/multi-host) are limited for safety. Their `service` must be `http`, `https`, `tcp`, `ssh` or `rdp` (or `hello_world` / `http_status:`). The host must be a public or private IP address, or be allowed in the agent's `services` list on the main instance. Loopback addresses, Unix sockets, `udp` and `bastion` are refused.

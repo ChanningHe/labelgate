@@ -1,86 +1,139 @@
 ---
-title: Configuration Overview
-description: Learn about the different ways to configure Labelgate.
+title: Configuration
+description: Configure Labelgate with environment variables, a config file, or both.
 ---
 
-Labelgate supports three configuration modes. All options follow the same naming convention — see the [Configuration Reference](/docs/configuration/reference) for the complete list.
+Labelgate reads its settings from three places. When a setting appears in more than one, the higher one wins:
 
-<Callout type="warn">
-Configuration is strict: unknown keys and invalid values stop Labelgate at startup with a message naming the offending key. Keys removed in v0.3 are rejected too; see [Removed Keys](/docs/configuration/reference#removed-keys). Every problem is listed in one message, one per line, so you can fix them all before the next start.
-</Callout>
+1. Environment variables (`LABELGATE_...`)
+2. A config file (YAML, JSON or TOML)
+3. Built-in defaults
 
-## Configuration Modes
+Every key and its environment variable is listed in the [Configuration Reference](/docs/configuration/reference).
 
-### 1. Environment Variables Only (Recommended for Simple Setups)
+## Environment variables only [#1-environment-variables]
 
-No config file needed. Set environment variables with the `LABELGATE_` prefix:
-
-```bash
-LABELGATE_CLOUDFLARE_API_TOKEN=your-token
-LABELGATE_CLOUDFLARE_ACCOUNT_ID=your-account-id
-LABELGATE_CLOUDFLARE_TUNNEL_ID=your-tunnel-id
-LABELGATE_API_TOKEN=a-long-random-string
-```
-
-This is the simplest approach and is used in the [Getting Started](/docs/getting-started) guide.
-
-### 2. Config File
-
-Use a config file for more complex setups (e.g., multi-credential, multi-tunnel, named agents). YAML, JSON and TOML are supported; ready-made examples live in the repository's `configs/` directory.
+This is the simplest setup and is enough for a single host.
 
 ```yaml
-# labelgate.yaml
-cloudflare:
-  api_token: your-cloudflare-api-token
-  account_id: your-account-id
-  tunnel_id: your-tunnel-id
+services:
+  labelgate:
+    image: ghcr.io/channinghe/labelgate:v0.3
+    environment:
+      LABELGATE_CLOUDFLARE_API_TOKEN: ${CF_API_TOKEN}
+      LABELGATE_CLOUDFLARE_ACCOUNT_ID: ${CF_ACCOUNT_ID}
+      LABELGATE_CLOUDFLARE_TUNNEL_ID: ${CF_TUNNEL_ID}
+      LABELGATE_API_TOKEN: ${LABELGATE_API_TOKEN}   # openssl rand -hex 32
 ```
 
-The config file is located in this order:
+To get the variable name for a key: replace `.` with `_`, write it in upper case and add `LABELGATE_`. For example, `sync.remove_delay` becomes `LABELGATE_SYNC_REMOVE_DELAY`. Lists are comma-separated: `LABELGATE_AGENT_ACCEPT_TUNNELS=default,secondary`. An empty variable is ignored.
 
-1. The `-c` / `--config` command-line flag (`labelgate -c /path/to/labelgate.yaml`)
-2. The `LABELGATE_CONFIG` environment variable
-3. `./labelgate.{yaml,yml,json,toml}`
-4. `/etc/labelgate/labelgate.{yaml,yml,json,toml}`
+## Config file [#2-config-file]
 
-A missing file in the default search paths is fine; a missing file that you named explicitly (flag or `LABELGATE_CONFIG`) is an error.
+You need a file for these sections. They have no environment variables:
 
-### 3. Hybrid Mode
+- `cloudflare.credentials`: more than one Cloudflare API token.
+- `cloudflare.tunnels`: more than one tunnel.
+- `agent.agents`: named [agents](/docs/examples/multi-host), each with its own token.
 
-Combine both: use a config file for non-sensitive settings and environment variables for secrets.
+Labelgate uses the first file it finds:
 
-**Priority: Environment Variables > Config File > Defaults**
+1. The path given with `-c` / `--config`.
+2. The path in `LABELGATE_CONFIG`.
+3. `labelgate.yaml` (or `.yml`, `.json`, `.toml`) in the working directory (`/app` in the image).
+4. `/etc/labelgate/labelgate.yaml` (or `.yml`, `.json`, `.toml`).
+
+In Docker, mount the file at `/etc/labelgate/labelgate.yaml`. A commented example is in [`configs/labelgate.example.yaml`](https://github.com/channinghe/labelgate/blob/main/configs/labelgate.example.yaml).
+
+## Both [#3-hybrid-mode]
+
+Put the structure in the file and pass secrets as environment variables. The variables override the file.
+
+The file is not templated: `${VAR}` inside it stays as literal text. Pass secrets through environment variables, or write them into the file.
+
+## Minimal main config [#minimal-main-config]
+
+`labelgate.yaml`:
 
 ```yaml
-# labelgate.yaml - config file for non-sensitive settings
 cloudflare:
   account_id: your-account-id
   tunnel_id: your-tunnel-id
+# Secrets come from the environment:
+#   LABELGATE_CLOUDFLARE_API_TOKEN, LABELGATE_API_TOKEN
 ```
 
-```bash
-# Secrets via environment variables (override config file values)
-LABELGATE_CLOUDFLARE_API_TOKEN=your-token
-LABELGATE_API_TOKEN=a-long-random-string
+`docker-compose.yaml`:
+
+```yaml
+services:
+  labelgate:
+    image: ghcr.io/channinghe/labelgate:v0.3
+    restart: unless-stopped
+    group_add:
+      - "999"   # group of the Docker socket: stat -c '%g' /var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./labelgate.yaml:/etc/labelgate/labelgate.yaml:ro
+      - ./labelgate-data:/app/config   # database; sudo chown -R 65532:65532 ./labelgate-data
+    environment:
+      LABELGATE_CLOUDFLARE_API_TOKEN: ${CF_API_TOKEN}
+      LABELGATE_API_TOKEN: ${LABELGATE_API_TOKEN}
+    ports:
+      - "127.0.0.1:8080:8080"   # dashboard and API
 ```
 
-## Command Line
+## Minimal agent config [#minimal-agent-config]
+
+An agent runs on another Docker host and reports its containers to the main instance. It needs no Cloudflare token.
+
+On the agent host:
+
+```yaml
+services:
+  labelgate-agent:
+    image: ghcr.io/channinghe/labelgate:v0.3
+    restart: unless-stopped
+    group_add:
+      - "999"   # group of the Docker socket: stat -c '%g' /var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      LABELGATE_MODE: agent
+      LABELGATE_CONNECT_ENDPOINT: wss://main.example.com:8081/ws
+      LABELGATE_CONNECT_AGENT_ID: edge1
+      LABELGATE_CONNECT_TOKEN: ${AGENT_TOKEN}   # openssl rand -hex 32
+```
+
+On the main instance, add the agent to `labelgate.yaml` with the same ID and token, and publish port `8081`:
+
+```yaml
+agent:
+  enabled: true
+  tls:                          # needed for wss://
+    cert: /app/config/tls/server.crt
+    key: /app/config/tls/server.key
+  agents:
+    edge1:
+      token: "<same value as AGENT_TOKEN>"
+```
+
+By default this agent may use any hostname except wildcards (`*.example.com`), only the default tunnel, and only IP addresses in a tunnel `service`. If the main's certificate comes from a private CA, set `LABELGATE_CONNECT_TLS_CA` on the agent. See [Multi-Host](/docs/examples/multi-host) for allow-lists, inbound mode and TLS options.
+
+## Things to know [#rules]
+
+- **Mistakes stop startup.** Unknown keys and invalid values are errors. All problems are listed at once, so you can fix them in one go.
+- **Durations need a unit.** Write `30s`, `5m` or `24h`. A bare `30` is an error; write `0s` for zero.
+- **Restart to apply changes.** The configuration is read once at startup. `SIGHUP` does not reload it.
+- **Old keys fail.** Keys removed in v0.3 are errors. See [Removed keys](/docs/configuration/reference#removed-keys).
+- **Agents ignore main-only settings.** In `mode: agent`, only `log_*`, `docker`, `retry` and `connect` are used.
+
+## Command line [#command-line]
 
 ```
-labelgate [-c|--config PATH] [--version]      run (main or agent mode, from the configuration)
-labelgate [-c|--config PATH] healthcheck      container HEALTHCHECK, see below
+labelgate [-c PATH]               run (main or agent, from the configuration)
+labelgate [-c PATH] healthcheck   the container's health check
+labelgate --version               print the version
 ```
 
-| Exit code | Meaning |
-|-----------|---------|
-| `0` | Clean shutdown after `SIGINT`/`SIGTERM`; `healthcheck`: healthy; `--version` |
-| `1` | Fatal error, invalid configuration, or `healthcheck`: unhealthy |
-| `2` | Usage error (unknown flag or command) |
-
-The configuration is read once at startup. Sending `SIGHUP` only logs a warning: restart Labelgate to apply changes. On `SIGINT`/`SIGTERM` the API and agent listener stop first, then the reconciler, then the database is closed; a second signal terminates immediately. The [healthcheck](/docs/configuration/reference#healthcheck) reads the same configuration as the daemon.
-
-## Next Steps
-
-- [Configuration Reference](/docs/configuration/reference) - Complete list of all options, defaults, removed keys and multi-credential setup
-- [Ownership & Conflicts](/docs/ownership) - What Labelgate will and will not touch on Cloudflare
-- [Upgrading to v0.3](/docs/upgrading) - Breaking changes since v0.2
+Labelgate exits with code `1` on a configuration error and prints the reason.

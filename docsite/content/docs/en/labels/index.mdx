@@ -1,98 +1,83 @@
 ---
-title: Label Format
-description: How Labelgate labels work and how to structure them.
+title: Labels
+description: How Labelgate labels are written, and what happens when one is wrong.
 ---
 
-Labelgate reads Docker container labels to determine what Cloudflare resources to manage. All labels follow a consistent naming convention.
+Add labels to a container and Labelgate creates the matching Cloudflare DNS records, Tunnel routes and Access policies. Remove the container and they are cleaned up.
 
-## Format
+```yaml
+services:
+  whoami:
+    image: traefik/whoami
+    labels:
+      # Publish http://whoami:80 at https://app.example.com through your tunnel
+      labelgate.tunnel.web.hostname: "app.example.com"
+      labelgate.tunnel.web.service: "http://whoami:80"
+```
+
+Only running containers are read. If `docker.filter_label` is set, only containers that carry that label are read.
+
+## Label format [#format]
 
 ```
-labelgate.<type>.<service_name>.<property>=<value>
+labelgate.<type>.<name>.<property>: "<value>"
 ```
 
-| Segment | Description | Example |
-|---------|-------------|---------|
-| `labelgate` | Prefix (configurable via `LABELGATE_LABEL_PREFIX`) | `labelgate` |
-| `type` | Resource type | `dns`, `tunnel`, `access` |
-| `service_name` | Unique service identifier | `web`, `api`, `mail` |
-| `property` | Setting name | `hostname`, `service`, `type` |
+| Part | What it is | Example |
+|------|------------|---------|
+| `labelgate` | The prefix. Change it with `label_prefix` (`LABELGATE_LABEL_PREFIX`). | `labelgate` |
+| `<type>` | What to create: `dns`, `tunnel` or `access`. | `tunnel` |
+| `<name>` | A name you choose. Labels with the same name belong together. | `web` |
+| `<property>` | The setting. Each type has its own list. | `hostname` |
 
-## Service Name Rules
+## The name part [#service-names]
 
-The `service_name` is a unique identifier for each service within a container. It lets you define multiple services on the same container.
+The name groups labels into one record or route. Pick any name. It only shows up in the dashboard and in logs.
 
-**Allowed characters:** lowercase letters, digits, and hyphens: `[a-z0-9]([a-z0-9-]*[a-z0-9])?`
-
-**Reserved words** (cannot be used as service names; the error is `reserved service name <name>`): `hostname`, `service`, `type`, `target`, `proxied`, `ttl`, `cleanup`, `credential`, `tunnel`, `path`, `origin`, `access`, `priority`, `weight`, `port`, `flags`, `tag`, `comment`
-
-The name `default` is special rather than reserved: `labelgate.dns.default.*` and `labelgate.tunnel.default.*` set per-container defaults for the other services of that type (see [DNS](/docs/labels/dns#per-container-defaults) and [Tunnel](/docs/labels/tunnel#per-container-defaults)). It never defines a service of its own, and `labelgate.access.default.*` is ignored.
-
-<Callout type="warn">
-Only keys of the form `<prefix>.<type>.<service>.<property>` are read. Labels that do not start with the prefix are ignored. Keys that do start with the prefix but are malformed are **reported as label errors**: keys with fewer than four segments (`labelgate.dns.hostname`, `labelgate.dns.web`) and unknown types (`labelgate.dnss.web.hostname`).
-</Callout>
-
-## Multiple Services
-
-A single container can define multiple services:
+Use a different name for each record or route on the same container:
 
 ```yaml
 labels:
-  # Service "web" - main website
   labelgate.tunnel.web.hostname: "www.example.com"
   labelgate.tunnel.web.service: "http://app:80"
-  # Service "api" - API endpoint
   labelgate.tunnel.api.hostname: "api.example.com"
   labelgate.tunnel.api.service: "http://app:3000"
 ```
 
-## Strict Validation
+Rules for names:
 
-Labels are validated when they are parsed. Since v0.3 mistakes are reported instead of being silently replaced by defaults:
+- Use lowercase letters, digits and `-`. Do not start or end with `-`.
+- Do not use a property name: `hostname`, `service`, `type`, `target`, `proxied`, `ttl`, `cleanup`, `credential`, `tunnel`, `path`, `origin`, `access`, `priority`, `weight`, `port`, `flags`, `tag`, `comment`.
+- `default` is special. `labelgate.dns.default.*` and `labelgate.tunnel.default.*` set defaults for the other names in the same container. See [DNS](/docs/labels/dns#per-container-defaults) and [Tunnel](/docs/labels/tunnel#per-container-defaults).
 
-- An **invalid value** (a boolean that is not `true`/`false`, a non-numeric `ttl`, an unknown record type, a CAA `tag` outside `issue`/`issuewild`/`iodef`, a port outside 0-65535, a malformed hostname...) **drops that service**.
-- An **unknown property** (for example `labelgate.dns.web.hostnme`) is reported as an error; the rest of the service is kept.
-- Service names that violate the rules above, or that are reserved, are skipped with an error.
-- A service with an invalid `<prefix>.dns.default.*` or `<prefix>.tunnel.default.*` block is skipped as a whole (`service skipped: invalid ... settings`).
+## Hostnames [#hostnames]
 
-A label error never looks like a removed service. If a service is dropped because of an error, the resources Labelgate already created for it are **held**: they are not orphaned, no cleanup countdown starts and nothing is changed on Cloudflare. They show the status `error` with a `label error: ...` reason until you fix the label. An unknown property does not hold anything, because the service itself is kept.
+- Case and a trailing dot are ignored: `App.Example.com.` is `app.example.com`.
+- A leading wildcard is allowed: `*.example.com`.
 
-Every label error is logged with the container name and label key, and sets the sync status to `error`, which is shown in the dashboard and in `GET /api/overview`. Check them after changing labels.
+### One hostname, one owner [#dns-and-tunnel-on-the-same-hostname]
 
-## Hostnames
+- A tunnel route creates its own DNS record. Do not add a `dns` label for the same hostname. The second one gets a conflict error.
+- If two names claim the same hostname and record type (in one container or several), the one that had it first keeps it. The other gets a conflict error.
+- Several `MX`, `TXT`, `SRV` or `CAA` records on one hostname are fine.
+- Labelgate never changes records it did not create. If Cloudflare already has a record for the hostname, you get `conflict: existing record not owned by labelgate`. Delete that record in Cloudflare or use another hostname. See [Ownership & Conflicts](/docs/ownership).
 
-Hostnames are normalised (trimmed, lower-cased, trailing dot removed) and validated. `App.Example.com.` and `app.example.com` are the same hostname. A valid hostname has at least two labels and at most 253 characters; each label is 1-63 characters of letters, digits, `-` and `_` (no leading or trailing `-`). A leading `*.` wildcard label is allowed.
+## When a label is wrong [#strict-validation]
 
-## Hostname Conflicts
+Labelgate checks every label. Problems appear in the log and in the dashboard, with the container name and the label key.
 
-### DNS and Tunnel on the Same Hostname
+| Mistake | What happens |
+|---------|--------------|
+| Invalid value, e.g. `proxied: "maybe"` | That name is skipped. Records it already created stay as they are until you fix the label. |
+| Unknown property, e.g. `labelgate.dns.web.proxyed` | Error reported. The rest of that name still works. |
+| Unknown type or too few parts, e.g. `labelgate.dnss.web.hostname` | Error reported. The label is ignored. |
+| Invalid `default` label | Every name of that type in the container is skipped. |
+| Label without the prefix | Ignored silently. |
 
-The same hostname cannot be used both as a DNS record and as a Tunnel ingress rule: a tunnel hostname is served through its own CNAME record. This is a **conflict error** on the service that arrives second, whether the two services are in the same container, different containers, or on different hosts. The stored reason is `conflict: hostname app.example.com is used by local container webapp service web as tunnel:<tunnel-id>`; the last word is the kind of use that holds the hostname: `records` (A, AAAA, TXT, MX, SRV, CAA), `cname` or `tunnel:<tunnel-id>`.
+Booleans accept `true`/`false`, `yes`/`no`, `on`/`off` and `1`/`0`.
 
-```yaml
-# WRONG - hostname conflict
-labels:
-  labelgate.dns.web.hostname: "app.example.com"
-  labelgate.tunnel.web.hostname: "app.example.com"  # Conflict!
-```
+## Label types
 
-```yaml
-# CORRECT - use different hostnames
-labels:
-  labelgate.dns.legacy.hostname: "old.example.com"
-  labelgate.tunnel.web.hostname: "app.example.com"
-```
-
-### Existing Owner Wins
-
-When several services claim the same hostname, the service that already owns it keeps it. A newcomer is **rejected** with a stored error such as `conflict: app.example.com|A already claimed by local container webapp service web` (an owner on an agent reads `agent host-b container webapp service web`), which is visible in the dashboard and the API. The decision is deterministic and does not flip between sync cycles. The identity of a claim is the hostname plus the record type (`app.example.com|A`), so two services cannot both own the `A` record of one hostname; `MX`, `SRV`, `TXT` and `CAA` records also include their content, so several of those can coexist. See [Ownership & Conflicts](/docs/ownership#conflicts-between-claims).
-
-### Existing Cloudflare Records
-
-If Cloudflare already has a record, Access application or tunnel rule for the hostname that Labelgate did not create, the service reports `conflict: existing record not owned by labelgate` and nothing is modified. See [Ownership & Conflicts](/docs/ownership#pre-existing-resources-are-never-adopted) to resolve it.
-
-## Label Types
-
-- [DNS Labels](/docs/labels/dns) - Manage Cloudflare DNS records
-- [Tunnel Labels](/docs/labels/tunnel) - Manage Cloudflare Tunnel ingress rules
-- [Access Policy Labels](/docs/labels/access) - Manage Zero Trust Access policies
+- [DNS labels](/docs/labels/dns): DNS records.
+- [Tunnel labels](/docs/labels/tunnel): Cloudflare Tunnel routes.
+- [Access labels](/docs/labels/access): Zero Trust Access login in front of a hostname.
