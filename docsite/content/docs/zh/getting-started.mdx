@@ -1,91 +1,75 @@
 ---
 title: 快速开始
-description: 使用 Docker Compose 在几分钟内设置 Labelgate。
+description: 用 Docker Compose 运行 Labelgate，并通过 Cloudflare Tunnel 发布你的第一个应用。
 ---
 
-## 前置要求
+跟着本页操作，你会从零开始，让 `https://app.example.com` 通过 Cloudflare Tunnel 对外提供服务。
 
-在开始之前，请确保您已具备：
+你需要：
 
-- 已安装 **Docker** 和 Docker Compose
-- 拥有至少一个域名的 **Cloudflare 账户**
-- 拥有 **Cloudflare API Token**（我们将在下面创建一个）
+- Docker 和 Docker Compose；
+- 一个托管在 Cloudflare 上的域名；
+- 一个 Cloudflare Tunnel。在 [Zero Trust > Networks > Tunnels](https://one.dash.cloudflare.com/) 中创建，并记下它的 **tunnel ID** 和 **token**。
 
-## 创建 Cloudflare API Token
+## 1. 创建 Cloudflare API token [#1-create-a-cloudflare-api-token]
 
-前往 [Cloudflare Dashboard > My Profile > API Tokens](https://dash.cloudflare.com/profile/api-tokens) 并创建一个具有所需权限的自定义 Token：
+在 [My Profile > API Tokens](https://dash.cloudflare.com/profile/api-tokens) 创建一个自定义 token，授予以下权限：
 
-| 使用场景 | 所需权限 |
-|----------|---------------------|
-| 仅 DNS | `Zone:Zone:Read` + `Zone:DNS:Edit` |
-| DNS + Tunnel | `Zone:Zone:Read` + `Zone:DNS:Edit` + `Account:Cloudflare Tunnel:Edit` |
-| DNS + Tunnel + Access | `Zone:Zone:Read` + `Zone:DNS:Edit` + `Account:Cloudflare Tunnel:Edit` + `Access: Apps and Policies:Edit` |
+| 你要用的功能 | 权限 |
+|--------------|------|
+| 仅 DNS | `Zone:Zone:Read`、`Zone:DNS:Edit` |
+| DNS + Tunnel | 以上权限 + `Account:Cloudflare Tunnel:Edit` |
+| DNS + Tunnel + Access | 以上权限 + `Access: Apps and Policies:Edit` |
 
-对于**区域资源**，选择您希望 Labelgate 管理的特定区域（域名），或选择"所有区域"以获得完全访问权限。
+- **Zone Resources：** 允许 Labelgate 管理的域名，或选 "All zones"。
+- **Account Resources：** tunnel 所在的账户。
 
-对于**账户资源**（Tunnel 模式必须），选择拥有 Tunnel 的账户。
+**Account ID** 可以在 Cloudflare dashboard 中任意域名的概览页找到。
 
-您还需要您的**账户 ID**，可以在 Cloudflare Dashboard 中任何区域的概览页面上找到。
-
-## 快速设置
-
-### 1. 设置环境变量
-
-在项目目录中创建 `.env` 文件：
+## 2. 创建 `.env` [#2-create-env]
 
 ```bash
-# Labelgate configuration
-LABELGATE_CLOUDFLARE_API_TOKEN=your-cloudflare-api-token
+LABELGATE_CLOUDFLARE_API_TOKEN=your-api-token
 LABELGATE_CLOUDFLARE_ACCOUNT_ID=your-account-id
-
-# Required for Tunnel mode
 LABELGATE_CLOUDFLARE_TUNNEL_ID=your-tunnel-id
 
-# Required for the API and dashboard (without it both are disabled)
-# Generate one with: openssl rand -hex 32
+# dashboard 和 API 的登录凭据，不设置则两者都不开启
+# 生成方法：openssl rand -hex 32
 LABELGATE_API_TOKEN=a-long-random-string
 
-# cloudflared tunnel token (for cloudflared daemon, not Labelgate)
-# Get this from: Cloudflare Dashboard > Zero Trust > Networks > Tunnels
+# 给 cloudflared 用的，不是给 Labelgate 的
 TUNNEL_TOKEN=your-tunnel-token
 ```
 
-<Callout type="warn">
-dashboard 和 HTTP API 必须设置 `LABELGATE_API_TOKEN`。如果它为空，两者都会被**禁用**（Labelgate 会继续同步，并输出一条错误日志）。请不要把 `.env` 文件提交到版本控制中。
-</Callout>
+不要把这个文件提交到版本库。
 
-<Callout type="info">
-如果您还没有 Tunnel，可以在 [Cloudflare Dashboard > Zero Trust > Networks > Tunnels](https://one.dash.cloudflare.com/) 中创建一个。
-</Callout>
+## 3. 创建 `compose.yaml` [#create-compose]
 
-### 2. 创建 docker-compose.yaml [#create-compose]
+Labelgate 以用户 `65532` 运行。启动前先执行这两条命令：
+
+```bash
+stat -c '%g' /var/run/docker.sock        # 得到下面 group_add 要填的组 ID
+mkdir -p labelgate-data && sudo chown -R 65532:65532 labelgate-data
+```
 
 ```yaml
 services:
   labelgate:
     image: ghcr.io/channinghe/labelgate:v0.3
     restart: unless-stopped
-    # 用命令 "stat -c '%g' /var/run/docker.sock" 获取 docker socket 所属组的 ID
     group_add:
-      - "REPLACE_WITH_GROUP_ID"
+      - "REPLACE_WITH_GROUP_ID"   # 上面 stat 命令的输出
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      # 运行 "sudo chown -R 65532:65532 ./labelgate-data"，让非 root 的容器用户可以写入数据库
       - ./labelgate-data:/app/config
     environment:
       - LABELGATE_CLOUDFLARE_API_TOKEN
       - LABELGATE_CLOUDFLARE_ACCOUNT_ID
       - LABELGATE_CLOUDFLARE_TUNNEL_ID
       - LABELGATE_API_TOKEN
-    # Dashboard 和 API（使用 LABELGATE_API_TOKEN 认证）。
-    # 这里特意只绑定到本机：对外暴露之前，请先在前面放上 TLS / VPN / Cloudflare Access。
     ports:
-      - "127.0.0.1:8080:8080"
-    # labelgate 不需要连接到 "cloudflared-network" 网络，
-    # 因为 Labelgate 只是通过 Cloudflare API 来创建 tunnel ingress 规则或 DNS 记录。
-    network_mode: bridge
+      - "127.0.0.1:8080:8080"     # dashboard 和 API，仅本机访问
 
-  # 仅 Tunnel 模式需要
   cloudflared:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
@@ -93,27 +77,41 @@ services:
     networks:
       - cloudflared-network
 
-  # 示例：通过 Tunnel 暴露一个 Web 应用
   webapp:
     image: nginx:alpine
     container_name: webapp
     labels:
       labelgate.tunnel.web.hostname: "app.example.com"
       labelgate.tunnel.web.service: "http://webapp:80"
-    # 连接到 "cloudflared-network" 网络
     networks:
       - cloudflared-network
 
-# 为需要通过 cloudflared 访问的服务创建一个网络。
-# 这样 Cloudflare tunnel 就可以通过容器名访问 "cloudflared-network" 桥接网络内的服务，无需映射端口。
-# 把所有公开的服务集中在同一个网络中，可以让它们与私有服务保持隔离。
 networks:
   cloudflared-network:
-    # 固定名称，方便其他 Compose 项目把它作为外部网络加入
     name: cloudflared-network
 ```
 
-对于不在这个 docker-compose.yaml 中的服务，可以把它加入 "cloudflared-network" 网络：
+Labelgate 本身不需要加入 `cloudflared-network`，它只和 Cloudflare API 打交道。这个网络让 `cloudflared` 能通过容器名访问你的应用，不用映射端口。
+
+## 4. 启动 [#4-start-it]
+
+```bash
+docker compose up -d
+```
+
+几秒钟内，Labelgate 会为 `app.example.com` 添加一条 tunnel 规则和一条 DNS 记录。打开 `https://app.example.com`，应该能看到 nginx 欢迎页。
+
+想看 Labelgate 管理了哪些资源，打开 `http://localhost:8080/dashboard/`，用 `LABELGATE_API_TOKEN` 登录。想看报错，执行 `docker compose logs labelgate`。
+
+如果 `app.example.com` 在 Cloudflare 上已经存在，Labelgate 不会覆盖它，而是显示 `conflict` 错误。参见[所有权与冲突](/zh/docs/ownership)。
+
+<Callout type="warn">
+容器被删除 30 分钟后，Labelgate 会删除它在 Cloudflare 上的资源。想保留的话，加上 `labelgate.tunnel.web.cleanup: "false"`。
+</Callout>
+
+## 其他 Compose 项目中的应用 [#apps-in-other-compose-projects]
+
+加入同一个网络并添加标签即可：
 
 ```yaml
 services:
@@ -125,48 +123,15 @@ services:
       labelgate.tunnel.other.service: "http://other-app:80"
     networks:
       - cloudflared-network
+
 networks:
   cloudflared-network:
     external: true
 ```
 
-### 3. 启动堆栈
+## 只用 DNS（不用 tunnel） [#dns-only-no-tunnel]
 
-```bash
-docker compose up -d
-```
-
-Labelgate 将：
-1. 连接到 Docker 守护进程并发现正在运行的容器
-2. 解析 `webapp` 上的标签
-3. 添加一条 Tunnel 入口规则，将 `app.example.com` 指向 `http://webapp:80`，同时保持你手工管理的任何入口规则不变
-4. 创建 CNAME 记录，将 `app.example.com` 指向 `<tunnel-id>.cfargotunnel.com`，并在记录备注中标记它属于当前 Labelgate 实例
-
-如果 `app.example.com` 已经以一条不是 Labelgate 创建的记录或规则存在，它**不会**被接管，而是得到一个 `conflict` 错误。参见[所有权与冲突](/zh/docs/ownership)。
-
-### 4. 验证
-
-几秒钟后，访问 `https://app.example.com` - 您的 nginx 欢迎页面应该可以通过 Cloudflare Tunnel 访问。
-
-您也可以查看 Labelgate 日志：
-
-```bash
-docker compose logs labelgate
-```
-
-打开 `http://localhost:8080/dashboard/`，用你的 `LABELGATE_API_TOKEN` 登录即可查看被管理的资源，也可以直接调用 API：
-
-```bash
-curl -H "Authorization: Bearer $LABELGATE_API_TOKEN" http://localhost:8080/api/overview
-```
-
-<Callout type="info">
-由于 `cleanup` 默认为 `true`，Labelgate 拥有的资源会在其容器消失约 30 分钟（`sync.remove_delay`）后被删除。如需保留，请设置 `labelgate.tunnel.web.cleanup: "false"`。
-</Callout>
-
-## 仅 DNS 示例
-
-如果您只需要 DNS 记录管理（无需隧道），则更简单：
+如果只需要 DNS 记录，就不需要 `cloudflared`，也不需要 tunnel 相关设置：
 
 ```yaml
 services:
@@ -174,10 +139,10 @@ services:
     image: ghcr.io/channinghe/labelgate:v0.3
     restart: unless-stopped
     group_add:
-      - "REPLACE_WITH_GROUP_ID"   # stat -c '%g' /var/run/docker.sock
+      - "REPLACE_WITH_GROUP_ID"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./labelgate-data:/app/config   # sudo chown -R 65532:65532 ./labelgate-data
+      - ./labelgate-data:/app/config
     environment:
       - LABELGATE_CLOUDFLARE_API_TOKEN
       - LABELGATE_API_TOKEN
@@ -191,10 +156,9 @@ services:
       labelgate.dns.web.proxied: "true"
 ```
 
-## 下一步
+## 下一步 [#next-steps]
 
-- [配置](/zh/docs/configuration) - 了解配置文件、环境变量和多凭证设置
-- [所有权与冲突](/zh/docs/ownership) - Labelgate 会动和不会动 Cloudflare 上的哪些资源
-- [升级到 v0.3](/zh/docs/upgrading) - 从 v0.2 升级？
-- [标签参考](/zh/docs/labels) - DNS、Tunnel 和 Access 标签的完整参考
-- [示例](/zh/docs/examples/single-host) - 更多真实世界的部署示例
+- [Label 参考](/zh/docs/labels)：所有 DNS、Tunnel 和 Access 标签。
+- [配置](/zh/docs/configuration)：配置文件和更多设置。
+- [配置示例](/zh/docs/examples/single-host)：更多部署方式，包括多主机。
+- [升级到 v0.3](/zh/docs/upgrading)：从 v0.2 升级。

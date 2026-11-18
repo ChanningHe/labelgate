@@ -1,91 +1,75 @@
 ---
 title: Getting Started
-description: Set up Labelgate in minutes with Docker Compose.
+description: Run Labelgate with Docker Compose and publish your first app through a Cloudflare Tunnel.
 ---
 
-## Prerequisites
+This page takes you from nothing to `https://app.example.com` served through a Cloudflare Tunnel.
 
-Before you begin, make sure you have:
+You need:
 
-- **Docker** with Docker Compose installed
-- A **Cloudflare account** with at least one domain
-- A **Cloudflare API Token** (we'll create one below)
+- Docker with Docker Compose;
+- a domain on Cloudflare;
+- a Cloudflare Tunnel. Create one under [Zero Trust > Networks > Tunnels](https://one.dash.cloudflare.com/) and note its **tunnel ID** and **token**.
 
-## Create a Cloudflare API Token
+## 1. Create a Cloudflare API token
 
-Go to [Cloudflare Dashboard > My Profile > API Tokens](https://dash.cloudflare.com/profile/api-tokens) and create a custom token with the permissions you need:
+Create a custom token at [My Profile > API Tokens](https://dash.cloudflare.com/profile/api-tokens) with these permissions:
 
-| Use Case | Required Permissions |
-|----------|---------------------|
-| DNS only | `Zone:Zone:Read` + `Zone:DNS:Edit` |
-| DNS + Tunnel | `Zone:Zone:Read` + `Zone:DNS:Edit` + `Account:Cloudflare Tunnel:Edit` |
-| DNS + Tunnel + Access | `Zone:Zone:Read` + `Zone:DNS:Edit` + `Account:Cloudflare Tunnel:Edit` + `Access: Apps and Policies:Edit` |
+| You want | Permissions |
+|----------|-------------|
+| DNS only | `Zone:Zone:Read`, `Zone:DNS:Edit` |
+| DNS + Tunnel | the above + `Account:Cloudflare Tunnel:Edit` |
+| DNS + Tunnel + Access | the above + `Access: Apps and Policies:Edit` |
 
-For **Zone Resources**, select the specific zones (domains) you want Labelgate to manage, or choose "All zones" for full access.
+- **Zone Resources:** the domains Labelgate may manage, or "All zones".
+- **Account Resources:** the account that owns the tunnel.
 
-For **Account Resources** (required for Tunnel mode), select the account that owns the tunnel.
+Your **account ID** is shown on any domain's overview page in the Cloudflare dashboard.
 
-You will also need your **Account ID**, which can be found on any zone's overview page in the Cloudflare Dashboard.
-
-## Quick Setup
-
-### 1. Set environment variables
-
-Create a `.env` file in your project directory:
+## 2. Create `.env`
 
 ```bash
-# Labelgate configuration
-LABELGATE_CLOUDFLARE_API_TOKEN=your-cloudflare-api-token
+LABELGATE_CLOUDFLARE_API_TOKEN=your-api-token
 LABELGATE_CLOUDFLARE_ACCOUNT_ID=your-account-id
-
-# Required for Tunnel mode
 LABELGATE_CLOUDFLARE_TUNNEL_ID=your-tunnel-id
 
-# Required for the API and dashboard (without it both are disabled)
-# Generate one with: openssl rand -hex 32
+# Dashboard and API login. Without it both are off.
+# Generate with: openssl rand -hex 32
 LABELGATE_API_TOKEN=a-long-random-string
 
-# cloudflared tunnel token (for cloudflared daemon, not Labelgate!)
-# Get this from: Cloudflare Dashboard > Zero Trust > Networks > Tunnels
+# For cloudflared, not for Labelgate
 TUNNEL_TOKEN=your-tunnel-token
 ```
 
-<Callout type="warn">
-`LABELGATE_API_TOKEN` is mandatory for the dashboard and the HTTP API. If it is empty, both are **disabled** (Labelgate keeps syncing and logs an error). Keep your `.env` file out of version control.
-</Callout>
+Keep this file out of version control.
 
-<Callout type="info">
-If you don't have a Tunnel yet, you can create one in the [Cloudflare Dashboard > Zero Trust > Networks > Tunnels](https://one.dash.cloudflare.com/).
-</Callout>
+## 3. Create `compose.yaml` [#create-compose]
 
-### 2. Create docker-compose.yaml [#create-compose]
+Labelgate runs as user `65532`. Before you start, run these two commands:
+
+```bash
+stat -c '%g' /var/run/docker.sock        # group ID for group_add below
+mkdir -p labelgate-data && sudo chown -R 65532:65532 labelgate-data
+```
 
 ```yaml
 services:
   labelgate:
     image: ghcr.io/channinghe/labelgate:v0.3
     restart: unless-stopped
-    # use command "stat -c '%g' /var/run/docker.sock" to get the group id of the docker socket
     group_add:
-      - "REPLACE_WITH_GROUP_ID"
+      - "REPLACE_WITH_GROUP_ID"   # output of the stat command
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      # Run "sudo chown -R 65532:65532 ./labelgate-data" so the non-root container user can write the database
       - ./labelgate-data:/app/config
     environment:
       - LABELGATE_CLOUDFLARE_API_TOKEN
       - LABELGATE_CLOUDFLARE_ACCOUNT_ID
       - LABELGATE_CLOUDFLARE_TUNNEL_ID
       - LABELGATE_API_TOKEN
-    # Dashboard and API (authenticated with LABELGATE_API_TOKEN).
-    # Bound to localhost on purpose: put TLS / a VPN / Cloudflare Access in front before exposing it.
     ports:
-      - "127.0.0.1:8080:8080"
-    # labelgate no need to connect to the network "cloudflared-network"
-    # Because Labelgate simply uses the Cloudflare API to create tunnel ingress rules or DNS records.
-    network_mode: bridge
+      - "127.0.0.1:8080:8080"     # dashboard and API, local only
 
-  # Only needed for Tunnel mode
   cloudflared:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
@@ -93,27 +77,41 @@ services:
     networks:
       - cloudflared-network
 
-  # Example: expose a web app through Tunnel
   webapp:
     image: nginx:alpine
     container_name: webapp
     labels:
       labelgate.tunnel.web.hostname: "app.example.com"
       labelgate.tunnel.web.service: "http://webapp:80"
-    # Connect to the network "cloudflared-network"
     networks:
       - cloudflared-network
 
-# Create a network for the services you want to connect to cloudflared.
-# This allows your Cloudflare tunnel to connect to services via their container_name within the "cloudflared-network" bridge, eliminating the need for port mapping.
-# Consolidating all public services into a single network ensures they remain isolated from private services.
 networks:
   cloudflared-network:
-    # Fixed name, so that other Compose projects can join it as an external network
     name: cloudflared-network
 ```
 
-For services that are not in this docker-compose.yaml, you can add the network "cloudflared-network" to the service.
+Labelgate itself does not need to join `cloudflared-network`. It only talks to the Cloudflare API. The network lets `cloudflared` reach your apps by container name, without published ports.
+
+## 4. Start it
+
+```bash
+docker compose up -d
+```
+
+Within a few seconds Labelgate adds a tunnel rule and a DNS record for `app.example.com`. Open `https://app.example.com` and you should see the nginx welcome page.
+
+To see what Labelgate manages, open `http://localhost:8080/dashboard/` and sign in with your `LABELGATE_API_TOKEN`. To see errors, run `docker compose logs labelgate`.
+
+If `app.example.com` already exists on Cloudflare, Labelgate does not overwrite it. It shows a `conflict` error instead. See [Ownership & Conflicts](/docs/ownership).
+
+<Callout type="warn">
+When a container is removed, Labelgate deletes its Cloudflare resources 30 minutes later. To keep them, add `labelgate.tunnel.web.cleanup: "false"`.
+</Callout>
+
+## Apps in other Compose projects
+
+Join the same network and add labels:
 
 ```yaml
 services:
@@ -125,48 +123,15 @@ services:
       labelgate.tunnel.other.service: "http://other-app:80"
     networks:
       - cloudflared-network
+
 networks:
   cloudflared-network:
     external: true
 ```
 
-### 3. Start the stack
+## DNS only (no tunnel)
 
-```bash
-docker compose up -d
-```
-
-Labelgate will:
-1. Connect to the Docker daemon and discover running containers
-2. Parse the labels on `webapp`
-3. Add a Tunnel ingress rule pointing `app.example.com` to `http://webapp:80`, leaving any ingress rules you manage by hand untouched
-4. Create a CNAME record `app.example.com` to `<tunnel-id>.cfargotunnel.com`, marked in its comment as owned by this Labelgate instance
-
-If `app.example.com` already exists as a record or rule that Labelgate did not create, it is **not** taken over: you get a `conflict` error instead. See [Ownership & Conflicts](/docs/ownership).
-
-### 4. Verify
-
-After a few seconds, visit `https://app.example.com` - your nginx welcome page should be accessible through the Cloudflare Tunnel.
-
-You can also check the Labelgate logs:
-
-```bash
-docker compose logs labelgate
-```
-
-Open `http://localhost:8080/dashboard/` and sign in with your `LABELGATE_API_TOKEN` to see the managed resources, or query the API:
-
-```bash
-curl -H "Authorization: Bearer $LABELGATE_API_TOKEN" http://localhost:8080/api/overview
-```
-
-<Callout type="info">
-Resources Labelgate owns are removed again about 30 minutes (`sync.remove_delay`) after their container is gone, because `cleanup` defaults to `true`. Set `labelgate.tunnel.web.cleanup: "false"` to keep them.
-</Callout>
-
-## DNS-Only Example
-
-If you only need DNS record management (no tunnels), it's even simpler:
+If you only want DNS records, you need neither `cloudflared` nor the tunnel settings:
 
 ```yaml
 services:
@@ -174,10 +139,10 @@ services:
     image: ghcr.io/channinghe/labelgate:v0.3
     restart: unless-stopped
     group_add:
-      - "REPLACE_WITH_GROUP_ID"   # stat -c '%g' /var/run/docker.sock
+      - "REPLACE_WITH_GROUP_ID"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./labelgate-data:/app/config   # sudo chown -R 65532:65532 ./labelgate-data
+      - ./labelgate-data:/app/config
     environment:
       - LABELGATE_CLOUDFLARE_API_TOKEN
       - LABELGATE_API_TOKEN
@@ -191,10 +156,9 @@ services:
       labelgate.dns.web.proxied: "true"
 ```
 
-## What's Next?
+## Next steps
 
-- [Configuration](/docs/configuration) - Learn about config files, environment variables, and multi-credential setup
-- [Ownership & Conflicts](/docs/ownership) - What Labelgate will and will not touch on Cloudflare
-- [Upgrading to v0.3](/docs/upgrading) - Coming from v0.2?
-- [Label Reference](/docs/labels) - Full reference for all DNS, Tunnel, and Access labels
-- [Examples](/docs/examples/single-host) - More real-world deployment examples
+- [Label Reference](/docs/labels): every DNS, Tunnel and Access label.
+- [Configuration](/docs/configuration): config files and more settings.
+- [Examples](/docs/examples/single-host): more setups, including several hosts.
+- [Upgrading to v0.3](/docs/upgrading): coming from v0.2.

@@ -1,16 +1,11 @@
 ---
 title: About Labelgate
-description: Automate Cloudflare DNS, Tunnels, and Access Policies through Docker container labels.
+description: Manage Cloudflare DNS, Tunnels and Access from Docker container labels.
 ---
 
-## What is Labelgate?
-
-Labelgate is a lightweight Go daemon that watches your Docker containers and automatically manages Cloudflare resources based on container labels. Simply add labels to your containers, and Labelgate takes care of DNS records, Tunnel ingress rules, and Zero Trust Access policies for you.
-
-Instead of manually configuring Cloudflare every time you deploy a service, Labelgate makes infrastructure-as-code as simple as adding a Docker label.
+Labelgate watches your Docker containers and sets up Cloudflare for them. You add labels to a container, and Labelgate creates the DNS record, the tunnel route or the Access rule. When the container goes away, Labelgate cleans up.
 
 ```yaml
-# Just add labels to your container
 services:
   webapp:
     image: nginx
@@ -19,97 +14,34 @@ services:
       labelgate.tunnel.web.service: "http://webapp:80"
 ```
 
-## Core Concepts
+Start with [Getting Started](/docs/getting-started).
 
-### Labels
+## What it manages
 
-Labels are the primary interface for telling Labelgate what to do. They follow a structured format:
+| Label type | What you get | Example |
+|------------|--------------|---------|
+| `dns` | DNS records (A, AAAA, CNAME, TXT, MX, SRV, CAA) | Point `api.example.com` at your server |
+| `tunnel` | Cloudflare Tunnel routes | Publish `app.example.com` without opening ports |
+| `access` | Zero Trust Access applications and policies | Allow only `alice@example.com` into `admin.example.com` |
 
-```
-labelgate.<type>.<service_name>.<property>=<value>
-```
-
-- **type** - The resource type: `dns`, `tunnel`, or `access`
-- **service_name** - A unique name for this service (e.g., `web`, `api`)
-- **property** - The specific setting (e.g., `hostname`, `service`)
-
-### Operators
-
-Labelgate has three operators, each managing a specific type of Cloudflare resource:
-
-| Operator | What it manages | Example use case |
-|----------|----------------|------------------|
-| **DNS Operator** | DNS records (A, AAAA, CNAME, TXT, MX, SRV, CAA) | Point `api.example.com` to your server |
-| **Tunnel Operator** | Cloudflare Tunnel ingress rules | Expose `app.example.com` through a tunnel |
-| **Access Operator** | Zero Trust Access policies | Restrict access to `admin.example.com` by email |
-
-### Reconciliation
-
-Labelgate uses an event-driven reconciliation model:
-
-1. **Docker events** and **agent reports** trigger reconciliation (debounced) when containers start, stop, or die
-2. **Periodic sync** runs every `sync.interval` (default 5 minutes) as a fallback to catch any missed events
-3. A single reconciler collects the **desired state** (from container labels), validates it, resolves hostname conflicts, plans the changes against the **actual state** (from the Cloudflare API) and applies them. All Cloudflare changes are serialised through it
-
-### Providers
-
-Providers are the source of container information. Currently, Labelgate supports Docker as a provider, with Kubernetes planned for the future. The Docker provider supports two connection methods:
-
-- **Unix socket** - Local Docker daemon (`unix:///var/run/docker.sock`)
-- **TCP** - Remote Docker daemon (`tcp://host:2376`, use TLS)
-
-`ssh://` endpoints were removed in v0.3. For remote hosts, run a Labelgate [agent](/docs/examples/multi-host) there instead.
-
-### State Persistence
-
-All managed resources are tracked in a local SQLite database. This enables:
-
-- **Ownership tracking** - Know which container owns which Cloudflare resource, and mark what Labelgate created so that it never touches anything else (see [Ownership & Conflicts](/docs/ownership))
-- **Conflict detection** - The existing owner of a hostname wins; newcomers are rejected with a visible error
-- **Graceful recovery** - Resume operations after restarts without duplicate resources
-
-## How It Works
+Every label has the same shape:
 
 ```
-┌─────────────────────────────────────────────────┐
-│                 Docker Containers                │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐      │
-│  │ webapp   │  │ api      │  │ admin    │      │
-│  │ labels:  │  │ labels:  │  │ labels:  │      │
-│  │ tunnel.. │  │ dns..    │  │ access.. │      │
-│  └──────────┘  └──────────┘  └──────────┘      │
-└────────────────────┬────────────────────────────┘
-                     │ Docker Events
-                     ▼
-              ┌──────────────┐
-              │  Labelgate   │
-              │              │
-              │ ┌──────────┐ │
-              │ │  Parser  │ │  Parse labels
-              │ └────┬─────┘ │
-              │      ▼       │
-              │ ┌──────────┐ │
-              │ │Reconciler│ │  Desired vs Actual
-              │ └────┬─────┘ │
-              │      ▼       │
-              │ ┌──────────┐ │
-              │ │Operators │ │  DNS / Tunnel / Access
-              │ └──────────┘ │
-              └──────┬───────┘
-                     │ Cloudflare API
-                     ▼
-              ┌──────────────┐
-              │  Cloudflare  │
-              │ DNS Records  │
-              │ Tunnel Rules │
-              │ Access Policy│
-              └──────────────┘
+labelgate.<type>.<name>.<property>=<value>
 ```
 
-## Next Steps
+`<name>` is any short name you choose, such as `web` or `api`. It groups the labels of one service. See the [Label Reference](/docs/labels).
 
-- [Getting Started](/docs/getting-started) - Set up Labelgate in minutes
-- [Label Reference](/docs/labels) - Complete label format documentation
-- [Configuration](/docs/configuration) - Advanced configuration options
-- [Ownership & Conflicts](/docs/ownership) - What Labelgate will and will not touch
-- [Upgrading to v0.3](/docs/upgrading) - Breaking changes since v0.2
+## How it works
+
+- Labelgate reads labels from the local Docker socket. Other Docker hosts can run a small [agent](/docs/examples/multi-host) that sends their labels to the main instance.
+- It applies changes as soon as a container starts or stops, and checks everything again every 5 minutes.
+- It only changes or deletes Cloudflare resources it created. Your hand-made records are never touched. See [Ownership & Conflicts](/docs/ownership).
+- A built-in dashboard shows what it manages and any errors.
+
+## Next steps
+
+- [Getting Started](/docs/getting-started): set it up in a few minutes.
+- [Label Reference](/docs/labels): every label and option.
+- [Configuration](/docs/configuration): config files and settings.
+- [Upgrading to v0.3](/docs/upgrading): coming from v0.2.
