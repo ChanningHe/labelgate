@@ -49,7 +49,7 @@ var dnsHandlers = map[string]func(*dnsBuilder, string) error{
 func setDNSType(b *dnsBuilder, v string) error {
 	t := model.DNSType(strings.ToUpper(strings.TrimSpace(v)))
 	if !slices.Contains(model.DNSTypes, t) {
-		return fmt.Errorf("invalid record type %q", v)
+		return fmt.Errorf("invalid record type %q: use A, AAAA, CNAME, TXT, MX, SRV or CAA", v)
 	}
 	b.spec.Type = t
 	return nil
@@ -85,7 +85,7 @@ func (p *parser) parseDNS(services map[string]props) []model.DNSSpec {
 		}
 		stem := p.stem(typeDNS, name)
 		if !defaultsOK {
-			p.errs.add(stem, "service skipped: invalid %s settings", defaultsStem)
+			p.errs.add(stem, "service skipped because a %s.* label is invalid; fix that label first", defaultsStem)
 			continue
 		}
 		b := base
@@ -119,11 +119,11 @@ func (p *parser) applyDNS(b *dnsBuilder, stem string, in props, allowed map[stri
 func (p *parser) finalizeDNS(b dnsBuilder, stem string) (model.DNSSpec, bool) {
 	s := b.spec
 	if s.Hostname == "" {
-		p.errs.add(stem, "hostname is required")
+		p.errs.add(stem, "hostname is required: add %s.hostname", stem)
 		return s, false
 	}
 	if !model.ValidHostname(s.Hostname) {
-		p.errs.add(stem+".hostname", "invalid hostname %q", s.Hostname)
+		p.errs.add(stem+".hostname", "invalid hostname %q: use a full domain name such as app.example.com", s.Hostname)
 		return s, false
 	}
 	target, err := dnsTarget(s.Type, s.Target, b.targetSet)

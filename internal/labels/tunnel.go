@@ -83,7 +83,7 @@ func (p *parser) parseTunnels(services map[string]props) []model.TunnelSpec {
 		}
 		stem := p.stem(typeTunnel, name)
 		if !defaultsOK {
-			p.errs.add(stem, "service skipped: invalid %s settings", defaultsStem)
+			p.errs.add(stem, "service skipped because a %s.* label is invalid; fix that label first", defaultsStem)
 			continue
 		}
 		s := base
@@ -126,11 +126,11 @@ func (p *parser) applyTunnel(s *model.TunnelSpec, stem string, in props, allowed
 func (p *parser) validateTunnel(s model.TunnelSpec, stem string) bool {
 	switch {
 	case s.Hostname == "":
-		p.errs.add(stem, "hostname is required")
+		p.errs.add(stem, "hostname is required: add %s.hostname", stem)
 	case !model.ValidHostname(s.Hostname):
-		p.errs.add(stem+".hostname", "invalid hostname %q", s.Hostname)
+		p.errs.add(stem+".hostname", "invalid hostname %q: use a full domain name such as app.example.com", s.Hostname)
 	case s.URL == "":
-		p.errs.add(stem, "service is required")
+		p.errs.add(stem, "service is required: add %s.service, e.g. http://web:8080", stem)
 	default:
 		if err := validateServiceURL(s.URL); err != nil {
 			p.errs.add(stem+".service", "%v", err)
@@ -161,22 +161,22 @@ func validateServiceURL(raw string) error {
 	scheme = strings.ToLower(scheme)
 	switch {
 	case !ok:
-		return fmt.Errorf("invalid service %q (expected scheme://host:port)", raw)
+		return fmt.Errorf("invalid service %q: use scheme://host:port, e.g. http://web:8080", raw)
 	case unixSchemes[scheme]:
 		if strings.Trim(rest, "/") == "" {
-			return fmt.Errorf("service %q needs a socket path", raw)
+			return fmt.Errorf("service %q needs a socket path, e.g. unix:/run/app.sock", raw)
 		}
 		return nil
 	case networkSchemes[scheme]:
 		return validateNetworkService(raw)
 	}
-	return fmt.Errorf("unsupported service scheme %q", scheme)
+	return fmt.Errorf("unsupported service scheme %q: use http, https, tcp, ssh, rdp, udp, unix, unix+tls, http_status:<code>, hello_world or bastion", scheme)
 }
 
 func validateNetworkService(raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" || u.Hostname() == "" {
-		return fmt.Errorf("invalid service %q (expected scheme://host:port)", raw)
+		return fmt.Errorf("invalid service %q: use scheme://host:port, e.g. http://web:8080", raw)
 	}
 	return nil
 }

@@ -59,7 +59,7 @@ func TestDNS_DefaultsErrors(t *testing.T) {
 			t.Fatalf("services must be dropped: %+v", got.DNS)
 		}
 		if !hasErr(got, "labelgate.dns.default.proxied", "invalid boolean") ||
-			!hasErr(got, "labelgate.dns.web", "invalid labelgate.dns.default") {
+			!hasErr(got, "labelgate.dns.web", "a labelgate.dns.default.* label is invalid") {
 			t.Fatalf("errors: %+v", got.Errors)
 		}
 	})

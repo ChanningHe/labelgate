@@ -75,7 +75,7 @@ func TestTunnel_DefaultsBlock(t *testing.T) {
 	if len(bad.Tunnels) != 0 ||
 		!hasErr(bad, "labelgate.tunnel.default.cleanup", "invalid boolean") ||
 		!hasErr(bad, "labelgate.tunnel.default.service", "unknown property") ||
-		!hasErr(bad, "labelgate.tunnel.a", "invalid labelgate.tunnel.default") {
+		!hasErr(bad, "labelgate.tunnel.a", "a labelgate.tunnel.default.* label is invalid") {
 		t.Errorf("got %+v", bad)
 	}
 }
@@ -136,8 +136,8 @@ func TestTunnel_RequiredAndInvalid(t *testing.T) {
 		wantKey string
 		wantMsg string
 	}{
-		{"missing hostname", L{"service": "http://a:80"}, "labelgate.tunnel.web", "hostname is required"},
-		{"missing service", L{"hostname": "a.example.com"}, "labelgate.tunnel.web", "service is required"},
+		{"missing hostname", L{"service": "http://a:80"}, "labelgate.tunnel.web", "hostname is required: add labelgate.tunnel.web.hostname"},
+		{"missing service", L{"hostname": "a.example.com"}, "labelgate.tunnel.web", "service is required: add labelgate.tunnel.web.service"},
 		{"bad hostname", L{"hostname": "nodots", "service": "http://a:80"}, "labelgate.tunnel.web.hostname", "invalid hostname"},
 		{"bad path regex", L{"hostname": "a.example.com", "service": "http://a:80", "path": "("}, "labelgate.tunnel.web.path", "invalid path regex"},
 		{"bad cleanup", L{"hostname": "a.example.com", "service": "http://a:80", "cleanup": "x"}, "labelgate.tunnel.web.cleanup", "invalid boolean"},
