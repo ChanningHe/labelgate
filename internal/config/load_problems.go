@@ -116,10 +116,16 @@ func decodeProblems(err error) (unknown, failures ValidationErrors) {
 func unknownKeys(section, list string) ValidationErrors {
 	var p ValidationErrors
 	for _, name := range strings.Split(list, ",") {
-		key := dotted(section + "." + strings.TrimSpace(name))
-		if !isRemovedPath(key) {
-			p.addf(key, "unknown key; check the spelling against the configuration reference, or delete it")
+		name = strings.TrimSpace(name)
+		key := dotted(section + "." + name)
+		if isRemovedPath(key) {
+			continue
 		}
+		if hint := suggestKey(sectionPattern(section), name); hint != "" {
+			p.addf(key, "unknown key; did you mean %s?", hint)
+			continue
+		}
+		p.addf(key, "unknown key; check the spelling against the configuration reference, or delete it")
 	}
 	return p
 }
