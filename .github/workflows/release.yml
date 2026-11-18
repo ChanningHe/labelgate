@@ -261,6 +261,9 @@ jobs:
                 - LABELGATE_CLOUDFLARE_API_TOKEN
                 - LABELGATE_CLOUDFLARE_ACCOUNT_ID
                 - LABELGATE_CLOUDFLARE_TUNNEL_ID
+                # Dashboard/API login token, at least 16 characters; generate one with "openssl rand -hex 32".
+                # Without it the dashboard and API are disabled (sync keeps running).
+                - LABELGATE_API_TOKEN
               ports:
                 - "28111:28111"
               network_mode: bridge
