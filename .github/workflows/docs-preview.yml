@@ -1,0 +1,72 @@
+name: Docs Preview
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "docsite/**"
+      - ".github/workflows/docs-preview.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Only the newest push to main matters; a superseded deploy is just noise.
+concurrency:
+  group: docs-preview
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy preview to Cloudflare Pages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: yarn
+          cache-dependency-path: docsite/yarn.lock
+
+      - name: Install and build
+        working-directory: docsite
+        run: |
+          yarn install --frozen-lockfile
+          yarn build
+
+      # Production deploys live in docs.yml (branch=tags). Any other --branch is a Pages
+      # preview, and Pages adds X-Robots-Tag: noindex to previews. "preview" (not "main")
+      # so this can never become production even if the project's production branch changes.
+      # The commit message is not passed: the action runs the command without a shell, so
+      # env expansion is unavailable, and wrangler reads it from the checkout anyway.
+      - name: Deploy preview to Cloudflare Pages
+        id: deploy
+        uses: cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0 # v4.1.3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy docsite/out --project-name=labelgate-docs --branch=preview --commit-hash=${{ github.sha }}
+
+      - name: Summarize deployment
+        env:
+          ALIAS_URL: ${{ steps.deploy.outputs.pages-deployment-alias-url }}
+          DEPLOYMENT_URL: ${{ steps.deploy.outputs.deployment-url }}
+          PAGES_ENVIRONMENT: ${{ steps.deploy.outputs.pages-environment }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          if [[ "$PAGES_ENVIRONMENT" == "production" ]]; then
+            echo "::error::Deployment landed in production; check the Pages project's production branch"
+            exit 1
+          fi
+          {
+            echo "### Docs preview"
+            echo
+            echo "- Preview: ${ALIAS_URL:-https://preview.labelgate-docs.pages.dev}"
+            echo "- This deployment: ${DEPLOYMENT_URL:-n/a}"
+            echo "- Environment: ${PAGES_ENVIRONMENT:-unknown}"
+            echo "- Commit: \`${COMMIT_SHA}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
