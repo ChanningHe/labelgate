@@ -59,11 +59,12 @@ func httpCheck(ctx context.Context, client *http.Client, listen, basePath string
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return fmt.Errorf("the API is not answering at %s: %w; check the labelgate logs, and that %s is the address it listens on",
+			url, err, config.KeyWithEnv("api.address"))
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("GET %s: status %d", url, resp.StatusCode)
+		return fmt.Errorf("GET %s returned HTTP %d, want 200; check %s", url, resp.StatusCode, config.KeyWithEnv("api.base_path"))
 	}
 	return nil
 }
@@ -76,7 +77,8 @@ func dialCheck(ctx context.Context, listen string) error {
 	var d net.Dialer
 	conn, err := d.DialContext(ctx, "tcp", addr)
 	if err != nil {
-		return err
+		return fmt.Errorf("the agent's inbound listener is not accepting connections at %s: %w; check the labelgate logs and %s",
+			addr, err, config.KeyWithEnv("connect.listen"))
 	}
 	return conn.Close()
 }

@@ -147,7 +147,7 @@ func (a *app) runAgent(ctx context.Context, cfg config.Config, log *slog.Logger)
 func (a *app) runMain(ctx context.Context, cfg config.Config, log *slog.Logger) (err error) {
 	st, err := a.b.openStore(ctx, cfg.DB.Path)
 	if err != nil {
-		return fmt.Errorf("open store %q: %w", cfg.DB.Path, err)
+		return fmt.Errorf("open store %q: %w%s", cfg.DB.Path, err, storeHint(err))
 	}
 	defer func() { err = errors.Join(err, st.Close()) }()
 
@@ -177,7 +177,8 @@ func (a *app) buildMain(ctx context.Context, cfg config.Config, st store.Store, 
 	}
 	if !cfg.SkipCredentialValidation {
 		if err := cf.Verify(ctx); err != nil {
-			return nil, nil, nil, fmt.Errorf("cloudflare credential validation failed: %w", err)
+			return nil, nil, nil, fmt.Errorf("cloudflare credential validation failed (checked at startup; %s=true skips it): %w",
+				config.KeyWithEnv("skip_credential_validation"), err)
 		}
 	}
 
@@ -267,10 +268,10 @@ func (a *app) buildHub(cfg config.Config, st store.Store, rec reconcile.Engine, 
 func (a *app) buildAPI(cfg config.Config, st store.Store, rec reconcile.Engine, h hub, cf cloudflare.API, log *slog.Logger) (runner, error) {
 	switch {
 	case !cfg.API.Enabled:
-		log.Info("API disabled (api.enabled=false)")
+		log.Info("API and dashboard disabled by " + config.KeyWithEnv("api.enabled") + "=false")
 		return nil, nil
 	case cfg.API.Token == "":
-		log.Error("api.token is empty: API and dashboard disabled")
+		log.Warn(apiTokenMissing())
 		return nil, nil
 	}
 	deps := api.Deps{
@@ -293,6 +294,13 @@ func (a *app) buildAPI(cfg config.Config, st store.Store, rec reconcile.Engine, 
 		return nil, fmt.Errorf("api: %w", err)
 	}
 	return srv, nil
+}
+
+// apiTokenMissing is logged when the API is enabled but has no token.
+func apiTokenMissing() string {
+	return fmt.Sprintf("API and dashboard disabled: api.token is empty; set %s to a secret of at least %d characters "+
+		"(generate one with: openssl rand -hex 32). DNS, tunnel and Access sync keep running",
+		config.KeyWithEnv("api.token"), config.MinAPITokenLen)
 }
 
 // closingEngine releases the Docker source once the reconciler has stopped.
