@@ -1,6 +1,10 @@
 package reconcile
 
-import "github.com/channinghe/labelgate/internal/config"
+import (
+	"strings"
+
+	"github.com/channinghe/labelgate/internal/config"
+)
 
 // PoliciesFromConfig builds AgentPolicies from the main instance configuration.
 //
@@ -28,6 +32,7 @@ func PoliciesFromConfig(cfg config.Config) AgentPolicies {
 			Hostnames: cloneStrings(cfg.Agent.AcceptHostnames),
 			Services:  cloneStrings(cfg.Agent.AcceptServices),
 			Tunnels:   cloneStrings(cfg.Agent.AcceptTunnels),
+			viaAccept: true,
 		}
 		if len(p.Tunnels) == 0 {
 			p.Tunnels = []string{""}
@@ -56,6 +61,28 @@ func namedPolicy(e config.AgentEntry) AgentPolicy {
 		Tunnels:       tunnels,
 		DefaultTunnel: e.DefaultTunnel,
 	}
+}
+
+// key returns the main-instance config key of one of this policy's
+// allow-lists ("hostnames", "tunnels" or "services"): agent.agents.<id>.<list>
+// for named agents, agent.accept_<list> for accept_token agents. The agent ID
+// is printed as-is; the result is for humans, not for key lookups.
+func (p AgentPolicy) key(id, list string) string {
+	if p.viaAccept {
+		return "agent.accept_" + list
+	}
+	return "agent.agents." + id + "." + list
+}
+
+// fixHint says where to change an allow-list: the key, the environment
+// variable that sets it for accept_token agents, and that the main instance
+// (not the agent) owns it.
+func (p AgentPolicy) fixHint(id, list string) string {
+	hint := p.key(id, list)
+	if p.viaAccept {
+		hint += " (env LABELGATE_AGENT_ACCEPT_" + strings.ToUpper(list) + ", comma-separated)"
+	}
+	return hint + " in the main instance config"
 }
 
 func copyPolicy(p AgentPolicy) AgentPolicy {

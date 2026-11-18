@@ -41,6 +41,10 @@ type AgentPolicy struct {
 	// Services allow-lists tunnel origins beyond public/private IP literals:
 	// hostname globs, IP addresses and CIDRs. Empty = IP literals only.
 	Services []string
+	// viaAccept marks a policy built from agent.accept_* (accept_token
+	// agents) instead of a named agent.agents.<id> entry. It only selects the
+	// config keys that rejection messages point at.
+	viaAccept bool
 }
 
 // AgentPolicies returns the policy for an agent ID.

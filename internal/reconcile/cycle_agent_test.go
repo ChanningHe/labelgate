@@ -107,12 +107,12 @@ func TestAgentPolicyRejections(t *testing.T) {
 		pl   model.ParsedLabels
 		want string
 	}{
-		{"hostname not allowed", dnsOnly(dnsSpec("web", appHost)), "may not claim hostname"},
+		{"hostname not allowed", dnsOnly(dnsSpec("web", appHost)), "hostnames allow-list"},
 		{"tunnel not allowed", func() model.ParsedLabels {
 			s := tunSpec("web", "a.agents.example.com", "http://web:80")
 			s.Tunnel = "other"
 			return tunOnly(s)
-		}(), "may not use tunnel"},
+		}(), "allowed tunnels"},
 		{"unknown tunnel", func() model.ParsedLabels {
 			s := tunSpec("web", "a.agents.example.com", "http://web:80")
 			s.Tunnel = "nope"
@@ -128,7 +128,7 @@ func TestAgentPolicyRejections(t *testing.T) {
 			name string
 			pl   model.ParsedLabels
 			want string
-		}{"ssrf " + u, tunOnly(tunSpec("web", "a.agents.example.com", u)), "not allowed"})
+		}{"ssrf " + u, tunOnly(tunSpec("web", "a.agents.example.com", u)), `agent "edge"`})
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
