@@ -21,7 +21,7 @@ type executor struct {
 	r        *Reconciler
 	now      time.Time
 	rows     map[rowKey]model.Resource // persisted state
-	issues   []string
+	issues   []problem
 	deleted  map[string]bool // DNS record IDs deleted this cycle
 	tunnelOK map[string]bool // tunnels whose configuration is in place
 }
@@ -135,14 +135,15 @@ func (e *executor) succeedRow(ctx context.Context, row model.Resource, cfid stri
 func (e *executor) fail(ctx context.Context, k rowKey, msg string) error {
 	row, ok := e.rows[k]
 	if !ok {
-		e.issues = append(e.issues, k.String()+": "+msg)
+		e.issues = append(e.issues, problem{k.String(), k.String() + ": " + msg})
 		return nil
 	}
 	return e.failRow(ctx, row, msg)
 }
 
 func (e *executor) failRow(ctx context.Context, row model.Resource, msg string) error {
-	e.issues = append(e.issues, keyOf(row).String()+": "+msg)
+	k := keyOf(row).String()
+	e.issues = append(e.issues, problem{k, k + ": " + msg})
 	row.Status, row.LastError = model.StatusError, msg
 	return e.persist(ctx, row)
 }

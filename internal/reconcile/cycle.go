@@ -17,17 +17,15 @@ func (r *Reconciler) runCycle(ctx context.Context) time.Time {
 		return time.Time{} // shutting down: the cycle is incomplete, keep the last status
 	}
 	if err != nil { // an aborted cycle is the most important problem: report it first
-		issues = append([]string{err.Error()}, issues...)
+		issues = append([]problem{{subjectCycle, err.Error()}}, issues...)
 	}
-	for _, msg := range issues {
-		r.log.Warn("reconcile problem", "problem", msg)
-	}
+	r.logProblems(r.now(), issues, err == nil)
 	st := SyncStatus{State: SyncSuccess, LastSync: r.now()}
 	if len(issues) > 0 {
 		st.State = SyncError
-		st.Error = issues[0]
+		st.Error = issues[0].Text
 		if len(issues) > 1 {
-			st.Error = fmt.Sprintf("%d problems (see the resource list and the labelgate log); first: %s", len(issues), issues[0])
+			st.Error = fmt.Sprintf("%d problems (see the resource list and the labelgate log); first: %s", len(issues), issues[0].Text)
 		}
 	}
 	r.setStatus(st)
@@ -35,7 +33,7 @@ func (r *Reconciler) runCycle(ctx context.Context) time.Time {
 }
 
 // cycle runs collect -> resolve -> observe -> plan -> execute.
-func (r *Reconciler) cycle(ctx context.Context, now time.Time) ([]string, time.Time, error) {
+func (r *Reconciler) cycle(ctx context.Context, now time.Time) ([]problem, time.Time, error) {
 	col, err := r.collect(ctx, now)
 	if err != nil {
 		return nil, time.Time{}, storeError{err}
@@ -99,10 +97,13 @@ func heldRejected(prev []model.Resource, held holdSet) []model.Resource {
 	return out
 }
 
-func rejectionIssues(rows []model.Resource) []string {
-	out := make([]string, 0, len(rows))
+func rejectionIssues(rows []model.Resource) []problem {
+	out := make([]problem, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, fmt.Sprintf("rejected %s (%s): %s", describeKey(keyOf(r)), describeOwner(r.Owner), r.LastError))
+		out = append(out, problem{
+			Subject: fmt.Sprintf("rejected %s (%s)", keyOf(r), describeOwner(r.Owner)),
+			Text:    fmt.Sprintf("rejected %s (%s): %s", describeKey(keyOf(r)), describeOwner(r.Owner), r.LastError),
+		})
 	}
 	return out
 }

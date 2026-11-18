@@ -16,7 +16,7 @@ type collected struct {
 	Claims   []claim
 	Rejected []model.Resource
 	Holds    []labelHold
-	Issues   []string
+	Issues   []problem
 	// Deadline is the earliest agent grace expiry (a cycle must run then).
 	Deadline time.Time
 }
@@ -55,10 +55,12 @@ func (r *Reconciler) collectLocal(ctx context.Context, out *collected) *sourceIn
 	switch {
 	case err != nil:
 		src.State = sourceHeld
-		out.Issues = append(out.Issues, fmt.Sprintf("%v; resources of local containers are kept unchanged until Docker answers again", err))
+		out.Issues = append(out.Issues, problem{subjectLocalDocker,
+			fmt.Sprintf("%v; resources of local containers are kept unchanged until Docker answers again", err)})
 	case !snap.Complete:
 		src.State = sourceHeld
-		out.Issues = append(out.Issues, "local Docker returned an incomplete container list; resources of local containers are kept unchanged until the next sync")
+		out.Issues = append(out.Issues, problem{subjectLocalDocker,
+			"local Docker returned an incomplete container list; resources of local containers are kept unchanged until the next sync"})
 	default:
 		snap.AgentID = model.LocalAgentID
 		src.Snapshot = snap
@@ -106,7 +108,10 @@ func (r *Reconciler) expand(src *sourceInfo, out *collected) {
 		src.Defs[c.Name] = pl.Access
 		parsed = append(parsed, parsedContainer{Ctr: c, Labels: pl})
 		for _, e := range pl.Errors {
-			out.Issues = append(out.Issues, fmt.Sprintf("%s container %s: %v", sourceName(src), c.Name, e))
+			out.Issues = append(out.Issues, problem{
+				Subject: fmt.Sprintf("%s container %s label %s", sourceName(src), c.Name, e.Key),
+				Text:    fmt.Sprintf("%s container %s: %v", sourceName(src), c.Name, e),
+			})
 			if h, ok := holdFor(r.settings.LabelPrefix, src.AgentID, c.Name, pl, e); ok {
 				out.Holds = append(out.Holds, h)
 			}
