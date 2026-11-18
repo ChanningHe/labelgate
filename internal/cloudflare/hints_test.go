@@ -51,6 +51,70 @@ func TestAPIError_ExplainsHowToFix(t *testing.T) {
 	}
 }
 
+func TestAPIError_InvalidTokenLeadsWithReplacingIt(t *testing.T) {
+	tests := []struct {
+		name string
+		err  *APIError
+	}{
+		{"403 invalid access token, dns op",
+			&APIError{Op: "dns.list", Status: 403, Codes: []int{9109}, Messages: []string{"Invalid access token"}, Err: ErrUnauthorized, Credential: "default"}},
+		{"403 invalid access token, code 10000",
+			&APIError{Op: "tunnel.config.get", Status: 403, Codes: []int{10000}, Messages: []string{"Invalid access token"}, Err: ErrUnauthorized, Credential: "default"}},
+		{"401 invalid API token by code",
+			&APIError{Op: "zones.list", Status: 401, Codes: []int{1000}, Messages: []string{"anything"}, Err: ErrUnauthorized, Credential: "default"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.err.Error()
+			assertContains(t, got, "replace the API token in cloudflare.api_token (env LABELGATE_CLOUDFLARE_API_TOKEN)", "invalid, expired or revoked", tokenPage)
+			if strings.Contains(got, "give it the") {
+				t.Errorf("an invalid token must not lead with a permission hint: %q", got)
+			}
+		})
+	}
+}
+
+func TestAPIError_AuthLockoutExplainsTheTokenIsInvalid(t *testing.T) {
+	e := &APIError{Op: "dns.list", Status: 429, Codes: []int{10502}, Messages: []string{"Too many authentication failures"}, Err: nil, Credential: "corp"}
+
+	got := e.Error()
+
+	assertContains(t, got, "HTTP 429 (codes [10502])", "cloudflare.credentials.corp.api_token", "is invalid",
+		"temporarily blocks it", "replace the token", "wait for the lockout to expire")
+	for _, bad := range []string{"rate-limiting", "retries on the next sync", "restart"} {
+		if strings.Contains(got, bad) {
+			t.Errorf("runtime lockout message must not contain %q: %q", bad, got)
+		}
+	}
+}
+
+func TestAPIError_StartupDoesNotPromiseARetry(t *testing.T) {
+	tests := []struct {
+		name  string
+		err   *APIError
+		wants []string
+	}{
+		{"lockout mentions the restart loop",
+			&APIError{Op: "tokens.verify", Status: 429, Codes: []int{10502}, Messages: []string{"Too many authentication failures"}, Credential: "default", startup: true},
+			[]string{"replace the token", "wait for the lockout to expire", "restart: unless-stopped", "keeps the lockout active"}},
+		{"plain rate limit",
+			&APIError{Op: "tokens.verify", Status: 429, Messages: []string{"slow down"}, Credential: "default", startup: true},
+			[]string{"rate-limiting", "start labelgate again"}},
+		{"server error",
+			&APIError{Op: "tokens.verify", Status: 502, Messages: []string{"bad gateway"}, Credential: "default", startup: true},
+			[]string{"server-side error", "start labelgate again"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.err.Error()
+			assertContains(t, got, tt.wants...)
+			if strings.Contains(got, "next sync") {
+				t.Errorf("startup exits, so no retry may be promised: %q", got)
+			}
+		})
+	}
+}
+
 func TestAPIError_NoHintOnShutdown(t *testing.T) {
 	e := &APIError{Op: "dns.list", Err: context.Canceled}
 	if got := e.Error(); got != "cloudflare dns.list: context canceled" {

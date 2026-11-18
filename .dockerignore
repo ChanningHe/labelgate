@@ -5,6 +5,9 @@
 .github/
 bin/
 dev/
+# Local tool state, including agent worktrees (each one a full checkout).
+.claude/
+.wrangler/
 
 # local secrets
 **/.env
@@ -17,7 +20,7 @@ coverage.html
 *.coverprofile
 
 # dependencies and build output
-dashboard/node_modules/
+**/node_modules/
 dashboard/static/
 dashboard/.vite/
 docsite/

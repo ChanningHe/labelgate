@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/channinghe/labelgate/internal/config"
@@ -83,6 +84,17 @@ func TunnelKeys(ref string) (tunnelID, accountID string) {
 	return "cloudflare.tunnels." + ref + ".tunnel_id", "cloudflare.tunnels." + ref + ".account_id"
 }
 
+// Cloudflare error codes that say the token itself is bad.
+const (
+	// codeInvalidAPIToken is "Invalid API Token" (token verification).
+	codeInvalidAPIToken = 1000
+	// codeBadAuthHeader is "Invalid format for Authorization header".
+	codeBadAuthHeader = 6111
+	// codeAuthLockout is HTTP 429 "Too many authentication failures": after
+	// repeated requests with an invalid token Cloudflare blocks it for a while.
+	codeAuthLockout = 10502
+)
+
 // hint says how to fix a failed call, or "" when the cause is not known.
 func (e *APIError) hint() string {
 	switch {
@@ -90,22 +102,60 @@ func (e *APIError) hint() string {
 		return "" // the caller stopped waiting (shutdown): nothing to fix
 	case errors.Is(e.Err, ErrUnauthorized):
 		return e.authHint()
+	case e.Status == http.StatusTooManyRequests && slices.Contains(e.Codes, codeAuthLockout):
+		return e.lockoutHint()
 	case e.Status == http.StatusTooManyRequests:
-		return "Cloudflare is rate-limiting this API token; labelgate retries on the next sync"
+		return "Cloudflare is rate-limiting this API token; " + e.retryAdvice()
 	case e.Status == 0 && e.Err != nil:
 		return "cannot reach the Cloudflare API: check DNS, outbound HTTPS (port 443) and proxy settings of the labelgate host"
 	case e.Status >= http.StatusInternalServerError:
-		return "Cloudflare had a server-side error; labelgate retries on the next sync"
+		return "Cloudflare had a server-side error; " + e.retryAdvice()
 	}
 	return ""
+}
+
+// retryAdvice says what happens next: a sync retries, but startup validation
+// exits the process, so there the operator has to start it again.
+func (e *APIError) retryAdvice() string {
+	if e.startup {
+		return "wait a moment, then start labelgate again"
+	}
+	return "labelgate retries on the next sync"
+}
+
+// lockoutHint explains HTTP 429 code 10502: the token is invalid and
+// Cloudflare temporarily blocks it after repeated failures.
+func (e *APIError) lockoutHint() string {
+	h := "the API token in " + CredentialKey(e.Credential) +
+		" is invalid and Cloudflare temporarily blocks it after repeated authentication failures; " +
+		"replace the token, then wait for the lockout to expire"
+	if e.startup {
+		h += " (a restart loop such as restart: unless-stopped keeps the lockout active)"
+	}
+	return h
+}
+
+// tokenRejected reports whether Cloudflare says the token itself is invalid,
+// as opposed to lacking a permission.
+func (e *APIError) tokenRejected() bool {
+	if slices.Contains(e.Codes, codeInvalidAPIToken) || slices.Contains(e.Codes, codeBadAuthHeader) {
+		return true
+	}
+	for _, m := range e.Messages {
+		m = strings.ToLower(m)
+		if strings.Contains(m, "invalid") && strings.Contains(m, "token") {
+			return true
+		}
+	}
+	return false
 }
 
 // authHint explains a 401/403: an invalid token or a missing permission.
 func (e *APIError) authHint() string {
 	key := CredentialKey(e.Credential)
 	perm := permissionFor(e.Op)
-	if e.Op == "tokens.verify" || perm == "" {
-		return "the API token in " + key + " is invalid, expired or revoked; create a new one under " + tokenPage
+	if e.Op == "tokens.verify" || perm == "" || e.tokenRejected() {
+		return "replace the API token in " + key + ": Cloudflare reports it as invalid, expired or revoked; create a new one under " + tokenPage
 	}
 	return "the API token in " + key + " was refused: give it the " + perm +
 		" permission for this zone or account under " + tokenPage + " (or replace it if it is invalid)"

@@ -50,6 +50,29 @@ func TestVerifyReportsEveryFailure(t *testing.T) {
 	}
 }
 
+func TestVerifyAuthLockoutIsStartupWorded(t *testing.T) {
+	f := newFakeCF(t)
+	f.inject("GET", "/user/tokens/verify", 10, 429, cfErrorBody(10502, "Too many authentication failures"), nil)
+	c := f.client(t, config.CloudflareConfig{APIToken: testToken})
+
+	err := c.Verify(context.Background())
+
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	for _, want := range []string{"codes [10502]", "is invalid", "replace the token", "restart: unless-stopped"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error lacks %q: %v", want, err)
+		}
+	}
+	if strings.Contains(err.Error(), "next sync") {
+		t.Errorf("startup must not promise a retry: %v", err)
+	}
+	if n := f.count("GET", "/user/tokens/verify"); n != 1 {
+		t.Errorf("a lockout must not be retried (it would extend it): %d requests", n)
+	}
+}
+
 func TestVerifyAccountOwnedToken(t *testing.T) {
 	f := newFakeCF(t)
 	f.userVerify4 = true

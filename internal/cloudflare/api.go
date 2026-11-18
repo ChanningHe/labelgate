@@ -123,6 +123,9 @@ type APIError struct {
 	Err      error    // sentinel (ErrNotFound, ErrAlreadyExists, ErrUnauthorized) or transport error; may be nil
 	// Credential names the configured credential used ("default" = root); "" if unknown.
 	Credential string
+	// startup is set by Verify: the process exits on this error, so hints must
+	// not promise a retry on the next sync.
+	startup bool
 }
 
 // Error reads "cloudflare <op>: HTTP <status> (codes [...]): <messages>",
@@ -161,7 +164,7 @@ type Zone struct {
 	ID         string
 	Name       string // zone name, lower-case
 	AccountID  string // account owning the zone; used for Access
-	Credential string // credential name ("default" = root)
+	Credential string //credential name ("default" = root)
 }
 
 // Account returns the Access account of the zone.

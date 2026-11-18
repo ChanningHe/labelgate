@@ -95,7 +95,7 @@ cloudflare:
 		"cloudflare.credentials.c.api_token")
 }
 
-func TestLoad_TypeErrorsAreAllReportedAndSkipValidation(t *testing.T) {
+func TestLoad_TypeErrorsDoNotHideValidationProblems(t *testing.T) {
 	err := loadYAML(t, `
 bogus: 1
 db:
@@ -107,9 +107,42 @@ sync:
   interval: 30
 `)
 
-	// log_level is only a validation problem: the config is untrusted, so
-	// Validate does not run.
-	wantFields(t, err, "db.retention", "bogus", "retry.attempts", "sync.interval")
+	// Order: removed, unknown, decode failures, then validation. The failed
+	// retry.attempts and sync.interval are not validated a second time.
+	wantFields(t, err, "db.retention", "bogus", "retry.attempts", "sync.interval", "log_level")
+}
+
+func TestLoad_ReportsDecodeValidationRemovedAndUnknownTogether(t *testing.T) {
+	path := writeFile(t, t.TempDir(), "c.yaml", "cloudflare:\n  api_token: t\nsync:\n  interval: 30\ndb:\n  retention: 1h\nbogus: 1\n")
+
+	_, err := load(path, env("LABELGATE_API_TOKEN", "short", "LABELGATE_LOG_LEVEL", "verbose"), nil)
+
+	wantFields(t, err, "db.retention", "bogus", "sync.interval", "log_level", "api.token")
+	msg := err.Error()
+	for _, sub := range []string{"must be a string", "must be at least 16 characters", `"verbose" is invalid`} {
+		if !strings.Contains(msg, sub) {
+			t.Errorf("missing %q in:\n%s", sub, msg)
+		}
+	}
+	if strings.Contains(msg, "must be >=") {
+		t.Errorf("a field that failed to decode must not be validated again:\n%s", msg)
+	}
+}
+
+func TestLoad_FailedFieldDependentsAreNotValidated(t *testing.T) {
+	tests := []struct {
+		name, body string
+		want       []string
+	}{
+		{"max_delay depends on a failed delay", "retry:\n  delay: 5\n  max_delay: 100ms\n", []string{"retry.delay"}},
+		{"failed entry hides its own checks", "agent:\n  agents:\n    web: not-a-map\n", []string{"agent.agents.web"}},
+		{"failed tunnels hide default_tunnel", "  tunnels: nope\ndefault_tunnel: sec\n", []string{"cloudflare.tunnels"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wantFields(t, loadYAML(t, tt.body), tt.want...)
+		})
+	}
 }
 
 func TestLoad_UnknownKeysStillRunValidation(t *testing.T) {
@@ -168,6 +201,21 @@ default_tunnel: sec
 
 	// default_tunnel resolves: the sec entry survives the unknown key.
 	wantFields(t, err, "cloudflare.tunnels.sec.acount_id")
+}
+
+func TestDropCovered_PatternsAndSubtrees(t *testing.T) {
+	found := ValidationErrors{
+		fail("agent.agents.nas.lan.tunnels", "x"),
+		fail("agent.agents.nas.lan.token", "x"),
+		fail("cloudflare.tunnels.sec.account_id", "x"),
+		fail("retry.max_delay", "x"),
+		fail("log_level", "x"),
+	}
+	failures := ValidationErrors{fail("cloudflare.tunnels", "x"), fail("retry.delay", "x")}
+
+	got := dropCovered(found, failures)
+
+	wantFields(t, got.err(), "agent.agents.nas.lan.token", "log_level")
 }
 
 func TestDecodeProblems_NonDecodeErrorBecomesConfigProblem(t *testing.T) {

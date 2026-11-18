@@ -97,7 +97,7 @@ func checkAgentEntry(p *ValidationErrors, cf CloudflareConfig, id string, e Agen
 func checkWebSocketURL(field, raw string) *ValidationError {
 	u, err := url.Parse(raw)
 	if err != nil || (u.Scheme != "ws" && u.Scheme != "wss") || u.Host == "" {
-		return fail(field, "%q must be a ws:// or wss:// URL with a host, e.g. wss://host:28112/ws", raw)
+		return fail(field, "%q must be a ws:// or wss:// URL with a host, e.g. wss://host:28112/ws", redactURL(raw))
 	}
 	return nil
 }
@@ -138,7 +138,8 @@ func checkConnectEndpoint(endpoint string) *ValidationError {
 		return ve
 	}
 	if u, _ := url.Parse(endpoint); strings.Trim(u.Path, "/") == "" {
-		return fail(field, "%q has no path (did you mean %s/ws?)", endpoint, strings.TrimRight(endpoint, "/"))
+		safe := redactURL(endpoint)
+		return fail(field, "%q has no path (did you mean %s/ws?)", safe, strings.TrimRight(safe, "/"))
 	}
 	return nil
 }

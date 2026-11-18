@@ -42,8 +42,9 @@ var (
 // Load reads configuration from file and environment, applies Defaults and
 // returns a validated Config. On failure the error describes every problem,
 // not just the first, in a stable order: removed keys, unknown keys, decode
-// (type) errors, then Validate problems. Validate is skipped when a decode
-// error means the Config cannot be trusted.
+// (type) errors, then Validate problems. Validate runs even after decode
+// errors, but its problems on a field that failed to decode (and on checks
+// that depend on it) are dropped, so nothing is reported twice.
 //
 //   - File resolution: explicit path (CLI --config) > $LABELGATE_CONFIG >
 //     ./labelgate.{yaml,yml,json,toml} > /etc/labelgate/labelgate.{...}.
@@ -78,11 +79,10 @@ func load(path string, env envLookup, dirs []string) (Config, error) {
 	cfg, unknown, failures := decode(v, env)
 	problems = append(problems, unknown...)
 	problems = append(problems, failures...)
-	// Unknown keys leave the struct fully decoded; a type error does not, and
-	// validating a half-decoded config would only add noise.
-	if len(failures) == 0 {
-		problems = append(problems, validate(cfg)...)
-	}
+	// A field that failed to decode keeps its default in cfg, so problems on
+	// it (and on checks relying on it) are dropped; everything else is still
+	// validated so one run reports all problems.
+	problems = append(problems, dropCovered(validate(cfg), failures)...)
 	if err := problems.err(); err != nil {
 		return Config{}, err
 	}
