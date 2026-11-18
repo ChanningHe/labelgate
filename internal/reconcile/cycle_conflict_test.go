@@ -18,7 +18,7 @@ func TestExistingOwnerWinsAndNeverFlaps(t *testing.T) {
 	h.src.set(incumbent, newcomer)
 	for i := range 5 {
 		st := h.cycle()
-		if st.State != SyncError || !strings.Contains(st.Error, "is already managed by local container zeta") {
+		if st.State != SyncError || !strings.Contains(st.Error, "is already managed by container zeta service web on the main instance") {
 			t.Fatalf("cycle %d: %+v", i, st)
 		}
 		if row := h.row(model.KindDNS, appKey); row.Owner.ContainerName != "zeta" || row.Status != model.StatusActive {

@@ -47,7 +47,7 @@ func indexRows(rows []model.Resource) map[rowKey]model.Resource {
 }
 
 func describeOwner(o model.Owner) string {
-	return fmt.Sprintf("%s container %s service %s", describeSource(o.AgentID), o.ContainerName, o.Service)
+	return fmt.Sprintf("container %s service %s on %s", o.ContainerName, o.Service, describeSource(o.AgentID))
 }
 
 // rekeyLegacy rewrites the key of a legacy row whose identity fields and
@@ -130,9 +130,11 @@ func (rs liveClaims) claiming(r model.Resource) bool {
 // sourceOf names the source of an owner: "" (local) or the agent ID.
 func sourceOf(o model.Owner) string { return o.AgentID }
 
+// describeSource names a source for users: "the main instance" or "agent <id>".
+// It is display text only; identity keys keep using the raw source string.
 func describeSource(src string) string {
 	if src == model.LocalAgentID {
-		return "local"
+		return "the main instance"
 	}
 	return "agent " + src
 }

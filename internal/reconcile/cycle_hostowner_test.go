@@ -8,7 +8,7 @@ import (
 	"github.com/channinghe/labelgate/internal/model"
 )
 
-const ownedByLocal = "is already managed by local"
+const ownedByLocal = "is already managed by the main instance"
 
 // wantOnlyRejected asserts every rejected row belongs to agent id and
 // carries reason.
