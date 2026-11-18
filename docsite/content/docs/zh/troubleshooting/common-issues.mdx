@@ -1,174 +1,649 @@
 ---
 title: 常见问题
-description: Labelgate 常见问题的解决方案。
+description: 按错误消息或现象查找解决办法。
 ---
 
-## 冲突
+在本页搜索错误消息的开头即可。大多数消息本身就写明了该改哪个设置、怎么改。
 
-冲突会在 dashboard 和 `GET /api/resources/*` 中以 `error` 状态的资源出现，原因写在 `last_error` 里。每个周期都会重新评估，只要成因消失就会自行恢复。
+## 先做这几步 [#first-steps]
 
-### `conflict: existing record not owned by labelgate`
+1. **看日志。** Labelgate 启动失败时，原因会以 `labelgate: ...` 的形式输出。运行中发现的问题记为 `msg="reconcile problem"`。
 
-**问题：** 某个服务一直处于错误状态，并带有这条消息。
+   ```bash
+   docker compose logs --tail 100 labelgate
+   docker compose logs labelgate | grep -E "WARN|ERROR"
+   ```
 
-**原因：** Cloudflare 上已存在标识相同的 DNS 记录、Access 应用或 tunnel ingress 规则，而 Labelgate 并不拥有它（它没有 `labelgate:<instance_id>` 备注标记，没有 `labelgate-<instance_id>` Access 标签，也不是被跟踪的 tunnel 规则）。Labelgate 绝不会收编或覆盖这类资源。
+   每个问题只在出现或内容变化时记录一次，问题持续期间每小时再记录一次（带 `still_present=true`）。问题解决后会记录 `reconcile problem resolved`。所以较早的日志行可能已经过时。
 
-**解决方案：** 要么在 Cloudflare 控制台删除已有的记录或规则，让 Labelgate 创建自己的；要么移除或修改标签；要么（对于确实想移交的 DNS 记录）自己加上标记备注。参见[所有权与冲突](/zh/docs/ownership#resolving-a-conflict)。
+2. **打开 dashboard**：`http://localhost:28111/dashboard/`。
+   - dashboard 始终显示当前存在的问题。**Overview → Last sync** 显示其中第一个。
+   - **DNS**、**Tunnels**、**Access** 列出所有资源。点开状态为 `error` 的资源即可看到原因。
+   - **Agents** 显示哪些 agent 已连接。
 
-### `conflict: ... already claimed by ...`
+3. **需要更多细节时打开 debug 日志**，然后重启：
 
-**问题：** 某个容器的服务因为另一个服务已拥有该主机名而被拒绝。
+   ```bash
+   LABELGATE_LOG_LEVEL=debug   # 或在 labelgate.yaml 里写 log_level: debug
+   ```
 
-**原因：** **先到者胜出**。另一个容器（或 agent）已经声明了该主机名，或者把它用作了另一类记录。只要它的拥有者持续声明，第一个声明就一直有效。
+Labelgate 只在启动时读取配置。改完环境变量后执行 `docker compose up -d`，改完配置文件后执行 `docker compose restart labelgate`。标签和 Cloudflare 方面的问题会在每次同步时（每 5 分钟，`sync.interval`）以及容器变化时自动重试。
 
-**解决方案：** 换一个主机名，或者停止当前的拥有者（或移除它的标签）：在同一来源（同一台主机或同一个 agent）内，下一个声明者会在下一个周期接管。你可以在错误消息或 dashboard 中找到拥有者。
+## 启动与配置 [#startup]
 
-### `conflict: hostname ... is owned by ...`
+### `labelgate: config: ...` [#config-errors]
 
-**问题：** 某个服务被拒绝，尽管它使用的记录类型、路径或 tunnel 与该主机名上已有的资源不同。
-
-**原因：** 一个主机名只属于一个来源：main 主机或某一个 agent。另一个来源（`local` 或 `agent <id>`）在该主机名上有资源（任何状态，包括孤立资源）：直到最后一条资源被删除（`cleanup: true`，在 `sync.remove_delay` 之后）或从数据库中移除（`cleanup: "false"`，在 `sync.orphan_ttl` 之后），该主机名都属于那个来源。
-
-**解决方案：** 把该主机名的所有服务都定义在同一台主机上，或者先在另一个来源上释放该主机名（参见[所有权与冲突](/zh/docs/ownership#conflicts-between-claims)）。
-
-### `service host ... is not allowed for agents` [#agent-service-host]
-
-**问题：** agent 主机上的 tunnel 标签被拒绝，例如 `http://traefik:80`。保存的原因形如：
+Labelgate 启动后立即退出（或不停重启）：
 
 ```
-agent "edge1": service host "traefik" is a host name, which agents may only use if allow-listed; add "traefik" to agent.agents.edge1.services in the main instance config (or use the origin's IP address)
+labelgate: config: 2 problems:
+  api.token (env LABELGATE_API_TOKEN): must be at least 16 characters, got 5 (generate one with: openssl rand -hex 32)
+  cloudflare.api_token (env LABELGATE_CLOUDFLARE_API_TOKEN): no Cloudflare API token is configured: set this, or add an entry under cloudflare.credentials in the config file
 ```
 
-**原因：** agent 的 tunnel 服务必须指向 IP 地址，或者指向该 agent 的 `services` 允许列表中列出的主机。主机名在 agent 主机上解析，可能会访问到 agent 主机本身或元数据服务。这个允许列表属于 **main** 实例的配置，而不是 agent 的配置：修改 agent 自己的配置或标签没有用。
+**原因：** 某个设置缺失或无效。每行对应一个配置项，并给出设置它的环境变量。
 
-**解决方案：** 在 **main** 实例上，把消息中引号里的值加入它所指出的键，然后重启 main 实例（配置只在启动时读取）。对于列在 `agent.agents` 下的 agent：
+**解决：**
+
+1. 逐项修改：在 `labelgate.yaml` 里改，或者用 `(env ...)` 中给出的环境变量。没有 `(env ...)` 的配置项只能写在配置文件里。
+2. `unknown key`：配置项拼错了，对照[配置参考](/zh/docs/configuration/reference)检查。
+3. `removed in v0.3`：删掉这个配置项。见[已移除的配置项](/zh/docs/configuration/reference#removed-keys)。
+4. 重新启动：`docker compose up -d`。
+
+### `config: cannot open the config file` [#config-file]
+
+```
+labelgate: config: cannot open the config file set by LABELGATE_CONFIG: stat /etc/labelgate/labelgate.yaml: no such file or directory; fix the path or mount the file into the container
+```
+
+**原因：** `LABELGATE_CONFIG`（或 `--config`）指向的文件不在容器里。
+
+**解决：** 把文件挂载进容器。放在 `/etc/labelgate/labelgate.yaml` 时，不设 `LABELGATE_CONFIG` 也能找到。
 
 ```yaml
-agent:
-  agents:
-    edge1:                      # 消息中的 agent ID
-      token: "<保持不变>"
-      services: ["traefik"]     # 主机名、glob（*.svc.internal）、IP 或 CIDR
+services:
+  labelgate:
+    volumes:
+      - ./labelgate.yaml:/etc/labelgate/labelgate.yaml:ro
 ```
 
-对于通过 `agent.accept_token` 接入的 agent，对应的键是 `agent.accept_services`：
+相关消息：
 
-```yaml
-agent:
-  accept_token: "<保持不变>"
-  accept_services: ["traefik"]
+- `config: cannot parse ...; fix the syntax at the reported position`：YAML 语法错误，按消息里给出的位置修改。
+- `config: cannot check for a config file: ...; make it readable by the labelgate user`：Labelgate 以 UID 65532 运行。执行 `sudo chown 65532 labelgate.yaml`。
+
+### `open store "/app/config/labelgate.db"` [#database]
+
+```
+labelgate: open store "/app/config/labelgate.db": ...; labelgate cannot write the database: make its directory writable by the labelgate user (the image runs as UID 65532: sudo chown -R 65532:65532 <host data dir>), or change db.path (env LABELGATE_DB_PATH)
 ```
 
-也可以设置环境变量 `LABELGATE_AGENT_ACCEPT_SERVICES=traefik`（多个条目用逗号分隔）。或者让标签直接指向容器的 IP 地址。对于回环、链路本地等本地 IP 地址，消息形如 `service target is the loopback address 127.0.0.1 ...`：把这个确切的 IP（或包含它的 CIDR）加入同一个键即可放行。任何允许列表都无法放行的服务（`unix:` socket、`bastion`、带用户信息的 URL、`127.1` 这类 IP 简写）会在消息中直接说明，并告诉你应改用什么。参见 [SSRF 防护](/zh/docs/examples/multi-host#ssrf-guard)。
+**原因：** 数据目录属于其他用户，而 Labelgate 以 UID 65532 运行。
 
-### DNS 和 Tunnel 使用相同主机名
+**解决：**
 
-**问题：** `conflict: hostname app.example.com is used by <owner> as tunnel:<id>`（或者 as `records` / `cname`）。
+- 绑定挂载（`./labelgate-data:/app/config`）：
 
-**原因：** 同一主机名不能同时用于 DNS 记录和 Tunnel ingress 规则：tunnel 主机名有自己的 CNAME 记录。
+  ```bash
+  sudo chown -R 65532:65532 ./labelgate-data
+  ```
 
-**解决方案：** 为 DNS 和 Tunnel 使用不同的主机名，或每个主机名仅使用一种类型：
+- 由旧版镜像创建的命名卷：先用 `docker volume ls` 找到卷名，再执行：
+
+  ```bash
+  docker run --rm -v VOLUME_NAME:/data alpine chown -R 65532:65532 /data
+  ```
+
+如果消息以 `this database was written by a newer labelgate` 结尾，说明你启动了一个更旧的版本。请换回新版本，或者[恢复 v0.2 的备份](/zh/docs/upgrading#database-migration)。
+
+### `api: cannot listen on :28111` [#port-in-use]
+
+```
+api: cannot listen on :28111: listen tcp :28111: bind: address already in use; free the port or change api.address (env LABELGATE_API_ADDRESS)
+```
+
+**原因：** 端口已被其他程序占用，通常出现在 `network_mode: host` 下。
+
+**解决：** 停掉占用端口的程序，或者让 Labelgate 换一个端口，并同步修改 `ports:`。
+
+```bash
+LABELGATE_API_ADDRESS=:28121
+```
+
+`agent: cannot listen on ...` 同理：在 main 上改 `agent.listen`（`LABELGATE_AGENT_LISTEN`），在 inbound 模式的 agent 上改 `connect.listen`（`LABELGATE_CONNECT_LISTEN`）。
+
+## Docker [#docker]
+
+### `Cannot connect to the Docker daemon` [#docker-socket-missing]
+
+```
+docker: cannot list containers: Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?; no Docker daemon answers at unix:///var/run/docker.sock: mount the socket into the container (volume /var/run/docker.sock:/var/run/docker.sock:ro) or set docker.endpoint (env LABELGATE_DOCKER_ENDPOINT); resources of local containers are kept unchanged until Docker answers again
+```
+
+**原因：** Docker socket 没有挂载进容器。
+
+**解决：** 挂载它。rootless Docker 请把当前用户的 socket（例如 `/run/user/1000/docker.sock`）挂到容器内同一路径。
 
 ```yaml
-# 仅使用 Tunnel（大多数情况下推荐）
+services:
+  labelgate:
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+```
+
+Docker 没有响应期间，不会删除任何资源。
+
+### Docker socket 报 `permission denied` [#docker-socket-permission]
+
+```
+docker: cannot list containers: permission denied ...; labelgate may not open the Docker socket: add the socket's group ID to the container (compose group_add; find it with: stat -c %g /var/run/docker.sock)
+```
+
+**原因：** Labelgate 以 UID 65532 运行，不在 socket 所属的组里。
+
+**解决：**
+
+1. 查出组 ID：`stat -c '%g' /var/run/docker.sock`
+2. 加到服务上，然后执行 `docker compose up -d`：
+
+   ```yaml
+   services:
+     labelgate:
+       group_add:
+         - "988"   # 第 1 步得到的数字
+   ```
+
+### 通过 `tcp://` 连接远程 Docker [#docker-tcp]
+
+消息以 `docker: cannot list containers:` 开头。在下表中找到它的结尾：
+
+| 消息结尾 | 解决办法 |
+|----------|----------|
+| `the Docker daemon's TLS certificate is not trusted` | 把 `docker.tls.ca`（`LABELGATE_DOCKER_TLS_CA`）设为签发 daemon 证书的 CA 文件。 |
+| `the Docker daemon requires a client certificate` | 设置 `docker.tls.cert`（`LABELGATE_DOCKER_TLS_CERT`）和 `docker.tls.key`（`LABELGATE_DOCKER_TLS_KEY`）。 |
+| `the Docker daemon expects TLS` | 设置 `docker.tls.ca`；daemon 要求客户端证书时也一并设置。 |
+| `check docker.endpoint (env LABELGATE_DOCKER_ENDPOINT) and that the Docker daemon listens there` | 修正 `LABELGATE_DOCKER_ENDPOINT` 里的主机和端口。 |
+
+证书文件要挂载进容器，例如 `./docker-certs:/certs:ro`。
+
+## Cloudflare [#cloudflare]
+
+### `cloudflare credential validation failed` [#credential-validation]
+
+Labelgate 启动时退出：
+
+```
+labelgate: cloudflare credential validation failed (checked at startup; ...): credential "default": cloudflare tokens.verify: HTTP 401 ...; the API token in cloudflare.api_token (env LABELGATE_CLOUDFLARE_API_TOKEN) is invalid, expired or revoked; create a new one under My Profile > API Tokens in the Cloudflare dashboard
+```
+
+**原因：** Cloudflare 不接受这个 token，或者配置的隧道不存在。
+
+**解决：** 看消息的结尾：
+
+- `is invalid, expired or revoked` 或 `is disabled or expired`：[新建一个 token](/zh/docs/getting-started)，填到消息指出的配置项里。
+- `no such tunnel in account`：把 `LABELGATE_CLOUDFLARE_TUNNEL_ID` 和 `LABELGATE_CLOUDFLARE_ACCOUNT_ID` 与 **Zero Trust > Networks > Tunnels** 中的值逐一核对。
+- `cannot reach the Cloudflare API`：见[下文](#cloudflare-unreachable)。
+
+### `was refused: give it the ... permission` [#token-permissions]
+
+```
+cannot create DNS record: cloudflare dns.create: HTTP 403 ...; the API token in cloudflare.api_token (env LABELGATE_CLOUDFLARE_API_TOKEN) was refused: give it the Zone:DNS:Edit permission for this zone or account under My Profile > API Tokens in the Cloudflare dashboard (or replace it if it is invalid)
+```
+
+**原因：** token 缺少消息里写的权限，或者没有覆盖这个域名或账户。
+
+**解决：**
+
+1. 打开 [My Profile > API Tokens](https://dash.cloudflare.com/profile/api-tokens)，编辑这个 token。
+2. 加上消息里的权限（`Zone:Zone:Read`、`Zone:DNS:Edit`、`Account:Cloudflare Tunnel:Edit` 或 `Access: Apps and Policies:Edit`）。
+3. 确认 **Zone Resources** 包含该域名，**Account Resources** 包含该账户。
+
+无需重启，下一次同步就会用上新权限。
+
+### `no matching zone` [#zone-not-found]
+
+```
+app.example.com: no matching zone: no configured API token can see a zone containing this hostname (cloudflare.credentials.<name>.zones may also exclude it); add the zone to a token's Zone Resources under My Profile > API Tokens in the Cloudflare dashboard, or fix the hostname
+```
+
+**原因：** 没有任何 API token 能看到这个主机名所在的域名。
+
+**解决：**
+
+1. 检查标签里的主机名有没有拼错。
+2. 把该域名加到 token 的 **Zone Resources** 里。
+3. 使用[多个 token](/zh/docs/configuration/reference#multi-credential-setup) 时：检查每个 credential 的 `zones` 列表，以及 `credential` 标签。
+
+新加的域名一分钟内就能被找到。
+
+### `unknown tunnel` 或 `no default tunnel configured` [#unknown-tunnel]
+
+```
+tunnel "media": unknown tunnel: use default (cloudflare.tunnel_id (env LABELGATE_CLOUDFLARE_TUNNEL_ID)) or a name or tunnel ID from cloudflare.tunnels in the main instance config
+no default tunnel configured: name the tunnel in the label, or set cloudflare.tunnel_id (env LABELGATE_CLOUDFLARE_TUNNEL_ID) or default_tunnel (env LABELGATE_DEFAULT_TUNNEL) in the main instance config
+credential "corp": unknown credential: add cloudflare.credentials.corp to the main instance config, or use default (cloudflare.api_token) or another configured credential
+```
+
+**原因：** `tunnel` 或 `credential` 标签引用了 main 配置里没有定义的名字，或者没有设置默认隧道。
+
+**解决：** 默认隧道用 `LABELGATE_CLOUDFLARE_TUNNEL_ID` 设置。更多隧道或 token 要写进 `labelgate.yaml`（只能写在文件里），名字与标签中的一致：
+
+```yaml
+cloudflare:
+  tunnels:
+    media:
+      account_id: "your-account-id"
+      tunnel_id: "your-tunnel-id"
+```
+
+### `cannot reach the Cloudflare API` [#cloudflare-unreachable]
+
+```
+cloudflare dns.list: dial tcp ...; cannot reach the Cloudflare API: check DNS, outbound HTTPS (port 443) and proxy settings of the labelgate host
+```
+
+**原因：** 容器无法正常访问外网。
+
+**解决：** 检查主机的 DNS、防火墙和代理。在主机上测试：`curl -I https://api.cloudflare.com`。
+
+### `Cloudflare is rate-limiting this API token` [#rate-limit]
+
+**原因：** 短时间内 API 调用过多，常见于一次性重启大量容器之后。
+
+**解决：** 等一会儿，Labelgate 会自动重试。如果经常出现，降低同步频率：
+
+```bash
+LABELGATE_SYNC_INTERVAL=15m
+LABELGATE_DOCKER_POLL_INTERVAL=5m
+```
+
+### `target auto: cannot detect this host's public IPv4 address` [#public-ip]
+
+```
+target auto: cannot detect this host's public IPv4 address: ...; set the record's target label to an IP address instead
+target auto needs the public IPv4 address of agent edge1, which it did not report (it could not detect one); set the record's target label to an IP address instead
+```
+
+agent 自己会记录 `cannot detect this host's public IPv4 address: records with target auto need it; ...`，恢复后记录 `public IPv4 detection recovered`。如果主机没有 IPv6，也没有 `AAAA` 记录使用 `target: auto`，可以忽略 IPv6 的这条警告。
+
+**原因：** `target: auto` 需要公网 IP。Labelgate 通过 `api.ipify.org` 和 `ipv4.icanhazip.com`（IPv6：`api6.ipify.org`、`ipv6.icanhazip.com`）获取，但没能访问到。对 agent 来说，是 agent 主机访问不到。
+
+**解决：** 放行到这些主机的 HTTPS 出站流量，或者直接写 IP：
+
+```yaml
+labels:
+  labelgate.dns.web.target: "203.0.113.10"
+```
+
+### 主机名返回 `502` 或错误 `1033` [#tunnel-502]
+
+**原因：** 隧道路由已经建好，但 cloudflared 没在运行，或者访问不到你的应用。
+
+**解决：** 见 [cloudflared：常见问题](/zh/docs/examples/cloudflared#常见问题)。
+
+## 冲突 [#conflicts]
+
+冲突不会改动 Cloudflare 上的任何东西。资源会一直处于 `error` 状态，原因排除后，下一次同步会自动恢复。
+
+### `conflict: existing record not owned by labelgate` [#not-owned]
+
+```
+conflict: existing record not owned by labelgate: a CNAME record for app.example.com (id 3f2a...) already exists in Cloudflare; delete it under DNS > Records in the Cloudflare dashboard or use another hostname
+```
+
+**原因：** Cloudflare 上已有这个主机名的记录、Access 应用或隧道路由，而且不是 Labelgate 创建的。Labelgate 从不接管或修改这些对象。
+
+**解决：** 看消息后半部分：
+
+| 消息后半部分 | 解决办法 |
+|--------------|----------|
+| `a ... record for ... already exists in Cloudflare` | 在 **DNS > Records** 删除该记录，或者换一个主机名。 |
+| `(it was created by labelgate instance "a1b2c3d4" ...)` | 数据库丢了。设置 `LABELGATE_INSTANCE_ID=a1b2c3d4`。见[数据库丢失时](/zh/docs/ownership#recovering-from-database-loss)。 |
+| `the ownership marker was removed from the comment` | 把 `labelgate:<instance_id>` 放回记录备注的开头，或者删除该记录。 |
+| `an Access application for ... already exists` | 在 **Zero Trust > Access > Applications** 删除它，或者去掉 access 标签。 |
+| `the tag "labelgate-..." was removed` | 给该 Access 应用重新加上这个标签，或者删除该应用。 |
+| `tunnel ... already routes ... with a rule labelgate did not create` | 在 **Zero Trust > Networks > Tunnels**（published application routes）删除该路由。 |
+| `Cloudflare refused to create ... because a conflicting object already exists` | 删除已有的对象，或者换一个主机名。 |
+
+见[所有权与冲突](/zh/docs/ownership#resolving-a-conflict)。
+
+### `conflict: the A record ... is already managed by` [#duplicate-claim]
+
+```
+conflict: the A record app.example.com is already managed by local container web service web; remove the duplicate label from one of the containers
+```
+
+**原因：** 两个容器声明了同一条记录或路由，先拿到的那个保留。
+
+**解决：** 从其中一个容器上去掉这个标签。如果改为停止或删除当前的拥有者，另一个容器会在下一次同步时接管。
+
+### `conflict: hostname ... is already managed by agent` [#hostname-other-host]
+
+```
+conflict: hostname app.example.com is already managed by agent edge1, and a hostname can belong to only one instance (main or one agent); remove this label or the one on agent edge1
+```
+
+**原因：** 一个主机名只属于一台主机：main 或某一个 agent。另一台主机已经有这个主机名的资源。
+
+**解决：** 把这个主机名的所有服务放在同一台主机上，或者去掉另一台主机上的标签。另一台主机的资源被删除后（`sync.remove_delay` 之后），主机名就空出来了。用 `cleanup: "false"` 保留的资源会一直占着主机名，直到你在 Cloudflare 上手动删除。
+
+### `conflict: hostname ... already has` [#dns-and-tunnel-on-same-hostname]
+
+```
+conflict: hostname app.example.com already has a route on tunnel 6ff4... from local container web service web; a hostname can have DNS records, one CNAME record or one tunnel route, not a mix: remove one of the labels
+```
+
+**原因：** 同一个主机名既有 DNS 标签又有隧道标签。隧道路由会自己创建 DNS 记录。
+
+**解决：** 只保留一种。用隧道时，删掉 `dns` 标签：
+
+```yaml
 labels:
   labelgate.tunnel.web.hostname: "app.example.com"
   labelgate.tunnel.web.service: "http://app:80"
 ```
 
-## 标签错误
+### `conflict: an older labelgate ... record ... still uses this hostname` [#older-record]
 
-**问题：** 同步状态为 `error`，日志中带有容器名和键的标签错误。
+```
+conflict: an older labelgate CNAME record for app.example.com (id 9b1c...) still uses this hostname (its label set cleanup=false, or sync.remove_delay has not passed); delete it under DNS > Records in the Cloudflare dashboard to use the hostname now
+```
 
-**原因：** 标签会被严格校验：非法的值（`proxied: "maybe"`、`ttl: "abc"`）会丢弃服务，未知的属性（`hostnme`）会报错。Labelgate 之前为被丢弃的服务创建的资源会被保留而不是删除，并显示 `label error: ...`，直到你修好标签。
+**原因：** 你改变了这个主机名的发布方式，例如从 DNS 记录改成了隧道，旧记录还在。
 
-**解决方案：** 修正日志中指出的标签；参见[严格校验](/zh/docs/labels#strict-validation)。如果某个服务消失了却没有任何报错，请检查键的结构：不是 `labelgate.<type>.<service>.<property>` 形式的键会被静默忽略。
+**解决：** 等 `sync.remove_delay`（默认 `30m`）过去，或者现在就在 **DNS > Records** 删除旧记录。
 
-## Dashboard 或 API 无法访问
+## 标签 [#labels]
 
-**问题：** 连接 8080 端口失败，或日志中出现 `api.token is empty: API and dashboard disabled`。
+### `container ...: label ...` [#label-errors]
 
-**原因：** `api.token` 是必填项。没有它，API 和 dashboard 都不会启动（协调仍会继续）。
+```
+local container web: label labelgate.dns.web.proxied: invalid boolean "maybe" (use true or false)
+```
 
-**解决方案：** 把 `LABELGATE_API_TOKEN` 设置为足够长的随机值（`openssl rand -hex 32`），发布端口，并用该 token 登录。
+资源上显示的是：
 
-## Zone 未找到
+```
+label error: labelgate.dns.web.proxied: invalid boolean "maybe" (use true or false); the existing Cloudflare objects are kept unchanged until the label is fixed
+```
 
-**问题：** 服务显示 `zone for app.example.com: app.example.com: no matching zone`。
+**原因：** 某个标签的值不对、名字拼错，或者缺少必填标签。
 
-**原因：** 没有任何凭据能看到包含您的主机名的 zone，或者 `credential` 标签指向的 token 看不到它。每个凭据的 zone 列表会被缓存；查找未命中时 Labelgate 会重新拉取，但每分钟最多一次，所以刚添加的 zone 可能需要一分钟才会出现。
+**解决：** 修正消息中指出的标签，然后重建容器（`docker compose up -d`）。在此之前，Cloudflare 上的内容不会变。见[标签写错时](/zh/docs/labels#strict-validation)。
 
-**解决方案：**
-1. 在 [Cloudflare Dashboard > API Tokens](https://dash.cloudflare.com/profile/api-tokens) 中检查您的 API token 权限
-2. 确保为目标 zone 授予 `Zone:Read` 权限
-3. 验证域名是否存在于您的 Cloudflare 账户中
+### `access policy "..." is not defined` [#access-policy-not-defined]
 
-## Tunnel 未连接
+```
+access policy "team" is not defined: add labelgate.access.team.* labels to this container or another container of the same host
+```
 
-**问题：** Labelgate 创建了 ingress 规则，但主机名返回 502 或连接错误。
+**原因：** 某个服务用了 `access: "team"`，但这台主机上没有容器定义名为 `team` 的策略。
 
-**原因：** `cloudflared` daemon 未运行或未连接到 tunnel。
+**解决：** 在这个容器或同一主机的其他容器上定义它：
 
-**解决方案：**
-1. 检查 cloudflared 是否正在运行：
+```yaml
+labels:
+  labelgate.access.team.policy.include.emails: "you@example.com"
+```
+
+如果消息是 `is defined differently on several containers of this host`，让各处定义完全一致，或者只保留一处。
+
+### 容器被忽略，没有任何报错 [#container-ignored]
+
+逐项检查：
+
+- 容器正在运行。已停止的容器视同已删除。
+- 每个键都以 `labelgate.` 开头，且有四段：`labelgate.<type>.<name>.<property>`。没有前缀的标签会被忽略。
+- 如果设置了 `docker.filter_label`（`LABELGATE_DOCKER_FILTER_LABEL`），容器上要有这个标签。
+- 如果改过 `label_prefix`（`LABELGATE_LABEL_PREFIX`），标签要使用新前缀。
+
+## Agent [#agents]
+
+### `cannot connect to the main instance; retrying` [#agent-cannot-connect]
+
+agent 日志：
+
+```
+level=WARN msg="cannot connect to the main instance; retrying" url=wss://main.example.com:28112/agent error="...; nothing serves agent connections at that path: connect.endpoint (env LABELGATE_CONNECT_ENDPOINT) must end in /ws"
+```
+
+**解决：** 看 error 的结尾：
+
+| error 结尾 | 解决办法 |
+|------------|----------|
+| `must end in /ws` | 使用 `LABELGATE_CONNECT_ENDPOINT=wss://main.example.com:28112/ws`。 |
+| `nothing listens there: ...` | main 要开启 `agent.enabled: true`（`LABELGATE_AGENT_ENABLED=true`），发布 `"28112:28112"`，并在防火墙放行该端口。 |
+| `does not resolve` | 修正 `LABELGATE_CONNECT_ENDPOINT` 里的主机名。 |
+| `TLS certificate is not trusted` | 把 `LABELGATE_CONNECT_TLS_CA` 设为你的 CA 文件，或者改用公开签发的证书。 |
+| `TLS certificate does not list the host` | 使用证书中包含的主机名。 |
+| `does not use TLS: use ws://` | 改用 `ws://`，或者给 main 配置证书（`agent.tls.cert`、`agent.tls.key`）。 |
+| `uses TLS: use wss://` | 改用 `wss://`。 |
+| `does not belong to labelgate's agent port` | 地址指向了别处，例如 dashboard 端口 `28111`。请用 `28112`。 |
+
+main 主动连接 [inbound 模式的 agent](/zh/docs/examples/multi-host#inbound-mode-example) 时，main 会记录 `cannot connect to inbound agent; retrying`，结尾含义相同。此时要在 main 上修改 `agent.agents.<id>.connect_to` 和 `agent.tls.ca`。
+
+### `peer authentication failed; tokens do not match` [#agent-auth]
+
+agent 日志：
+
+```
+level=WARN msg="handshake with the main instance failed" error="agent: peer authentication failed; tokens do not match: connect.token (env LABELGATE_CONNECT_TOKEN) on this agent must equal agent.agents.edge1.token in the main instance config (or agent.accept_token there if \"edge1\" is not listed under agent.agents)"
+```
+
+main 会记录 `agent handshake failed` 并指出是哪个 agent，例如 `agent "edge1" is not configured: add agent.agents.edge1 with a token to the main instance config`。
+
+**原因：** agent ID 或 token 与 main 的配置不一致。
+
+**解决：**
+
+1. agent 上的 `LABELGATE_CONNECT_AGENT_ID` 必须等于 main 上 `agent.agents` 下的键名。
+2. `LABELGATE_CONNECT_TOKEN` 必须等于该条目的 `token`。重新复制一遍。
+3. 列在 `agent.agents` 下的 agent 只能用自己的 token，`agent.accept_token` 对它无效。
+4. `labelgate.yaml` 不会展开 `${VAR}`，请直接粘贴真实的 token。
+5. 改完 main 的配置后重启 main。
+
+### `must be at least 32 characters`（agent token） [#agent-token-too-short]
+
+```
+labelgate: config: connect.token (env LABELGATE_CONNECT_TOKEN): must be at least 32 characters, got 12 (generate one with: openssl rand -hex 32)
+```
+
+**原因：** agent token 至少需要 32 个字符，且至少包含 12 个不同字符。`labelgate.yaml` 里没被展开的 `${VAR}` 也会触发这个检查。
+
+**解决：** 生成新 token，两边都填上（main 上的 `agent.agents.<id>.token`，agent 上的 `LABELGATE_CONNECT_TOKEN`）：
+
+```bash
+openssl rand -hex 32
+```
+
+### `another agent with ID "..." is already connected` [#duplicate-agent]
+
+```
+peer error: duplicate_agent: agent already connected; another agent with ID "edge1" is already connected: give each agent its own connect.agent_id (env LABELGATE_CONNECT_AGENT_ID)
+```
+
+main 会记录 `rejected a second connection for an agent ID that is already connected`。
+
+**原因：** 两台主机用了同一个 agent ID。
+
+**解决：** 给每台主机设置不同的 `LABELGATE_CONNECT_AGENT_ID`。
+
+### 重建容器后 agent ID 变了 [#agent-id-changes]
+
+**原因：** 没有设置 `connect.agent_id`，容器里也没有 `/etc/machine-id`，agent 只能用容器的主机名，而主机名每次重建都会变。出现这种情况时，Labelgate 启动时会打印一条警告。
+
+**解决：** 设置 ID，或者挂载宿主机的 machine ID：
+
+```yaml
+services:
+  labelgate-agent:
+    environment:
+      - LABELGATE_CONNECT_AGENT_ID=edge1
+    # 或者：
+    volumes:
+      - /etc/machine-id:/etc/machine-id:ro
+```
+
+### `unsupported_version` [#agent-version]
+
+```
+peer error: unsupported_version: ...; the main instance runs an incompatible labelgate release: run the same release on both
+```
+
+**解决：** main 和所有 agent 运行相同版本的 Labelgate。见[升级](/zh/docs/upgrading#agents)。
+
+### `does not match the agent's hostnames allow-list` [#agent-allow-lists]
+
+违反允许列表的 agent 资源会被拒绝。消息会写明要改哪个配置项：
+
+```
+agent "edge1": hostname "app.example.com" does not match the agent's hostnames allow-list; add "app.example.com" (or a glob matching it) to agent.agents.edge1.hostnames in the main instance config
+agent "edge1": wildcard hostname "*.example.com" is only allowed by an identical entry (...); add "*.example.com" to agent.agents.edge1.hostnames in the main instance config
+agent "edge1": tunnel "media" is not in the agent's allowed tunnels; add "media" to agent.agents.edge1.tunnels in the main instance config
+```
+
+**原因：** 允许列表写在 **main** 的配置里，改 agent 没有用。
+
+**解决：** 在 main 上把值加到消息指出的配置项里，然后重启 main。通过 `agent.accept_token` 接入的 agent，消息给出的是 `agent.accept_hostnames` 或 `agent.accept_tunnels` 及其环境变量。见[允许列表](/zh/docs/examples/multi-host#allow-lists)。
+
+如果消息是 `a CNAME to ... is not allowed`，说明 agent 的 DNS 标签指向了隧道，请改用隧道标签。
+
+### `service host "..." is a host name, which agents may only use if allow-listed` [#agent-service-host]
+
+```
+agent "edge1": service host "traefik" is a host name, which agents may only use if allow-listed; add "traefik" to agent.agents.edge1.services in the main instance config (or use the origin's IP address)
+```
+
+**原因：** agent 的隧道 `service` 可以直接指向 IP 地址；像 `traefik` 这样的主机名必须先在 **main** 的配置里放行。
+
+**解决：** 在 main 上把主机名加到该 agent 的 `services`，然后重启 main：
+
+```yaml
+agent:
+  agents:
+    edge1:
+      token: "保持不变"
+      services: ["traefik"]   # 主机名、通配（*.svc.internal）、IP 或 CIDR
+```
+
+通过 `agent.accept_token` 接入的 agent 用 `agent.accept_services`（`LABELGATE_AGENT_ACCEPT_SERVICES=traefik`）。也可以让标签直接指向容器的 IP 地址。
+
+`service target is the loopback address 127.0.0.1, which agents may not use unless allow-listed` 的处理方式相同：加上这个 IP，或包含它的 CIDR。带 `no allow-list can permit` 的消息（`unix:` socket、`bastion`、URL 里带 `user:pass@`）无法放行，只能改标签。见[Agent 隧道服务](/zh/docs/examples/multi-host#ssrf-guard)。
+
+### 已加进 `agent.accept_services`，仍被拒绝 [#named-vs-accept]
+
+**原因：** 这个 agent 列在 `agent.agents` 下，`agent.accept_*` 列表对它永远不生效。
+
+**解决：** 改用 `agent.agents.<id>.services`（以及 `.hostnames`、`.tunnels`）。消息里给出的总是正确的配置项。见[命名 agent 与共享 token](/zh/docs/examples/multi-host#named-vs-shared)。
+
+### `too many containers` [#agent-too-many-containers]
+
+```
+too many containers: 5000 > 4096; set docker.filter_label (env LABELGATE_DOCKER_FILTER_LABEL) on the agent to report only labelled containers
+```
+
+**原因：** agent 主机上的容器数超过了单次上报的上限。main 会继续使用该 agent 上一次上报的容器。
+
+**解决：** 在 agent 上只读取带标记标签的容器，并给要发布的容器加上这个标签：
+
+```bash
+LABELGATE_DOCKER_FILTER_LABEL=public=true
+```
+
+## Dashboard 与 API [#dashboard]
+
+### `API and dashboard disabled: api.token is empty` [#api-token-missing]
+
+```
+level=WARN msg="API and dashboard disabled: api.token is empty; set api.token (env LABELGATE_API_TOKEN) to a secret of at least 16 characters (generate one with: openssl rand -hex 32). DNS, tunnel and Access sync keep running"
+```
+
+**解决：** 设置 token 并传给容器：
+
+```bash
+openssl rand -hex 32   # 把输出写进 .env 的 LABELGATE_API_TOKEN
+```
+
+```yaml
+services:
+  labelgate:
+    environment:
+      - LABELGATE_API_TOKEN
+    ports:
+      - "127.0.0.1:28111:28111"
+```
+
+如果日志是 `API and dashboard disabled by api.enabled (env LABELGATE_API_ENABLED)=false`，去掉这个设置即可。
+
+### Dashboard 打不开 [#dashboard-not-loading]
+
+逐项检查：
+
+1. 地址以 `/dashboard/` 结尾：`http://localhost:28111/dashboard/`。
+2. 端口已发布（见上面的 `ports:`），日志里没有 `api: cannot listen on`。
+3. 日志里没有 `API and dashboard disabled`。
+4. `this binary was built without the dashboard` 只会出现在自行编译的程序上。请使用官方镜像，或者在 `go build` 之前先在 `dashboard/` 里执行 `yarn build`。
+
+放在反向代理后面时，要把 `/dashboard/` 和 API 路径（`api.base_path`，默认 `/api`）原样转发给 Labelgate。
+
+### `That token was rejected` / `401 unauthorized` [#api-unauthorized]
+
+**原因：** 输入的 token 不是 `api.token`。API 会返回 `401` 和 `{"error":"unauthorized"}`。
+
+**解决：**
+
+1. 从 `.env` 里重新复制 `LABELGATE_API_TOKEN` 的值。
+2. 更换 token 后，点顶栏的 **Forget API token**，再重新登录。
+3. 调用 API 时把 token 放进请求头：
+
    ```bash
-   docker compose ps cloudflared
+   curl -H "Authorization: Bearer $LABELGATE_API_TOKEN" http://localhost:28111/api/overview
    ```
-2. 检查 cloudflared 日志：
-   ```bash
-   docker compose logs cloudflared
-   ```
-3. 验证 tunnel token 是否正确
-4. 在 [Zero Trust Dashboard](https://one.dash.cloudflare.com/) 的 **Networks > Tunnels** 下检查 tunnel 状态
 
-## 公共 IP 检测失败
+### `healthcheck failed` [#healthcheck]
 
-**问题：** 带有 `target=auto` 的 DNS 记录未被创建，服务显示 `public IPv4 address: publicip: ...`（或 `IPv6`）。
+`docker compose ps` 显示容器为 `unhealthy`。查看原因：
 
-**原因：** Labelgate 未能检测到主机的公共 IP 地址。它会请求 `api.ipify.org` 和 `ipv4.icanhazip.com`（`AAAA` 则是 `api6.ipify.org` 和 `ipv6.icanhazip.com`）。对于 agent 上的容器，使用 agent 自己上报的地址（`agent <id> reported no public IPv4 address`）。
+```bash
+docker inspect --format '{{range .State.Health.Log}}{{.Output}}{{end}}' $(docker compose ps -q labelgate)
+```
 
-**解决方案：**
-- 检查 Labelgate 容器的互联网连接
-- 检查日志中的 IP 检测错误：
-  ```bash
-  docker compose logs labelgate | grep "public IP"
-  ```
-- 使用显式 IP 而不是 `auto`：
-  ```yaml
-  labels:
-    labelgate.dns.web.target: "203.0.113.1"
-  ```
+| 输出 | 解决办法 |
+|------|----------|
+| `the API is not answering at http://127.0.0.1:28111/api/health` | API 没有启动，到日志里找原因。 |
+| `returned HTTP 404, want 200; check api.base_path` | 该端口上响应的是别的程序。检查 `api.address` 和 `api.base_path`（`LABELGATE_API_BASE_PATH`）。 |
 
-## API 速率限制
+## 资源没删除，或被意外删除 [#cleanup]
 
-**问题：** 日志或资源的 `last_error` 中出现 HTTP 状态码 429 的 Cloudflare 错误。
+<Callout type="warn">
+`cleanup` 默认开启。容器停止或删除后，Labelgate 会在 `sync.remove_delay`（默认 `30m`）之后删除它的资源。
+</Callout>
 
-**原因：** Cloudflare 将 API 限制为每 5 分钟 1200 个请求。超过限制会导致 5 分钟封禁。
+### 容器没了，资源还在 [#resources-not-cleaned-up]
 
-**解决方案：**
-- Labelgate 会对 429 和 5xx 响应自动使用指数退避重试（`retry.*`），并遵循 `Retry-After`，下一个周期还会再试
-- 如果经常达到限制，减少托管资源的数量
-- 避免同时快速重启多个容器
-- 增大间隔以减少协调频率（每个周期都会列出每个被引用 zone 的 DNS 记录、每个 tunnel 的配置，以及每个账户的 Access 应用和策略）：
-  ```bash
-  LABELGATE_DOCKER_POLL_INTERVAL=5m
-  LABELGATE_SYNC_INTERVAL=15m
-  ```
+在 dashboard 里看资源的状态：
 
-## 资源未清理
+| 状态 | 含义 | 解决办法 |
+|------|------|----------|
+| `pending_cleanup` | 正在等待 `sync.remove_delay`。 | 等待，或者缩短：`LABELGATE_SYNC_REMOVE_DELAY=5m`。 |
+| `orphaned` | 标签设置了 `cleanup: "false"`，Labelgate 会把它留在 Cloudflare 上。 | 在 Cloudflare 控制台手动删除。 |
+| 不在列表里 | 不是 Labelgate 创建的，它永远不会删。 | 在 Cloudflare 控制台手动删除。 |
 
-**问题：** 容器停止后，Cloudflare 资源仍然存在。
+另外两种情况也会保留资源：
 
-**可能的原因：**
-- `remove_delay` 还没到。孤立资源会在容器消失 `sync.remove_delay`（默认 `30m`）之后被删除。修改延迟：
-  ```bash
-  LABELGATE_SYNC_REMOVE_DELAY=5m
-  ```
-- 该服务设置了 `cleanup: "false"`，因此资源被有意保留（它们会显示为 `orphaned`）。
-- 资源并不属于 Labelgate。它只会删除带有自己备注标记的记录、带有自己标签的应用，以及它跟踪的规则。你手工创建的资源永远不会被删除。
-- 资源属于一个离线的 agent。它会先被保留 `sync.agent_grace`（默认 `24h`）。
+- **agent 离线：** 它的资源先保留 `sync.agent_grace`（默认 `24h`），再等 `sync.remove_delay`。
+- **Docker 无响应：** Docker 恢复之前不会删除任何资源。见 [Docker](#docker)。
 
-`cleanup` 默认为 **`true`**：如果想保留资源，请显式设置为 `"false"`：
+### 资源被意外删除 [#resources-deleted-unexpectedly]
+
+**原因：**
+
+- 容器停止或删除的时间超过了 `sync.remove_delay`。
+- 你改了主机名或记录类型，旧资源会在 `sync.remove_delay` 之后删除。
+- agent 离线时间超过了 `sync.agent_grace` 加 `sync.remove_delay`。
+- `sync.remove_delay` 设成了 `0s`，会立即删除。
+
+**解决：** 重要服务的资源设为保留，并把等待时间放宽：
 
 ```yaml
 labels:
@@ -176,102 +651,7 @@ labels:
   labelgate.tunnel.web.cleanup: "false"
 ```
 
-## 资源被意外删除
-
-**问题：** 容器停止或 agent 离线后，一条记录或规则消失了。
-
-**原因：** `cleanup` 默认为 `true`。Labelgate 在 `sync.remove_delay` 之后删除了它拥有的资源；对于离线 agent，则是在 `sync.agent_grace` 加 `sync.remove_delay` 之后。请检查你的配置中是否设置了 `remove_delay: 0s`。
-
-**解决方案：** 对必须保留的服务设置 `cleanup: "false"`，如果 agent 会长时间离线，请调大 `sync.agent_grace`。
-
-## 容器重建（相同配置，新 ID）
-
-**问题：** 重建容器后，资源显示为冲突。
-
-**原因：** 新容器具有不同的 ID，但主机名配置相同。
-
-**解决方案：** 所有权跟随拥有者标识（主机或 agent、容器名和服务名），而不是容器 ID，所以名称相同的重建容器会直接保留它的资源。如果你重命名了容器，旧名称在消失之前仍是拥有者；请先停止旧容器，新容器会在下一次同步时接手。
-
-## Agent 连接问题
-
-### Agent 无法连接
-
-**问题：** Agent 日志显示 `connection refused`、`timeout`、404 或 `unauthorized`。
-
-**解决方案：**
-1. 确认端点包含 **`/ws` 路径**：`wss://main.example.com:8081/ws`。没有它，main 会返回 404。
-2. 确认从 agent 主机可以访问 main 实例，并且 8081 端口（或你自定义的 `agent.listen`）已开放。
-3. 检查 agent ID 和 token 是否与 main 实例上 `agent.agents` 下的某个条目匹配，或者 main 是否设置了 `agent.accept_token`。未知 ID 和错误 token 会返回相同的 `unauthorized` 错误，这是有意的设计。
-4. v0.2 的 agent 无法连接 v0.3，请升级它们（参见[升级到 v0.3](/zh/docs/upgrading#agents)）。
-
-### TLS 证书错误
-
-**问题：** `x509: certificate signed by unknown authority`，或主机名不匹配。
-
-**原因：** 证书默认会被校验。
-
-**解决方案：** 使用受信任 CA 签发的证书，或用 `connect.tls.ca`（agent 拨号 main）或 `agent.tls.ca`（main 拨号 inbound agent）配置你的私有 CA。仅在测试中作为最后手段，才可以用 `insecure_skip_verify: true` 关闭校验；请勿在生产环境使用。
-
-### `duplicate_agent`
-
-**问题：** Agent 在认证之后被拒绝。
-
-**原因：** 已经有另一个 agent 以相同的 ID 连接。已有会话不受影响。
-
-**解决方案：** 让每个 agent 使用唯一的 `connect.agent_id`。
-
-### Agent 的服务被拒绝
-
-**问题：** Agent 的某个服务显示错误，例如主机名或 tunnel 不被允许，或服务地址被拒绝。
-
-**原因：** 声明违反了 main 实例上该 agent 的允许列表（`hostnames`、`tunnels`、`services`，或 `accept_hostnames` / `accept_tunnels` / `accept_services`），或者 tunnel 的 `service` 属于任何允许列表都无法放行的类型（`unix:` socket、`bastion`、带用户信息的 URL），或者 agent 把 CNAME 指向了 `cfargotunnel.com`。保存的每条原因都是一行，写明 agent、被拒绝的值、需要在 main 实例配置中修改的键以及要加入的值，例如：
-
-- `agent "edge1": hostname "app.example.com" does not match the agent's hostnames allow-list; add "app.example.com" (or a glob matching it) to agent.agents.edge1.hostnames in the main instance config`
-- `agent "edge1": wildcard hostname "*.example.com" is only allowed by an identical entry (...); add "*.example.com" to agent.agents.edge1.hostnames in the main instance config`
-- `agent "edge1": tunnel "other" is not in the agent's allowed tunnels; add "other" to agent.agents.edge1.tunnels in the main instance config`
-- 对于 `accept_token` agent，键是 `agent.accept_<list>`（及对应的 `LABELGATE_AGENT_ACCEPT_<LIST>` 环境变量），而不是 `agent.agents.<id>.<list>`。
-
-**解决方案：** 在 **main** 实例（而不是 agent）上按消息指出的键做修改，或者按消息的提示修正标签。服务主机的情况参见上面的 [`service host ... is not allowed for agents`](#agent-service-host)。
-
-### Agent 不断重连
-
-**问题：** Agent 日志显示反复的连接/断开循环。
-
-**解决方案：**
-- 网络不稳定时这是正常的 - agent 会以指数退避自动重连，期间其资源会被保留 `sync.agent_grace` 的时长
-- 检查 main 实例日志中是否有认证错误
-- 确认 main 实例上的 agent token 没有被更改
-
-## Docker Socket 权限被拒绝
-
-**问题：** `permission denied while trying to connect to the Docker daemon socket`
-
-**解决方案：** 确保 Labelgate 可以访问 Docker socket：
-
-```yaml
-services:
-  labelgate:
-    image: ghcr.io/channinghe/labelgate:v0.3
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    # 推荐：加入拥有该 socket 的用户组
-    # （stat -c '%g' /var/run/docker.sock）
-    group_add:
-      - "REPLACE_WITH_GROUP_ID"
-    # 或者，如果你接受其风险，以 root 运行
-    # user: root
+```bash
+LABELGATE_SYNC_REMOVE_DELAY=2h
+LABELGATE_SYNC_AGENT_GRACE=72h
 ```
-
-## 启动错误
-
-**问题：** Labelgate 启动后立刻退出，并输出 `config:` 错误。
-
-**原因：** 配置会被严格校验。未知的键、非法的值，以及 v0.2 中已移除的配置项（`docker.ssh.*`、`ssh://` 地址、`db.retention`、`db.vacuum_interval`）都会在启动时失败。
-
-**解决方案：** 修正或删除消息中指出的键；参见[已移除的配置项](/zh/docs/configuration/reference#removed-keys)。发生致命错误时进程以非零状态退出。
-
-## 数据库不可写
-
-**问题：** Labelgate 以 `open store "/app/config/labelgate.db": ...`（例如 `unable to open database file`）退出，或迁移备份失败。
-
-**解决方案：** 镜像以非 root 用户（UID 65532）运行。镜像自带属主为该用户的 `/app/config`，因此 Docker 命名卷会自动可写。bind mount 保留宿主机目录的属主：请执行 `sudo chown -R 65532:65532 ./labelgate-data`（或使用 `user: root`）。由旧镜像创建的命名卷属于 root，需要同样处理。从 v0.2 升级时，目录还需要有足够空间存放 `labelgate.db.v0.2.bak` 备份。

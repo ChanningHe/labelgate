@@ -1,174 +1,649 @@
 ---
 title: Common Issues
-description: Solutions to frequently encountered problems with Labelgate.
+description: Find your error message or symptom and fix it.
 ---
 
-## Conflicts
+Search this page for the start of your error message. Most messages already name the setting to change and how.
 
-Conflicts are shown in the dashboard and in `GET /api/resources/*` as resources with status `error` and the reason in `last_error`. They are re-evaluated every cycle and clear on their own once the cause is gone.
+## First steps [#first-steps]
 
-### `conflict: existing record not owned by labelgate`
+1. **Read the log.** If Labelgate does not start, the reason is printed as `labelgate: ...`. Problems found while it runs are logged as `msg="reconcile problem"`.
 
-**Problem:** A service stays in the error state with this message.
+   ```bash
+   docker compose logs --tail 100 labelgate
+   docker compose logs labelgate | grep -E "WARN|ERROR"
+   ```
 
-**Cause:** A DNS record, Access application or tunnel ingress rule with the same identity already exists on Cloudflare and Labelgate does not own it (it has no `labelgate:<instance_id>` comment marker, no `labelgate-<instance_id>` Access tag, and is not tracked as a tunnel rule). Labelgate never adopts or overwrites such resources.
+   A problem is logged once, when it appears or its text changes, and again every hour (`still_present=true`) while it lasts. A fixed problem logs `reconcile problem resolved`. So an old log line may no longer apply.
 
-**Solution:** Either delete the existing record or rule in the Cloudflare dashboard so Labelgate can create its own, remove or change the label, or (for DNS records you really want to hand over) add the marker comment yourself. See [Ownership & Conflicts](/docs/ownership#resolving-a-conflict).
+2. **Open the dashboard** at `http://localhost:28111/dashboard/`.
+   - The dashboard always shows the current problems. **Overview → Last sync** shows the first one.
+   - **DNS**, **Tunnels** and **Access** list every resource. Open one in status `error` to see why.
+   - **Agents** shows which agents are connected.
 
-### `conflict: ... already claimed by ...`
+3. **Turn on debug logs** if you need more detail, then restart:
 
-**Problem:** A container's service is rejected because another one owns the hostname.
+   ```bash
+   LABELGATE_LOG_LEVEL=debug   # or log_level: debug in labelgate.yaml
+   ```
 
-**Cause:** The **existing owner wins**. Another container (or agent) already claims that hostname, or uses it as a different kind of record. The first claim stays in place for as long as its owner keeps claiming it.
+Labelgate reads its configuration only at startup. After a change, run `docker compose up -d` (environment) or `docker compose restart labelgate` (config file). Label and Cloudflare problems are retried on every sync (every 5 minutes, `sync.interval`) and whenever a container changes.
 
-**Solution:** Use a different hostname, or stop the current owner (or remove its labels): within the same source (the same host or agent) the next claimant takes over on the next cycle. You can find the owner in the error message or in the dashboard.
+## Startup and configuration [#startup]
 
-### `conflict: hostname ... is owned by ...`
+### `labelgate: config: ...` [#config-errors]
 
-**Problem:** A service is rejected although it uses a different record type, path or tunnel than the existing resources on that hostname.
-
-**Cause:** A hostname belongs to one source: the main host or one agent. Another source (`local` or `agent <id>`) has resources on it, in any state, including orphaned ones: the hostname stays with that source until the last of them is deleted (`cleanup: true`, after `sync.remove_delay`) or dropped from the database (`cleanup: "false"`, after `sync.orphan_ttl`).
-
-**Solution:** Define every service for that hostname on the same host, or free the hostname on the other source first (see [Ownership & Conflicts](/docs/ownership#conflicts-between-claims)).
-
-### `service host ... is not allowed for agents` [#agent-service-host]
-
-**Problem:** A tunnel label on an agent host is rejected, for example for `http://traefik:80`. The stored reason reads:
+Labelgate exits (or keeps restarting) right after start:
 
 ```
-agent "edge1": service host "traefik" is a host name, which agents may only use if allow-listed; add "traefik" to agent.agents.edge1.services in the main instance config (or use the origin's IP address)
+labelgate: config: 2 problems:
+  api.token (env LABELGATE_API_TOKEN): must be at least 16 characters, got 5 (generate one with: openssl rand -hex 32)
+  cloudflare.api_token (env LABELGATE_CLOUDFLARE_API_TOKEN): no Cloudflare API token is configured: set this, or add an entry under cloudflare.credentials in the config file
 ```
 
-**Cause:** Agent tunnel services must target an IP address, or a host listed in the agent's `services` allow-list. Host names are resolved on the agent host and could reach it or a metadata service. The allow-list is part of the **main** instance's configuration, not the agent's: changing the agent's own config or labels does not help.
+**Cause:** a setting is missing or invalid. Each line names one key and the environment variable that sets it.
 
-**Solution:** On the **main** instance, add the value quoted in the message to the key it names, then restart the main instance (configuration is read at startup). For an agent listed under `agent.agents`:
+**Fix:**
+
+1. Fix each key, in `labelgate.yaml` or with the variable shown in `(env ...)`. Keys without `(env ...)` can only be set in the config file.
+2. `unknown key`: the key is misspelled. Compare it with the [configuration reference](/docs/configuration/reference).
+3. `removed in v0.3`: delete the key. See [Removed keys](/docs/configuration/reference#removed-keys).
+4. Start again: `docker compose up -d`.
+
+### `config: cannot open the config file` [#config-file]
+
+```
+labelgate: config: cannot open the config file set by LABELGATE_CONFIG: stat /etc/labelgate/labelgate.yaml: no such file or directory; fix the path or mount the file into the container
+```
+
+**Cause:** `LABELGATE_CONFIG` (or `--config`) points to a file that is not in the container.
+
+**Fix:** mount the file. Labelgate finds `/etc/labelgate/labelgate.yaml` without `LABELGATE_CONFIG`.
 
 ```yaml
-agent:
-  agents:
-    edge1:                      # the agent ID quoted in the message
-      token: "<unchanged>"
-      services: ["traefik"]     # a host name, glob (*.svc.internal), IP or CIDR
+services:
+  labelgate:
+    volumes:
+      - ./labelgate.yaml:/etc/labelgate/labelgate.yaml:ro
 ```
 
-For an agent admitted through `agent.accept_token`, the key is `agent.accept_services`:
+Related messages:
 
-```yaml
-agent:
-  accept_token: "<unchanged>"
-  accept_services: ["traefik"]
+- `config: cannot parse ...; fix the syntax at the reported position`: a YAML syntax error. Fix the line the message names.
+- `config: cannot check for a config file: ...; make it readable by the labelgate user`: Labelgate runs as UID 65532. Run `sudo chown 65532 labelgate.yaml`.
+
+### `open store "/app/config/labelgate.db"` [#database]
+
+```
+labelgate: open store "/app/config/labelgate.db": ...; labelgate cannot write the database: make its directory writable by the labelgate user (the image runs as UID 65532: sudo chown -R 65532:65532 <host data dir>), or change db.path (env LABELGATE_DB_PATH)
 ```
 
-or set `LABELGATE_AGENT_ACCEPT_SERVICES=traefik` (comma-separated for several entries). Alternatively, point the label at the container's IP address. The same message form appears for loopback, link-local and other local IP addresses (`service target is the loopback address 127.0.0.1 ...`): adding that exact IP, or a CIDR containing it, to the same key permits it. Services that no allow-list can permit (`unix:` sockets, `bastion`, URLs with user info, shorthand IPs such as `127.1`) say so in the message and what to use instead. See [SSRF guard](/docs/examples/multi-host#ssrf-guard).
+**Cause:** the data folder belongs to another user. Labelgate runs as UID 65532.
 
-### DNS and Tunnel on Same Hostname
+**Fix:**
 
-**Problem:** `conflict: hostname app.example.com is used by <owner> as tunnel:<id>` (or as `records` / `cname`).
+- Bind mount (`./labelgate-data:/app/config`):
 
-**Cause:** The same hostname cannot be used for both a DNS record and a Tunnel ingress rule: a tunnel hostname has its own CNAME record.
+  ```bash
+  sudo chown -R 65532:65532 ./labelgate-data
+  ```
 
-**Solution:** Use different hostnames for DNS and Tunnel, or only one type per hostname:
+- Named volume made by an older image: find its name with `docker volume ls`, then:
+
+  ```bash
+  docker run --rm -v VOLUME_NAME:/data alpine chown -R 65532:65532 /data
+  ```
+
+If the message ends with `this database was written by a newer labelgate`, you started an older version. Run the newer version again, or [restore the v0.2 backup](/docs/upgrading#database-migration).
+
+### `api: cannot listen on :28111` [#port-in-use]
+
+```
+api: cannot listen on :28111: listen tcp :28111: bind: address already in use; free the port or change api.address (env LABELGATE_API_ADDRESS)
+```
+
+**Cause:** another program already uses the port. This usually happens with `network_mode: host`.
+
+**Fix:** stop the other program, or move Labelgate to another port and update `ports:` to match.
+
+```bash
+LABELGATE_API_ADDRESS=:28121
+```
+
+The same applies to `agent: cannot listen on ...`: change `agent.listen` (`LABELGATE_AGENT_LISTEN`) on the main, or `connect.listen` (`LABELGATE_CONNECT_LISTEN`) on an inbound agent.
+
+## Docker [#docker]
+
+### `Cannot connect to the Docker daemon` [#docker-socket-missing]
+
+```
+docker: cannot list containers: Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?; no Docker daemon answers at unix:///var/run/docker.sock: mount the socket into the container (volume /var/run/docker.sock:/var/run/docker.sock:ro) or set docker.endpoint (env LABELGATE_DOCKER_ENDPOINT); resources of local containers are kept unchanged until Docker answers again
+```
+
+**Cause:** the Docker socket is not mounted into the container.
+
+**Fix:** mount it. For rootless Docker, mount your user's socket (for example `/run/user/1000/docker.sock`) at the same container path.
 
 ```yaml
-# Use Tunnel only (recommended for most cases)
+services:
+  labelgate:
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+```
+
+Nothing is deleted while Docker does not answer.
+
+### `permission denied` on the Docker socket [#docker-socket-permission]
+
+```
+docker: cannot list containers: permission denied ...; labelgate may not open the Docker socket: add the socket's group ID to the container (compose group_add; find it with: stat -c %g /var/run/docker.sock)
+```
+
+**Cause:** Labelgate runs as UID 65532, which is not in the group that owns the socket.
+
+**Fix:**
+
+1. Find the group ID: `stat -c '%g' /var/run/docker.sock`
+2. Add it to the service and run `docker compose up -d`:
+
+   ```yaml
+   services:
+     labelgate:
+       group_add:
+         - "988"   # the number from step 1
+   ```
+
+### Remote Docker over `tcp://` [#docker-tcp]
+
+The message starts with `docker: cannot list containers:`. Find its ending in the table:
+
+| Message ends with | Fix |
+|-------------------|-----|
+| `the Docker daemon's TLS certificate is not trusted` | Set `docker.tls.ca` (`LABELGATE_DOCKER_TLS_CA`) to the CA file that signed the daemon's certificate. |
+| `the Docker daemon requires a client certificate` | Set `docker.tls.cert` (`LABELGATE_DOCKER_TLS_CERT`) and `docker.tls.key` (`LABELGATE_DOCKER_TLS_KEY`). |
+| `the Docker daemon expects TLS` | Set `docker.tls.ca`, and the client certificate if the daemon asks for one. |
+| `check docker.endpoint (env LABELGATE_DOCKER_ENDPOINT) and that the Docker daemon listens there` | Fix the host and port in `LABELGATE_DOCKER_ENDPOINT`. |
+
+Mount the certificate files into the container, for example `./docker-certs:/certs:ro`.
+
+## Cloudflare [#cloudflare]
+
+### `cloudflare credential validation failed` [#credential-validation]
+
+Labelgate exits at start:
+
+```
+labelgate: cloudflare credential validation failed (checked at startup; ...): credential "default": cloudflare tokens.verify: HTTP 401 ...; the API token in cloudflare.api_token (env LABELGATE_CLOUDFLARE_API_TOKEN) is invalid, expired or revoked; create a new one under My Profile > API Tokens in the Cloudflare dashboard
+```
+
+**Cause:** Cloudflare does not accept the token, or a configured tunnel does not exist.
+
+**Fix:** find the end of the message:
+
+- `is invalid, expired or revoked` or `is disabled or expired`: [create a new token](/docs/getting-started) and put it in the key the message names.
+- `no such tunnel in account`: compare `LABELGATE_CLOUDFLARE_TUNNEL_ID` and `LABELGATE_CLOUDFLARE_ACCOUNT_ID` with **Zero Trust > Networks > Tunnels**.
+- `cannot reach the Cloudflare API`: see [below](#cloudflare-unreachable).
+
+### `was refused: give it the ... permission` [#token-permissions]
+
+```
+cannot create DNS record: cloudflare dns.create: HTTP 403 ...; the API token in cloudflare.api_token (env LABELGATE_CLOUDFLARE_API_TOKEN) was refused: give it the Zone:DNS:Edit permission for this zone or account under My Profile > API Tokens in the Cloudflare dashboard (or replace it if it is invalid)
+```
+
+**Cause:** the token lacks the permission named in the message, or does not cover this zone or account.
+
+**Fix:**
+
+1. Open [My Profile > API Tokens](https://dash.cloudflare.com/profile/api-tokens) and edit the token.
+2. Add the permission from the message (`Zone:Zone:Read`, `Zone:DNS:Edit`, `Account:Cloudflare Tunnel:Edit` or `Access: Apps and Policies:Edit`).
+3. Check that **Zone Resources** include the domain and **Account Resources** include the account.
+
+No restart is needed. The next sync uses the new permissions.
+
+### `no matching zone` [#zone-not-found]
+
+```
+app.example.com: no matching zone: no configured API token can see a zone containing this hostname (cloudflare.credentials.<name>.zones may also exclude it); add the zone to a token's Zone Resources under My Profile > API Tokens in the Cloudflare dashboard, or fix the hostname
+```
+
+**Cause:** no API token can see the domain of this hostname.
+
+**Fix:**
+
+1. Check the hostname in the label for typos.
+2. Add the domain to the token's **Zone Resources**.
+3. With [several tokens](/docs/configuration/reference#multi-credential-setup): check the `zones` list of each credential and the `credential` label.
+
+A domain you just added is found within a minute.
+
+### `unknown tunnel` or `no default tunnel configured` [#unknown-tunnel]
+
+```
+tunnel "media": unknown tunnel: use default (cloudflare.tunnel_id (env LABELGATE_CLOUDFLARE_TUNNEL_ID)) or a name or tunnel ID from cloudflare.tunnels in the main instance config
+no default tunnel configured: name the tunnel in the label, or set cloudflare.tunnel_id (env LABELGATE_CLOUDFLARE_TUNNEL_ID) or default_tunnel (env LABELGATE_DEFAULT_TUNNEL) in the main instance config
+credential "corp": unknown credential: add cloudflare.credentials.corp to the main instance config, or use default (cloudflare.api_token) or another configured credential
+```
+
+**Cause:** a `tunnel` or `credential` label names something the main config does not define, or no default tunnel is set.
+
+**Fix:** set `LABELGATE_CLOUDFLARE_TUNNEL_ID` for the default tunnel. For more tunnels or tokens, add them to `labelgate.yaml` (file only) with the name the label uses:
+
+```yaml
+cloudflare:
+  tunnels:
+    media:
+      account_id: "your-account-id"
+      tunnel_id: "your-tunnel-id"
+```
+
+### `cannot reach the Cloudflare API` [#cloudflare-unreachable]
+
+```
+cloudflare dns.list: dial tcp ...; cannot reach the Cloudflare API: check DNS, outbound HTTPS (port 443) and proxy settings of the labelgate host
+```
+
+**Cause:** the container has no working internet access.
+
+**Fix:** check DNS, the firewall and the proxy of the host. Test from the host: `curl -I https://api.cloudflare.com`.
+
+### `Cloudflare is rate-limiting this API token` [#rate-limit]
+
+**Cause:** too many API calls in a short time, often after restarting many containers at once.
+
+**Fix:** wait. Labelgate retries on its own. If it keeps happening, sync less often:
+
+```bash
+LABELGATE_SYNC_INTERVAL=15m
+LABELGATE_DOCKER_POLL_INTERVAL=5m
+```
+
+### `target auto: cannot detect this host's public IPv4 address` [#public-ip]
+
+```
+target auto: cannot detect this host's public IPv4 address: ...; set the record's target label to an IP address instead
+target auto needs the public IPv4 address of agent edge1, which it did not report (it could not detect one); set the record's target label to an IP address instead
+```
+
+The agent itself logs `cannot detect this host's public IPv4 address: records with target auto need it; ...`, and `public IPv4 detection recovered` once it works again. The IPv6 warning can be ignored if the host has no IPv6 and no `AAAA` record uses `target: auto`.
+
+**Cause:** `target: auto` needs the public IP. Labelgate asks `api.ipify.org` and `ipv4.icanhazip.com` (IPv6: `api6.ipify.org`, `ipv6.icanhazip.com`), and could not reach them. For an agent, the agent host could not reach them.
+
+**Fix:** allow outbound HTTPS to those hosts, or set the IP yourself:
+
+```yaml
+labels:
+  labelgate.dns.web.target: "203.0.113.10"
+```
+
+### Hostname gives `502` or error `1033` [#tunnel-502]
+
+**Cause:** the tunnel route exists, but cloudflared is not running or cannot reach your app.
+
+**Fix:** see [cloudflared: common problems](/docs/examples/cloudflared#common-problems).
+
+## Conflicts [#conflicts]
+
+A conflict never changes anything on Cloudflare. The resource stays in status `error` until you fix the cause; then the next sync clears it.
+
+### `conflict: existing record not owned by labelgate` [#not-owned]
+
+```
+conflict: existing record not owned by labelgate: a CNAME record for app.example.com (id 3f2a...) already exists in Cloudflare; delete it under DNS > Records in the Cloudflare dashboard or use another hostname
+```
+
+**Cause:** Cloudflare already has a record, Access application or tunnel route for this hostname that Labelgate did not create. Labelgate never takes over or changes those.
+
+**Fix:** find the rest of the message:
+
+| Message continues with | Fix |
+|------------------------|-----|
+| `a ... record for ... already exists in Cloudflare` | Delete the record under **DNS > Records**, or use another hostname. |
+| `(it was created by labelgate instance "a1b2c3d4" ...)` | You lost the database. Set `LABELGATE_INSTANCE_ID=a1b2c3d4`. See [If you lose the database](/docs/ownership#recovering-from-database-loss). |
+| `the ownership marker was removed from the comment` | Put `labelgate:<instance_id>` back at the start of the record's comment, or delete the record. |
+| `an Access application for ... already exists` | Delete it under **Zero Trust > Access > Applications**, or remove the access label. |
+| `the tag "labelgate-..." was removed` | Add the tag back to the Access application, or delete it. |
+| `tunnel ... already routes ... with a rule labelgate did not create` | Remove the route under **Zero Trust > Networks > Tunnels** (published application routes). |
+| `Cloudflare refused to create ... because a conflicting object already exists` | Delete the existing object, or use another hostname. |
+
+See [Ownership & Conflicts](/docs/ownership#resolving-a-conflict).
+
+### `conflict: the A record ... is already managed by` [#duplicate-claim]
+
+```
+conflict: the A record app.example.com is already managed by local container web service web; remove the duplicate label from one of the containers
+```
+
+**Cause:** two containers claim the same record or route. The one that had it first keeps it.
+
+**Fix:** remove the label from one container. If you stop or remove the current owner instead, the other container takes over on the next sync.
+
+### `conflict: hostname ... is already managed by agent` [#hostname-other-host]
+
+```
+conflict: hostname app.example.com is already managed by agent edge1, and a hostname can belong to only one instance (main or one agent); remove this label or the one on agent edge1
+```
+
+**Cause:** a hostname belongs to one host: the main or one agent. Another host already has resources for it.
+
+**Fix:** define every service of that hostname on the same host, or remove the label on the other host. The hostname is free once the other host's resources are deleted (after `sync.remove_delay`). Resources kept with `cleanup: "false"` hold the hostname until you delete them in Cloudflare.
+
+### `conflict: hostname ... already has` [#dns-and-tunnel-on-same-hostname]
+
+```
+conflict: hostname app.example.com already has a route on tunnel 6ff4... from local container web service web; a hostname can have DNS records, one CNAME record or one tunnel route, not a mix: remove one of the labels
+```
+
+**Cause:** one hostname has both a DNS label and a tunnel label. A tunnel route creates its own DNS record.
+
+**Fix:** keep only one. For a tunnel, remove the `dns` labels:
+
+```yaml
 labels:
   labelgate.tunnel.web.hostname: "app.example.com"
   labelgate.tunnel.web.service: "http://app:80"
 ```
 
-## Label Errors
+### `conflict: an older labelgate ... record ... still uses this hostname` [#older-record]
 
-**Problem:** The sync status is `error` and the logs contain a label error with a container name and key.
+```
+conflict: an older labelgate CNAME record for app.example.com (id 9b1c...) still uses this hostname (its label set cleanup=false, or sync.remove_delay has not passed); delete it under DNS > Records in the Cloudflare dashboard to use the hostname now
+```
 
-**Cause:** Labels are strictly validated: invalid values (`proxied: "maybe"`, `ttl: "abc"`) drop the service, and unknown properties (`hostnme`) are errors. Resources that Labelgate already created for a dropped service are held, not deleted, and show `label error: ...` until you fix the label.
+**Cause:** you changed how the hostname is published, for example from a DNS record to a tunnel. The old record still exists.
 
-**Solution:** Fix the label named in the log line; see [Strict Validation](/docs/labels#strict-validation). If a service is missing without any error, check the key structure: keys that do not look like `labelgate.<type>.<service>.<property>` are ignored silently.
+**Fix:** wait for `sync.remove_delay` (default `30m`), or delete the old record under **DNS > Records** now.
 
-## Dashboard or API Not Available
+## Labels [#labels]
 
-**Problem:** Connecting to port 8080 fails, or the logs say `api.token is empty: API and dashboard disabled`.
+### `container ...: label ...` [#label-errors]
 
-**Cause:** `api.token` is required. Without it the API and the dashboard are not started (reconciliation continues).
+```
+local container web: label labelgate.dns.web.proxied: invalid boolean "maybe" (use true or false)
+```
 
-**Solution:** Set `LABELGATE_API_TOKEN` to a long random value (`openssl rand -hex 32`), publish the port, and sign in with that token.
+The resource itself shows:
 
-## Zone Not Found
+```
+label error: labelgate.dns.web.proxied: invalid boolean "maybe" (use true or false); the existing Cloudflare objects are kept unchanged until the label is fixed
+```
 
-**Problem:** The service shows `zone for app.example.com: app.example.com: no matching zone`.
+**Cause:** a label has a wrong value, a typo in its name, or a required label is missing.
 
-**Cause:** None of the credentials can see the zone containing your hostname, or a `credential` label points at a token that cannot. The zone list of each credential is cached; Labelgate refetches it when a lookup misses, at most once per minute, so a zone you just added can take a minute to appear.
+**Fix:** fix the label named in the message and recreate the container (`docker compose up -d`). Nothing on Cloudflare changes until then. See [When a label is wrong](/docs/labels#strict-validation).
 
-**Solution:**
-1. Check your API token permissions in [Cloudflare Dashboard > API Tokens](https://dash.cloudflare.com/profile/api-tokens)
-2. Ensure `Zone:Read` permission is granted for the target zone
-3. Verify the domain exists in your Cloudflare account
+### `access policy "..." is not defined` [#access-policy-not-defined]
 
-## Tunnel Not Connected
+```
+access policy "team" is not defined: add labelgate.access.team.* labels to this container or another container of the same host
+```
 
-**Problem:** Labelgate creates ingress rules but the hostname returns a 502 or connection error.
+**Cause:** a service uses `access: "team"`, but no container on that host defines the policy `team`.
 
-**Cause:** The `cloudflared` daemon is not running or not connected to the tunnel.
+**Fix:** define it, on this container or another one on the same host:
 
-**Solution:**
-1. Check cloudflared is running:
+```yaml
+labels:
+  labelgate.access.team.policy.include.emails: "you@example.com"
+```
+
+If the message says `is defined differently on several containers of this host`, make the definitions identical or keep only one.
+
+### A container is ignored, with no error [#container-ignored]
+
+Check:
+
+- The container is running. Stopped containers count as gone.
+- Every key starts with `labelgate.` and has four parts: `labelgate.<type>.<name>.<property>`. Labels without the prefix are ignored.
+- If `docker.filter_label` (`LABELGATE_DOCKER_FILTER_LABEL`) is set, the container carries that label.
+- If you changed `label_prefix` (`LABELGATE_LABEL_PREFIX`), the labels use the new prefix.
+
+## Agents [#agents]
+
+### `cannot connect to the main instance; retrying` [#agent-cannot-connect]
+
+The agent logs:
+
+```
+level=WARN msg="cannot connect to the main instance; retrying" url=wss://main.example.com:28112/agent error="...; nothing serves agent connections at that path: connect.endpoint (env LABELGATE_CONNECT_ENDPOINT) must end in /ws"
+```
+
+**Fix:** find the end of the error:
+
+| Error ends with | Fix |
+|-----------------|-----|
+| `must end in /ws` | Use `LABELGATE_CONNECT_ENDPOINT=wss://main.example.com:28112/ws`. |
+| `nothing listens there: ...` | Start the main with `agent.enabled: true` (`LABELGATE_AGENT_ENABLED=true`), publish `"28112:28112"`, and open the port in the firewall. |
+| `does not resolve` | Fix the host name in `LABELGATE_CONNECT_ENDPOINT`. |
+| `TLS certificate is not trusted` | Set `LABELGATE_CONNECT_TLS_CA` to your CA file, or use a public certificate. |
+| `TLS certificate does not list the host` | Use a host name that the certificate is issued for. |
+| `does not use TLS: use ws://` | Use `ws://`, or give the main a certificate (`agent.tls.cert`, `agent.tls.key`). |
+| `uses TLS: use wss://` | Use `wss://`. |
+| `does not belong to labelgate's agent port` | The URL points somewhere else, for example the dashboard port `28111`. Use port `28112`. |
+
+When the main dials an [inbound agent](/docs/examples/multi-host#inbound-mode-example), the main logs `cannot connect to inbound agent; retrying` with the same endings. Fix `agent.agents.<id>.connect_to` and `agent.tls.ca` on the main instead.
+
+### `peer authentication failed; tokens do not match` [#agent-auth]
+
+The agent logs:
+
+```
+level=WARN msg="handshake with the main instance failed" error="agent: peer authentication failed; tokens do not match: connect.token (env LABELGATE_CONNECT_TOKEN) on this agent must equal agent.agents.edge1.token in the main instance config (or agent.accept_token there if \"edge1\" is not listed under agent.agents)"
+```
+
+The main logs `agent handshake failed` and names the agent, for example `agent "edge1" is not configured: add agent.agents.edge1 with a token to the main instance config`.
+
+**Cause:** the agent ID or the token does not match the main's config.
+
+**Fix:**
+
+1. `LABELGATE_CONNECT_AGENT_ID` on the agent must equal the key under `agent.agents` on the main.
+2. `LABELGATE_CONNECT_TOKEN` must equal that entry's `token`. Copy it again.
+3. An agent listed under `agent.agents` must use its own token. `agent.accept_token` does not work for it.
+4. `labelgate.yaml` does not expand `${VAR}`. Paste the real token.
+5. Restart the main after changing its config.
+
+### `must be at least 32 characters` (agent token) [#agent-token-too-short]
+
+```
+labelgate: config: connect.token (env LABELGATE_CONNECT_TOKEN): must be at least 32 characters, got 12 (generate one with: openssl rand -hex 32)
+```
+
+**Cause:** agent tokens need at least 32 characters and 12 different characters. A `${VAR}` left unexpanded in `labelgate.yaml` also fails this check.
+
+**Fix:** make a new token and put it on both sides (`agent.agents.<id>.token` on the main, `LABELGATE_CONNECT_TOKEN` on the agent):
+
+```bash
+openssl rand -hex 32
+```
+
+### `another agent with ID "..." is already connected` [#duplicate-agent]
+
+```
+peer error: duplicate_agent: agent already connected; another agent with ID "edge1" is already connected: give each agent its own connect.agent_id (env LABELGATE_CONNECT_AGENT_ID)
+```
+
+The main logs `rejected a second connection for an agent ID that is already connected`.
+
+**Cause:** two hosts use the same agent ID.
+
+**Fix:** give each host its own `LABELGATE_CONNECT_AGENT_ID`.
+
+### Agent gets a new ID after the container is recreated [#agent-id-changes]
+
+**Cause:** `connect.agent_id` is not set and the container has no `/etc/machine-id`. The agent then uses the container's hostname, which changes on every recreate. Labelgate logs a warning at startup when this happens.
+
+**Fix:** set the ID, or mount the host's machine ID:
+
+```yaml
+services:
+  labelgate-agent:
+    environment:
+      - LABELGATE_CONNECT_AGENT_ID=edge1
+    # or:
+    volumes:
+      - /etc/machine-id:/etc/machine-id:ro
+```
+
+### `unsupported_version` [#agent-version]
+
+```
+peer error: unsupported_version: ...; the main instance runs an incompatible labelgate release: run the same release on both
+```
+
+**Fix:** run the same Labelgate version on the main and all agents. See [Upgrading](/docs/upgrading#agents).
+
+### `does not match the agent's hostnames allow-list` [#agent-allow-lists]
+
+Agent resources that break an allow-list are rejected. The message names the key to change:
+
+```
+agent "edge1": hostname "app.example.com" does not match the agent's hostnames allow-list; add "app.example.com" (or a glob matching it) to agent.agents.edge1.hostnames in the main instance config
+agent "edge1": wildcard hostname "*.example.com" is only allowed by an identical entry (...); add "*.example.com" to agent.agents.edge1.hostnames in the main instance config
+agent "edge1": tunnel "media" is not in the agent's allowed tunnels; add "media" to agent.agents.edge1.tunnels in the main instance config
+```
+
+**Cause:** allow-lists live in the **main** instance's config. Changing the agent does not help.
+
+**Fix:** add the value to the key the message names, on the main, then restart the main. For agents that log in with `agent.accept_token`, the message names `agent.accept_hostnames` or `agent.accept_tunnels` and its environment variable instead. See [Allow-lists](/docs/examples/multi-host#allow-lists).
+
+A message with `a CNAME to ... is not allowed` means an agent's DNS label points at a tunnel. Use a tunnel label instead.
+
+### `service host "..." is a host name, which agents may only use if allow-listed` [#agent-service-host]
+
+```
+agent "edge1": service host "traefik" is a host name, which agents may only use if allow-listed; add "traefik" to agent.agents.edge1.services in the main instance config (or use the origin's IP address)
+```
+
+**Cause:** an agent's tunnel `service` may point to an IP address. A host name such as `traefik` must be allowed in the **main** instance's config.
+
+**Fix:** on the main, add the host name to that agent's `services`, then restart the main:
+
+```yaml
+agent:
+  agents:
+    edge1:
+      token: "UNCHANGED"
+      services: ["traefik"]   # host name, pattern (*.svc.internal), IP or CIDR
+```
+
+For agents that log in with `agent.accept_token`, use `agent.accept_services` (`LABELGATE_AGENT_ACCEPT_SERVICES=traefik`). Or point the label at the container's IP address.
+
+`service target is the loopback address 127.0.0.1, which agents may not use unless allow-listed` works the same way: add that IP, or a CIDR containing it. Messages that say `no allow-list can permit` (`unix:` sockets, `bastion`, `user:pass@` in the URL) cannot be allowed; change the label. See [Agent tunnel services](/docs/examples/multi-host#ssrf-guard).
+
+### Added to `agent.accept_services`, still rejected [#named-vs-accept]
+
+**Cause:** the agent is listed under `agent.agents`. The `agent.accept_*` lists never apply to it.
+
+**Fix:** use `agent.agents.<id>.services` (and `.hostnames`, `.tunnels`). The message always names the right key. See [Named agents vs shared token](/docs/examples/multi-host#named-vs-shared).
+
+### `too many containers` [#agent-too-many-containers]
+
+```
+too many containers: 5000 > 4096; set docker.filter_label (env LABELGATE_DOCKER_FILTER_LABEL) on the agent to report only labelled containers
+```
+
+**Cause:** the agent host runs more containers than one report may carry. The main keeps the agent's previous containers.
+
+**Fix:** on the agent, read only containers with a marker label, and add that label to the containers you publish:
+
+```bash
+LABELGATE_DOCKER_FILTER_LABEL=public=true
+```
+
+## Dashboard and API [#dashboard]
+
+### `API and dashboard disabled: api.token is empty` [#api-token-missing]
+
+```
+level=WARN msg="API and dashboard disabled: api.token is empty; set api.token (env LABELGATE_API_TOKEN) to a secret of at least 16 characters (generate one with: openssl rand -hex 32). DNS, tunnel and Access sync keep running"
+```
+
+**Fix:** set the token and pass it to the container:
+
+```bash
+openssl rand -hex 32   # put the output in .env as LABELGATE_API_TOKEN
+```
+
+```yaml
+services:
+  labelgate:
+    environment:
+      - LABELGATE_API_TOKEN
+    ports:
+      - "127.0.0.1:28111:28111"
+```
+
+If the log says `API and dashboard disabled by api.enabled (env LABELGATE_API_ENABLED)=false`, remove that setting.
+
+### Dashboard does not open [#dashboard-not-loading]
+
+Check:
+
+1. The URL ends in `/dashboard/`: `http://localhost:28111/dashboard/`.
+2. The port is published (`ports:` above) and the log has no `api: cannot listen on` line.
+3. The log has no `API and dashboard disabled` line.
+4. `this binary was built without the dashboard` appears only with a self-built binary. Use the official image, or run `yarn build` in `dashboard/` before `go build`.
+
+Behind a reverse proxy, forward both `/dashboard/` and the API path (`api.base_path`, default `/api`) to Labelgate unchanged.
+
+### `That token was rejected` / `401 unauthorized` [#api-unauthorized]
+
+**Cause:** the token you entered is not `api.token`. The API answers `401` with `{"error":"unauthorized"}`.
+
+**Fix:**
+
+1. Copy the value of `LABELGATE_API_TOKEN` from your `.env` again.
+2. After you change the token, click **Forget API token** in the top bar and sign in again.
+3. For the API, send the token as a header:
+
    ```bash
-   docker compose ps cloudflared
+   curl -H "Authorization: Bearer $LABELGATE_API_TOKEN" http://localhost:28111/api/overview
    ```
-2. Check cloudflared logs:
-   ```bash
-   docker compose logs cloudflared
-   ```
-3. Verify the tunnel token is correct
-4. Check tunnel status in the [Zero Trust Dashboard](https://one.dash.cloudflare.com/) under **Networks > Tunnels**
 
-## Public IP Detection Fails
+### `healthcheck failed` [#healthcheck]
 
-**Problem:** DNS records with `target=auto` are not being created and the service shows `public IPv4 address: publicip: ...` (or `IPv6`).
+`docker compose ps` shows the container as `unhealthy`. See why:
 
-**Cause:** Labelgate failed to detect the host's public IP address. It asks `api.ipify.org` and `ipv4.icanhazip.com` (`api6.ipify.org` and `ipv6.icanhazip.com` for `AAAA`). For containers on an agent, the agent's own report is used (`agent <id> reported no public IPv4 address`).
+```bash
+docker inspect --format '{{range .State.Health.Log}}{{.Output}}{{end}}' $(docker compose ps -q labelgate)
+```
 
-**Solution:**
-- Check internet connectivity from the Labelgate container
-- Check logs for IP detection errors:
-  ```bash
-  docker compose logs labelgate | grep "public IP"
-  ```
-- Use an explicit IP instead of `auto`:
-  ```yaml
-  labels:
-    labelgate.dns.web.target: "203.0.113.1"
-  ```
+| Output | Fix |
+|--------|-----|
+| `the API is not answering at http://127.0.0.1:28111/api/health` | The API did not start. Read the log for the reason. |
+| `returned HTTP 404, want 200; check api.base_path` | Another program answers on that port. Check `api.address` and `api.base_path` (`LABELGATE_API_BASE_PATH`). |
 
-## API Rate Limits
+## Resources not removed, or removed unexpectedly [#cleanup]
 
-**Problem:** Cloudflare errors with HTTP status 429 in the logs or in a resource's `last_error`.
+<Callout type="warn">
+`cleanup` is on by default. Labelgate deletes a container's resources `sync.remove_delay` (default `30m`) after the container stops or is removed.
+</Callout>
 
-**Cause:** Cloudflare limits the API to 1200 requests per 5 minutes. Exceeded limits result in a 5-minute ban.
+### Resources stay after the container is gone [#resources-not-cleaned-up]
 
-**Solution:**
-- Labelgate automatically retries 429 and 5xx responses with exponential backoff (`retry.*`), honouring `Retry-After`, and tries again on the next cycle
-- Reduce the number of managed resources if limits are frequently hit
-- Avoid rapidly restarting many containers at once
-- Increase the intervals to reduce reconciliation frequency (every cycle lists the DNS records of each referenced zone, each tunnel configuration, and the Access apps and policies of each account):
-  ```bash
-  LABELGATE_DOCKER_POLL_INTERVAL=5m
-  LABELGATE_SYNC_INTERVAL=15m
-  ```
+Look up the resource's status in the dashboard:
 
-## Resources Not Cleaned Up
+| Status | Meaning | Fix |
+|--------|---------|-----|
+| `pending_cleanup` | Waiting for `sync.remove_delay`. | Wait, or shorten it: `LABELGATE_SYNC_REMOVE_DELAY=5m`. |
+| `orphaned` | The label set `cleanup: "false"`. Labelgate leaves it on Cloudflare. | Delete it in the Cloudflare dashboard. |
+| not listed | Labelgate did not create it and never deletes it. | Delete it in the Cloudflare dashboard. |
 
-**Problem:** Cloudflare resources persist after containers are stopped.
+Two more cases keep resources:
 
-**Possible causes:**
-- The `remove_delay` has not elapsed yet. Orphaned resources are deleted `sync.remove_delay` (default `30m`) after the container is gone. To change the delay:
-  ```bash
-  LABELGATE_SYNC_REMOVE_DELAY=5m
-  ```
-- The service has `cleanup: "false"`, so its resources are intentionally kept (they show as `orphaned`).
-- Labelgate does not own the resource. It only deletes records with its comment marker, apps with its tag, and rules it tracks. Resources you created by hand are never deleted.
-- The resource belongs to an agent that is offline. It is held for `sync.agent_grace` (default `24h`) first.
+- **Offline agent:** its resources stay for `sync.agent_grace` (default `24h`), then `sync.remove_delay`.
+- **Docker not answering:** nothing is deleted until Docker answers again. See [Docker](#docker).
 
-`cleanup` defaults to **`true`**: if you want to keep resources, set it to `"false"` explicitly:
+### Resources were deleted unexpectedly [#resources-deleted-unexpectedly]
+
+**Causes:**
+
+- The container was stopped or removed for longer than `sync.remove_delay`.
+- You changed a hostname or record type. The old resource is deleted after `sync.remove_delay`.
+- An agent was offline for longer than `sync.agent_grace` plus `sync.remove_delay`.
+- `sync.remove_delay` is `0s`, which deletes at once.
+
+**Fix:** keep the resources of important services, and give yourself more time:
 
 ```yaml
 labels:
@@ -176,102 +651,7 @@ labels:
   labelgate.tunnel.web.cleanup: "false"
 ```
 
-## Resources Deleted Unexpectedly
-
-**Problem:** A record or rule disappeared after a container stopped or an agent went offline.
-
-**Cause:** `cleanup` defaults to `true`. Labelgate deleted a resource it owns after `sync.remove_delay`, or after `sync.agent_grace` plus `sync.remove_delay` for an offline agent. Check that your config does not set `remove_delay: 0s`.
-
-**Solution:** Set `cleanup: "false"` on services that must survive, and raise `sync.agent_grace` if agents are offline for long periods.
-
-## Container Rebuild (Same Config, New ID)
-
-**Problem:** After rebuilding a container, resources show as conflicting.
-
-**Cause:** The new container has a different ID but the same hostname configuration.
-
-**Solution:** Ownership follows the owner key (host or agent, container name and service name), not the container ID, so a rebuilt container with the same name simply keeps its resources. If you renamed the container, the old name stays the owner until it is gone; stop the old container first and the new one takes over on the next sync.
-
-## Agent Connection Issues
-
-### Agent Can't Connect
-
-**Problem:** Agent logs show `connection refused`, `timeout`, a 404, or `unauthorized`.
-
-**Solution:**
-1. Make sure the endpoint includes the **`/ws` path**: `wss://main.example.com:8081/ws`. Without it the main returns 404.
-2. Verify the main instance is reachable from the agent host and that port 8081 (or your custom `agent.listen`) is open.
-3. Check that the agent ID and token match an entry under `agent.agents` on the main instance, or that the main has `agent.accept_token` set. An unknown ID and a wrong token give the same `unauthorized` error on purpose.
-4. Agents from v0.2 cannot connect to v0.3; upgrade them (see [Upgrading to v0.3](/docs/upgrading#agents)).
-
-### TLS Certificate Errors
-
-**Problem:** `x509: certificate signed by unknown authority`, or a hostname mismatch.
-
-**Cause:** Certificates are verified by default.
-
-**Solution:** Use a certificate from a trusted CA, or configure your private CA with `connect.tls.ca` (agent dialing the main) or `agent.tls.ca` (main dialing inbound agents). As a last resort for testing, `insecure_skip_verify: true` disables verification; do not use it in production.
-
-### `duplicate_agent`
-
-**Problem:** The agent is rejected after authenticating.
-
-**Cause:** Another agent is already connected with the same ID. The existing session is not disturbed.
-
-**Solution:** Give every agent a unique `connect.agent_id`.
-
-### Agent Services Rejected
-
-**Problem:** An agent's service shows an error such as a hostname or tunnel not allowed, or a service URL rejected.
-
-**Cause:** The claim violated the agent's allow-lists on the main instance (`hostnames`, `tunnels`, `services`, or `accept_hostnames` / `accept_tunnels` / `accept_services`), or the tunnel `service` is something no allow-list can permit (a `unix:` socket, `bastion`, a URL with user info), or the agent pointed a CNAME at `cfargotunnel.com`. Every stored reason is one line that names the agent, the rejected value, the config key to change in the main instance config and the value to add, for example:
-
-- `agent "edge1": hostname "app.example.com" does not match the agent's hostnames allow-list; add "app.example.com" (or a glob matching it) to agent.agents.edge1.hostnames in the main instance config`
-- `agent "edge1": wildcard hostname "*.example.com" is only allowed by an identical entry (...); add "*.example.com" to agent.agents.edge1.hostnames in the main instance config`
-- `agent "edge1": tunnel "other" is not in the agent's allowed tunnels; add "other" to agent.agents.edge1.tunnels in the main instance config`
-- for `accept_token` agents the key is `agent.accept_<list>` (with its `LABELGATE_AGENT_ACCEPT_<LIST>` variable) instead of `agent.agents.<id>.<list>`.
-
-**Solution:** Apply the change the message names on the **main** instance (not on the agent), or fix the label as the message says. For service hosts see [`service host ... is not allowed for agents`](#agent-service-host) above.
-
-### Agent Keeps Reconnecting
-
-**Problem:** Agent logs show repeated connect/disconnect cycles.
-
-**Solution:**
-- This is normal during network instability - agents auto-reconnect with exponential backoff, and their resources are held for `sync.agent_grace` meanwhile
-- Check main instance logs for authentication errors
-- Verify the agent token hasn't been changed on the main instance
-
-## Docker Socket Permission Denied
-
-**Problem:** `permission denied while trying to connect to the Docker daemon socket`
-
-**Solution:** Ensure Labelgate has access to the Docker socket:
-
-```yaml
-services:
-  labelgate:
-    image: ghcr.io/channinghe/labelgate:v0.3
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    # Recommended: add the group that owns the socket
-    # (stat -c '%g' /var/run/docker.sock)
-    group_add:
-      - "REPLACE_WITH_GROUP_ID"
-    # Or, if you accept the risk, run as root
-    # user: root
+```bash
+LABELGATE_SYNC_REMOVE_DELAY=2h
+LABELGATE_SYNC_AGENT_GRACE=72h
 ```
-
-## Startup Errors
-
-**Problem:** Labelgate exits immediately with a `config:` error.
-
-**Cause:** Configuration is validated strictly. Unknown keys, invalid values, and removed v0.2 keys (`docker.ssh.*`, `ssh://` endpoints, `db.retention`, `db.vacuum_interval`) fail at startup.
-
-**Solution:** Fix or delete the key named in the message; see [Removed Keys](/docs/configuration/reference#removed-keys). Fatal errors exit with a non-zero status.
-
-## Database Is Not Writable
-
-**Problem:** Labelgate exits with `open store "/app/config/labelgate.db": ...` (for example `unable to open database file`), or a migration backup fails.
-
-**Solution:** The image runs as a non-root user (UID 65532). The image ships `/app/config` owned by that user, so a Docker named volume is writable automatically. A bind mount keeps the host directory's ownership: make it writable with `sudo chown -R 65532:65532 ./labelgate-data` (or use `user: root`). A named volume created by an older image is root-owned and needs the same treatment. When upgrading from v0.2, the directory also needs free space for the `labelgate.db.v0.2.bak` backup.
