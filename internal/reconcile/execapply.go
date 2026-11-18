@@ -5,7 +5,6 @@ import (
 	"errors"
 
 	"github.com/channinghe/labelgate/internal/cloudflare"
-	"github.com/channinghe/labelgate/internal/model"
 )
 
 func (e *executor) dnsOps(ctx context.Context, ops []dnsOp) error {
@@ -26,23 +25,23 @@ func (e *executor) dns(ctx context.Context, op dnsOp) error {
 		return e.fail(ctx, op.Key, op.Msg)
 	case dnsDrop:
 		if op.Msg != "" {
-			e.r.log.Warn("dropping dns row", "resource", op.Key.String(), "reason", op.Msg)
+			e.r.log.Warn(op.Msg, "resource", op.Key.String())
 		}
 		return e.drop(ctx, op.Key)
 	case dnsDelete:
 		err := e.r.cf.DeleteDNSRecord(ctx, op.Zone, op.Record.ID)
 		if err != nil && !errors.Is(err, cloudflare.ErrNotFound) {
-			return e.fail(ctx, op.Key, "delete dns record: "+err.Error())
+			return e.fail(ctx, op.Key, "cannot delete DNS record: "+err.Error())
 		}
 		e.deleted[op.Record.ID] = true
 		return e.drop(ctx, op.Key)
 	}
 	if op.WaitTunnel != "" && !e.tunnelOK[op.WaitTunnel] {
-		return e.fail(ctx, op.Key, "waiting for tunnel "+op.WaitTunnel+" configuration")
+		return e.fail(ctx, op.Key, "waiting for tunnel "+op.WaitTunnel+": its configuration could not be updated (see the tunnel route's error)")
 	}
 	for _, id := range op.Blockers {
 		if !e.deleted[id] {
-			return e.fail(ctx, op.Key, "waiting for superseded record "+id)
+			return e.fail(ctx, op.Key, "waiting for the previous record (id "+id+") on this hostname to be deleted first")
 		}
 	}
 	return e.applyDNS(ctx, op)
@@ -53,15 +52,15 @@ func (e *executor) applyDNS(ctx context.Context, op dnsOp) error {
 	case dnsCreate:
 		rec, err := e.r.cf.CreateDNSRecord(ctx, op.Zone, op.Record)
 		if errors.Is(err, cloudflare.ErrAlreadyExists) {
-			return e.fail(ctx, op.Key, model.ConflictNotOwned)
+			return e.fail(ctx, op.Key, createRefused(describeKey(op.Key), dnsRecordsPage))
 		}
 		if err != nil {
-			return e.fail(ctx, op.Key, "create dns record: "+err.Error())
+			return e.fail(ctx, op.Key, "cannot create DNS record: "+err.Error())
 		}
 		return e.succeed(ctx, op.Key, rec.ID, true)
 	case dnsUpdate:
 		if _, err := e.r.cf.UpdateDNSRecord(ctx, op.Zone, op.Record); err != nil {
-			return e.fail(ctx, op.Key, "update dns record: "+err.Error())
+			return e.fail(ctx, op.Key, "cannot update DNS record: "+err.Error())
 		}
 		return e.succeed(ctx, op.Key, op.Record.ID, true)
 	default:
@@ -122,7 +121,7 @@ func (e *executor) access(ctx context.Context, op accessOp) error {
 	row := e.rows[op.Key]
 	row.CFID, row.PolicyIDs = cfid, policyIDList(ids, remaining)
 	if len(remaining) > 0 {
-		return e.failRow(ctx, row, "delete detached access policy failed; retrying")
+		return e.failRow(ctx, row, "cannot delete an Access policy that is no longer used; retrying next sync")
 	}
 	return e.succeedRow(ctx, row, cfid, len(op.Detach) > 0 || op.Mode != appNoop || anyWrite(op.Steps))
 }
@@ -143,13 +142,13 @@ func (e *executor) writePolicy(ctx context.Context, op accessOp, s policyStep, i
 	}
 	if s.Policy.ID != "" {
 		if _, err := e.r.cf.UpdateAccessPolicy(ctx, op.Account, s.Policy); err != nil {
-			return false, e.fail(ctx, op.Key, "update access policy: "+err.Error())
+			return false, e.fail(ctx, op.Key, "cannot update Access policy: "+err.Error())
 		}
 		return true, nil
 	}
 	p, err := e.r.cf.CreateAccessPolicy(ctx, op.Account, s.Policy)
 	if err != nil {
-		return false, e.fail(ctx, op.Key, "create access policy: "+err.Error())
+		return false, e.fail(ctx, op.Key, "cannot create Access policy: "+err.Error())
 	}
 	ids[i] = p.ID
 	row := e.rows[op.Key]
@@ -164,17 +163,17 @@ func (e *executor) writeApp(ctx context.Context, op accessOp, app cloudflare.Acc
 	case appCreate:
 		a, err := e.r.cf.CreateAccessApp(ctx, op.Account, app)
 		if errors.Is(err, cloudflare.ErrAlreadyExists) {
-			return "", false, e.fail(ctx, op.Key, model.ConflictNotOwned)
+			return "", false, e.fail(ctx, op.Key, createRefused(describeKey(op.Key), accessAppsPage))
 		}
 		if err != nil {
-			return "", false, e.fail(ctx, op.Key, "create access app: "+err.Error())
+			return "", false, e.fail(ctx, op.Key, "cannot create Access application: "+err.Error())
 		}
 		row := e.rows[op.Key]
 		row.CFID = a.ID
 		return a.ID, true, e.persist(ctx, row)
 	case appUpdate:
 		if _, err := e.r.cf.UpdateAccessApp(ctx, op.Account, app); err != nil {
-			return "", false, e.fail(ctx, op.Key, "update access app: "+err.Error())
+			return "", false, e.fail(ctx, op.Key, "cannot update Access application: "+err.Error())
 		}
 	}
 	return app.ID, true, nil
@@ -185,7 +184,7 @@ func (e *executor) detach(ctx context.Context, op accessOp) ([]string, error) {
 	var remaining []string
 	for _, id := range op.Detach {
 		if err := e.r.cf.DeleteAccessPolicy(ctx, op.Account, id); err != nil && !errors.Is(err, cloudflare.ErrNotFound) {
-			e.r.log.Warn("delete access policy", "resource", op.Key.String(), "policy", id, "error", err)
+			e.r.log.Warn("cannot delete an Access policy that is no longer used; retrying next sync", "resource", op.Key.String(), "policy", id, "error", err)
 			remaining = append(remaining, id)
 		}
 	}
@@ -209,12 +208,12 @@ func (e *executor) accessDelete(ctx context.Context, d accessDelete) error {
 		return e.fail(ctx, d.Key, d.Fail)
 	}
 	if d.Warn != "" {
-		e.r.log.Warn("dropping access row", "resource", d.Key.String(), "reason", d.Warn)
+		e.r.log.Warn(d.Warn, "resource", d.Key.String())
 	}
 	if d.AppID != "" {
 		err := e.r.cf.DeleteAccessApp(ctx, d.Account, d.AppID)
 		if err != nil && !errors.Is(err, cloudflare.ErrNotFound) {
-			return e.fail(ctx, d.Key, "delete access app: "+err.Error())
+			return e.fail(ctx, d.Key, "cannot delete Access application: "+err.Error())
 		}
 		row := e.rows[d.Key]
 		row.CFID = ""
@@ -227,7 +226,7 @@ func (e *executor) accessDelete(ctx context.Context, d accessDelete) error {
 		if err != nil && !errors.Is(err, cloudflare.ErrNotFound) {
 			row := e.rows[d.Key]
 			row.PolicyIDs = append([]string(nil), d.Policies[i:]...)
-			return e.failRow(ctx, row, "delete access policy: "+err.Error())
+			return e.failRow(ctx, row, "cannot delete Access policy: "+err.Error())
 		}
 	}
 	return e.drop(ctx, d.Key)

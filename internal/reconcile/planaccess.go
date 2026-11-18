@@ -120,7 +120,7 @@ func ownedApp(row model.Resource, apps []cloudflare.AccessApp, tag string) (*clo
 			if a.HasTag(tag) || row.Legacy {
 				return &a, ""
 			}
-			return nil, model.ConflictNotOwned + " (ownership tag removed)"
+			return nil, appTagRemoved(a, tag)
 		}
 	}
 	for _, a := range apps {
@@ -130,7 +130,7 @@ func ownedApp(row model.Resource, apps []cloudflare.AccessApp, tag string) (*clo
 	}
 	for _, a := range apps {
 		if a.Domain == row.Hostname {
-			return nil, model.ConflictNotOwned
+			return nil, notOwnedApp(a)
 		}
 	}
 	return nil, ""
@@ -151,11 +151,11 @@ func planAccess(row model.Resource, w claim, al accountLive, observed bool, inst
 	case w.Err != "":
 		op.Fail = w.Err
 	case !observed:
-		op.Fail = "access account not observed"
+		op.Fail = accountNotRead(op.Account.ID)
 	case al.Err != nil:
-		op.Fail = "list access: " + al.Err.Error()
+		op.Fail = "cannot list Access applications and policies: " + al.Err.Error()
 	case al.TagErr != nil:
-		op.Fail = "ensure access tag: " + al.TagErr.Error()
+		op.Fail = "cannot create the labelgate Access tag: " + al.TagErr.Error()
 	}
 	if op.Fail != "" {
 		return op
@@ -168,7 +168,7 @@ func planAccess(row model.Resource, w claim, al accountLive, observed bool, inst
 	}
 	want, err := desiredPolicies(*w.Def, row.AppName, row.Hostname)
 	if err != nil {
-		op.Fail = "access policy definition " + w.Def.Name + ": " + err.Error()
+		op.Fail = "invalid access policy " + w.Def.Name + ": " + err.Error()
 		return op
 	}
 	op.Steps, op.Detach = policySteps(row, want, al.Policies)
@@ -253,16 +253,17 @@ func planAccessDelete(row model.Resource, al accountLive, observed bool, instanc
 		return d
 	}
 	if !observed || al.Err != nil {
-		d.Fail = "access account not observed"
+		d.Fail = accountNotRead(d.Account.ID)
 		if observed {
-			d.Fail = "list access: " + al.Err.Error()
+			d.Fail = "cannot list Access applications and policies: " + al.Err.Error()
 		}
 		return d
 	}
 	if row.CFID != "" {
 		if a, ok := findApp(al.Apps, row.CFID); ok {
 			if !a.HasTag(model.AccessTag(instanceID)) && !row.Legacy {
-				d.Warn = "ownership tag removed from access app " + a.ID + "; left in place"
+				d.Warn = "the labelgate tag was removed from the Access application for " + a.Domain + " (id " + a.ID +
+					") in Cloudflare, so labelgate stops managing it and leaves it in place"
 				return d
 			}
 			d.AppID = a.ID

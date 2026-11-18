@@ -311,9 +311,9 @@ func planTunnel(in planInput, lc lifecycle, id string) tunnelOp {
 	tl, ok := in.Live.Tunnels[id]
 	op := tunnelOp{Tunnel: tl.Tunnel, Deletes: deletes, HostOK: map[string]bool{}}
 	if !ok || tl.Err != nil {
-		msg := "tunnel " + id + " configuration unavailable"
+		msg := "the configuration of tunnel " + id + " could not be read this sync; retrying"
 		if ok {
-			msg = "get tunnel configuration: " + tl.Err.Error()
+			msg = "cannot read the configuration of tunnel " + id + ": " + tl.Err.Error()
 		}
 		op.Blocked, op.Deletes = true, nil
 		for _, k := range append(append([]rowKey(nil), winners...), deletes...) {
@@ -326,7 +326,7 @@ func planTunnel(in planInput, lc lifecycle, id string) tunnelOp {
 	conflicted := map[rowKey]bool{}
 	for _, k := range m.Conflicts { // winners, held and orphaned rows alike
 		conflicted[k] = true
-		op.Failed = append(op.Failed, rowFail{Key: k, Msg: model.ConflictNotOwned + " (unmanaged ingress rule uses this hostname)"})
+		op.Failed = append(op.Failed, rowFail{Key: k, Msg: notOwnedRoute(id, lc.rows[k].Hostname)})
 	}
 	for _, k := range winners {
 		if conflicted[k] {

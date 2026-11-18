@@ -164,7 +164,7 @@ func TestTunnelGetFailureNeverPuts(t *testing.T) {
 	if st.State != SyncError || h.cf.CountCalls(cffake.OpPutTunnelConfig) != 0 || len(h.records()) != 0 {
 		t.Fatalf("status %+v calls %+v", st, h.cf.Calls())
 	}
-	if row := h.row(model.KindTunnel, ruleKey); !strings.Contains(row.LastError, "get tunnel configuration") {
+	if row := h.row(model.KindTunnel, ruleKey); !strings.Contains(row.LastError, "cannot read the configuration of tunnel") {
 		t.Fatalf("row %+v", row)
 	}
 	if st := h.cycle(); st.State != SyncSuccess {
@@ -191,7 +191,7 @@ func TestTunnelPutFailureRetried(t *testing.T) {
 	h.src.set(ctr("web", tunOnly(tunSpec("web", appHost, "http://web:80"))))
 	h.cf.FailNext(cffake.OpPutTunnelConfig, errBoom)
 	h.cycle()
-	if row := h.row(model.KindTunnel, ruleKey); !strings.Contains(row.LastError, "put tunnel configuration") {
+	if row := h.row(model.KindTunnel, ruleKey); !strings.Contains(row.LastError, "cannot update the configuration of tunnel") {
 		t.Fatalf("row %+v", row)
 	}
 	if row := h.row(model.KindDNS, cnameKey); !strings.Contains(row.LastError, "waiting for tunnel") || len(h.records()) != 0 {
@@ -271,7 +271,7 @@ func TestSupersededDeleteFailureWaits(t *testing.T) {
 	h.src.set(ctr("web", tunOnly(tunSpec("web", appHost, "http://web:80"))))
 	h.cf.FailNext(cffake.OpDeleteDNSRecord, errBoom)
 	h.cycle()
-	if row := h.row(model.KindDNS, cnameKey); !strings.Contains(row.LastError, "waiting for superseded") {
+	if row := h.row(model.KindDNS, cnameKey); !strings.Contains(row.LastError, "waiting for the previous record") {
 		t.Fatalf("row %+v", row)
 	}
 	h.cycle()
@@ -308,7 +308,7 @@ func TestUnknownTunnelIsRejected(t *testing.T) {
 	s.Tunnel = "missing"
 	h.src.set(ctr("web", tunOnly(s)))
 	h.cycle()
-	if rej := h.st.list(true); len(rej) != 1 || !strings.Contains(rej[0].LastError, "unknown tunnel") {
+	if rej := h.st.list(true); len(rej) != 1 || !strings.Contains(rej[0].LastError, "unknown tunnel: use default") {
 		t.Fatalf("rejected %+v", rej)
 	}
 }

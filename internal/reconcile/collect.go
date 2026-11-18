@@ -55,10 +55,10 @@ func (r *Reconciler) collectLocal(ctx context.Context, out *collected) *sourceIn
 	switch {
 	case err != nil:
 		src.State = sourceHeld
-		out.Issues = append(out.Issues, fmt.Sprintf("local source: %v", err))
+		out.Issues = append(out.Issues, fmt.Sprintf("local Docker: %v; resources of local containers are kept unchanged until Docker answers again", err))
 	case !snap.Complete:
 		src.State = sourceHeld
-		out.Issues = append(out.Issues, "local source: incomplete snapshot")
+		out.Issues = append(out.Issues, "local Docker returned an incomplete container list; resources of local containers are kept unchanged until the next sync")
 	default:
 		snap.AgentID = model.LocalAgentID
 		src.Snapshot = snap
@@ -98,6 +98,7 @@ func (r *Reconciler) expand(src *sourceInfo, out *collected) {
 	ctrs := append([]model.Container(nil), src.Snapshot.Containers...)
 	sort.SliceStable(ctrs, func(i, j int) bool { return ctrs[i].Name < ctrs[j].Name })
 	src.Defs = map[string][]model.AccessPolicyDef{}
+	src.LabelPrefix = r.settings.LabelPrefix
 	parsed := make([]parsedContainer, 0, len(ctrs))
 	for i := range ctrs {
 		c := &ctrs[i]
@@ -148,7 +149,8 @@ func holdFor(prefix, agentID, ctr string, pl model.ParsedLabels, e model.LabelEr
 	if len(parts) < 2 {
 		return labelHold{}, false
 	}
-	h := labelHold{AgentID: agentID, Container: ctr, Type: parts[0], Service: parts[1], Reason: "label error: " + e.Error()}
+	h := labelHold{AgentID: agentID, Container: ctr, Type: parts[0], Service: parts[1], Reason: "label error: " + e.Key + ": " + e.Message +
+		"; the existing Cloudflare objects are kept unchanged until the label is fixed"}
 	switch {
 	case h.Type != "access" && h.Service == "default":
 		h.Service = ""

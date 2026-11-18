@@ -113,7 +113,7 @@ func TestAccessInvalidRuleSelector(t *testing.T) {
 	def.Policies[0].Include = []model.AccessRule{{Selector: "bogus", Values: []string{"x"}}}
 	h.src.set(accessCtr("web", def))
 	h.cycle()
-	if row := h.row(model.KindAccess, appHost); !strings.Contains(row.LastError, "access policy definition team") {
+	if row := h.row(model.KindAccess, appHost); !strings.Contains(row.LastError, "invalid access policy team") {
 		t.Fatalf("row %+v", row)
 	}
 }
@@ -143,7 +143,7 @@ func TestDNSMultiValuedIdentity(t *testing.T) {
 	h.src.set(ctr("web", dnsOnly(ours, same)))
 	h.cycle()
 	wantStatus(t, h.row(model.KindDNS, model.DNSKey(appHost, model.DNSTypeTXT, "mine")), model.StatusActive)
-	if row := h.row(model.KindDNS, model.DNSKey(appHost, model.DNSTypeTXT, "other")); row.LastError != model.ConflictNotOwned {
+	if row := h.row(model.KindDNS, model.DNSKey(appHost, model.DNSTypeTXT, "other")); !strings.HasPrefix(row.LastError, model.ConflictNotOwned) {
 		t.Fatalf("row %+v", row)
 	}
 	if len(h.recordsNamed(appHost)) != 2 {

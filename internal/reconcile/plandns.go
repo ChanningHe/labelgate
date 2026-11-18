@@ -1,6 +1,7 @@
 package reconcile
 
 import (
+	"fmt"
 	"net/netip"
 	"strings"
 	"unicode/utf8"
@@ -124,16 +125,16 @@ func planDNS(row model.Resource, w claim, zl zoneLive, observed bool, instanceID
 	case w.Err != "":
 		return failDNS(k, w.Err)
 	case !observed:
-		return failDNS(k, "zone "+w.Zone.ID+" not observed")
+		return failDNS(k, zoneNotRead(w.Zone.ID))
 	case zl.Err != nil:
-		return failDNS(k, "list dns records: "+zl.Err.Error())
+		return failDNS(k, "cannot list the DNS records of zone "+w.Zone.Name+": "+zl.Err.Error())
 	}
 	want := desiredRecord(row, instanceID)
 	op := dnsOp{Key: k, Zone: w.Zone}
 	if row.CFID != "" {
 		if rec, ok := findRecord(zl.Records, row.CFID); ok {
 			if !model.IsOwnedComment(instanceID, rec.Comment) && !row.Legacy {
-				return failDNS(k, model.ConflictNotOwned+" (ownership marker removed)")
+				return failDNS(k, markerRemoved(rec, instanceID))
 			}
 			return existingOp(op, row, rec, want)
 		}
@@ -162,7 +163,7 @@ func createOp(op dnsOp, row model.Resource, want cloudflare.DNSRecord, recs []cl
 	}
 	for _, rec := range recs {
 		if sameIdentity(rec, want) {
-			return failDNS(op.Key, model.ConflictNotOwned)
+			return failDNS(op.Key, notOwnedRecord(rec, id))
 		}
 	}
 	for _, rec := range recs {
@@ -170,11 +171,12 @@ func createOp(op dnsOp, row model.Resource, want cloudflare.DNSRecord, recs []cl
 			continue
 		}
 		if !model.IsOwnedComment(id, rec.Comment) {
-			return failDNS(op.Key, model.ConflictNotOwned)
+			return failDNS(op.Key, notOwnedRecord(rec, id))
 		}
 		if !deleting[rec.ID] {
-			return failDNS(op.Key, "conflict: labelgate "+string(rec.Type)+" record "+rec.ID+
-				" is kept (cleanup=false or not yet removed); delete it on Cloudflare to use this hostname")
+			return failDNS(op.Key, fmt.Sprintf("conflict: an older labelgate %s record for %s (id %s) still uses this hostname "+
+				"(its label set cleanup=false, or sync.remove_delay has not passed); delete it under %s to use the hostname now",
+				rec.Type, rec.Name, rec.ID, dnsRecordsPage))
 		}
 		op.Blockers = append(op.Blockers, rec.ID)
 	}
@@ -197,9 +199,9 @@ func planDNSDelete(row model.Resource, zl zoneLive, observed bool, instanceID st
 		op.Action = dnsDrop
 		return op
 	case !observed:
-		return failDNS(k, "zone "+row.ZoneID+" not observed")
+		return failDNS(k, zoneNotRead(row.ZoneID))
 	case zl.Err != nil:
-		return failDNS(k, "list dns records: "+zl.Err.Error())
+		return failDNS(k, "cannot list the DNS records of zone "+row.ZoneID+": "+zl.Err.Error())
 	}
 	if row.CFID == "" {
 		return deleteByIdentity(op, row, zl.Records, instanceID)
@@ -211,7 +213,8 @@ func planDNSDelete(row model.Resource, zl zoneLive, observed bool, instanceID st
 	case model.IsOwnedComment(instanceID, rec.Comment) || row.Legacy:
 		op.Action, op.Record = dnsDelete, rec
 	default:
-		op.Action, op.Msg = dnsDrop, "ownership marker removed from record "+rec.ID+"; left in place"
+		op.Action, op.Msg = dnsDrop, fmt.Sprintf("the ownership marker was removed from the comment of the %s record %s (id %s) in Cloudflare, "+
+			"so labelgate stops managing it and leaves it in place", rec.Type, rec.Name, rec.ID)
 	}
 	return op
 }
@@ -256,9 +259,9 @@ func planDNSOps(in planInput, lc lifecycle, deleting map[string]bool, tunnels []
 func gateOnTunnel(op dnsOp, t tunnelOp, tid, host string) dnsOp {
 	switch {
 	case t.Tunnel.ID == "" || t.Blocked:
-		return failDNS(op.Key, "waiting for tunnel "+tid+" configuration")
+		return failDNS(op.Key, "waiting for tunnel "+tid+": its configuration could not be updated (see the tunnel route's error)")
 	case !t.HostOK[host]:
-		return failDNS(op.Key, "no ingress rule applied for "+host)
+		return failDNS(op.Key, "waiting for the tunnel route for "+host+" (see the tunnel route's error); the CNAME is created once the route is in place")
 	}
 	op.WaitTunnel = tid
 	return op

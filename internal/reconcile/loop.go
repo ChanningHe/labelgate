@@ -23,7 +23,7 @@ func (r *Reconciler) Run(ctx context.Context) error {
 			defer wg.Done()
 			err := r.local.Watch(ctx, r.Trigger)
 			if err != nil && ctx.Err() == nil {
-				r.log.Error("local source watch stopped", "error", err)
+				r.log.Error("watching local Docker events stopped; container changes are picked up only by the periodic sync (sync.interval)", "error", err)
 			}
 		}()
 	}

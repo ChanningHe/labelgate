@@ -18,7 +18,7 @@ func TestExistingOwnerWinsAndNeverFlaps(t *testing.T) {
 	h.src.set(incumbent, newcomer)
 	for i := range 5 {
 		st := h.cycle()
-		if st.State != SyncError || !strings.Contains(st.Error, "already claimed by local container zeta") {
+		if st.State != SyncError || !strings.Contains(st.Error, "is already managed by local container zeta") {
 			t.Fatalf("cycle %d: %+v", i, st)
 		}
 		if row := h.row(model.KindDNS, appKey); row.Owner.ContainerName != "zeta" || row.Status != model.StatusActive {
@@ -101,7 +101,7 @@ func TestHostnameClassConflicts(t *testing.T) {
 				t.Fatalf("status %+v", st)
 			}
 			rej := h.st.list(true)
-			if len(rej) != 1 || rej[0].Owner.ContainerName != "aa" || !strings.Contains(rej[0].LastError, "as "+tc.class) {
+			if len(rej) != 1 || rej[0].Owner.ContainerName != "aa" || !strings.Contains(rej[0].LastError, "already has "+describeClass(tc.class)) {
 				t.Fatalf("rejected %+v", rej)
 			}
 			if h.mutations() != 0 {
@@ -135,7 +135,7 @@ func TestStoreErrorsAbortCycle(t *testing.T) {
 			if op != "UpdateResource" && h.mutations() != 0 {
 				t.Fatalf("mutated after store failure: %+v", h.cf.Calls())
 			}
-			if st := h.cycle(); !strings.Contains(st.Error, "already claimed") || strings.Contains(st.Error, "boom") {
+			if st := h.cycle(); !strings.Contains(st.Error, "is already managed by") || strings.Contains(st.Error, "boom") {
 				t.Fatalf("recovery %+v", st)
 			}
 			wantStatus(t, h.row(model.KindDNS, appKey), model.StatusActive)

@@ -99,7 +99,7 @@ func tunnelClaim(api tunnelResolver, src *sourceInfo, c *model.Container, s mode
 	t, err := api.ResolveTunnel(ref)
 	if err != nil {
 		res.Key = model.TunnelKey(ref, host, s.Path)
-		rej := rejectRow(res, fmt.Sprintf("tunnel %q: %v", ref, err))
+		rej := rejectRow(res, err.Error())
 		return claim{}, &rej
 	}
 	res.TunnelID, res.AccountID, res.Credential = t.ID, t.AccountID, t.Credential
