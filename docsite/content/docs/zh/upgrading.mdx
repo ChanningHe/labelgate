@@ -82,7 +82,7 @@ Labelgate 现在只删除和修改自己拥有的资源，并且**绝不收编**
 | `db.retention` | 无（直接删除该键） |
 | `db.vacuum_interval` | 无（直接删除该键） |
 
-这些配置项现在会在启动时报明确的错误。未知的 `mode`、`log_level`、`log_format` 值同样会失败，而不是静默回退。
+这些配置项现在会在启动时报明确的错误，并一次列出所有问题。未知的 `mode`、`log_level`、`log_format` 值同样会失败，而不是静默回退。
 
 ### 其他行为变化 [#other-behavior-changes]
 
