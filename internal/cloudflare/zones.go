@@ -55,7 +55,7 @@ func (c *Client) ResolveZone(ctx context.Context, hostname, credential string) (
 			return z, nil
 		}
 	}
-	return Zone{}, fmt.Errorf("%s: %w", host, ErrNoZone)
+	return Zone{}, NoZoneError(host, credential)
 }
 
 func (c *Client) zoneCandidates(credential string) ([]*credEntry, error) {
@@ -82,7 +82,7 @@ func (c *Client) matchZone(ctx context.Context, host string, cands []*credEntry,
 	for _, cr := range cands {
 		zones, err := c.zones(ctx, cr, refresh)
 		if err != nil {
-			return Zone{}, false, fmt.Errorf("zones of credential %q: %w", cr.name, err)
+			return Zone{}, false, fmt.Errorf("list zones of credential %q: %w", cr.name, err)
 		}
 		for _, z := range zones {
 			if !zoneContains(z.Name, host) || (!explicit && !cr.allowsZone(z.Name)) {
@@ -148,7 +148,7 @@ func (c *Client) zones(ctx context.Context, cr *credEntry, miss bool) ([]Zone, e
 		default:
 			zc.lastErr = err
 			if zc.loaded {
-				c.log.Warn("cloudflare zone refresh failed; using cached zones",
+				c.log.Warn("cloudflare zone list refresh failed; using the zones from the previous refresh",
 					"credential", cr.name, "error", err.Error())
 			}
 		}

@@ -245,7 +245,7 @@ func (f *Fake) ResolveZone(ctx context.Context, hostname, credential string) (cl
 		}
 	}
 	if !found {
-		return cloudflare.Zone{}, fmt.Errorf("%s: %w", host, cloudflare.ErrNoZone)
+		return cloudflare.Zone{}, cloudflare.NoZoneError(host, credential)
 	}
 	return best, nil
 }
@@ -266,7 +266,7 @@ func (f *Fake) ResolveTunnel(ref string) (cloudflare.Tunnel, error) {
 	defer f.mu.Unlock()
 	if ref == "" {
 		if f.defaultTunnel == "" {
-			return cloudflare.Tunnel{}, cloudflare.ErrNoDefaultTunnel
+			return cloudflare.Tunnel{}, cloudflare.NoDefaultTunnelError()
 		}
 		ref = f.defaultTunnel
 	}
@@ -275,7 +275,7 @@ func (f *Fake) ResolveTunnel(ref string) (cloudflare.Tunnel, error) {
 			return t, nil
 		}
 	}
-	return cloudflare.Tunnel{}, fmt.Errorf("%s: %w", ref, cloudflare.ErrUnknownTunnel)
+	return cloudflare.Tunnel{}, cloudflare.UnknownTunnelError(ref)
 }
 
 // PutRecord seeds a record (assigning an ID if empty) and returns it.

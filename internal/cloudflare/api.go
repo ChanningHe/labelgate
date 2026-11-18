@@ -121,14 +121,30 @@ type APIError struct {
 	Codes    []int    // Cloudflare error codes
 	Messages []string // Cloudflare error messages
 	Err      error    // sentinel (ErrNotFound, ErrAlreadyExists, ErrUnauthorized) or transport error; may be nil
+	// Credential names the configured credential used ("default" = root); "" if unknown.
+	Credential string
 }
 
+// Error reads "cloudflare <op>: HTTP <status> (codes [...]): <messages>",
+// followed by how to fix it when the failure has a known cause.
 func (e *APIError) Error() string {
 	msg := strings.Join(e.Messages, "; ")
 	if msg == "" && e.Err != nil {
 		msg = e.Err.Error()
 	}
-	return fmt.Sprintf("cloudflare %s: status %d codes %v: %s", e.Op, e.Status, e.Codes, msg)
+	var b strings.Builder
+	b.WriteString("cloudflare " + e.Op)
+	if e.Status != 0 {
+		fmt.Fprintf(&b, ": HTTP %d", e.Status)
+	}
+	if len(e.Codes) > 0 {
+		fmt.Fprintf(&b, " (codes %v)", e.Codes)
+	}
+	b.WriteString(": " + msg)
+	if hint := e.hint(); hint != "" {
+		b.WriteString("; " + hint)
+	}
+	return b.String()
 }
 
 func (e *APIError) Unwrap() error { return e.Err }

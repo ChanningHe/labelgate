@@ -46,9 +46,10 @@ func (c *Client) call(ctx context.Context, cr *credEntry, r request) error {
 			return nil
 		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return &APIError{Op: r.op, Err: ctxErr}
+			return &APIError{Op: r.op, Err: ctxErr, Credential: cr.name}
 		}
 		apiErr := toAPIError(r.op, resp, err)
+		apiErr.Credential = cr.name
 		c.recordFailure(apiErr)
 		if attempt+1 >= c.retry.Attempts || !retryable(r.method, apiErr) {
 			return apiErr
@@ -57,7 +58,7 @@ func (c *Client) call(ctx context.Context, cr *credEntry, r request) error {
 		c.log.Debug("cloudflare request failed, retrying",
 			"op", r.op, "attempt", attempt+1, "status", apiErr.Status, "delay", delay, "error", apiErr.Error())
 		if err := c.sleep(ctx, delay); err != nil {
-			return &APIError{Op: r.op, Err: err}
+			return &APIError{Op: r.op, Err: err, Credential: cr.name}
 		}
 	}
 }
@@ -235,7 +236,7 @@ func listAll[T any](ctx context.Context, c *Client, cr *credEntry, op, path stri
 			return out, nil
 		}
 	}
-	return nil, &APIError{Op: op, Messages: []string{fmt.Sprintf("more than %d pages", maxPages)}}
+	return nil, &APIError{Op: op, Messages: []string{fmt.Sprintf("more than %d pages", maxPages)}, Credential: cr.name}
 }
 
 // envelope is a Cloudflare v4 single-object response.

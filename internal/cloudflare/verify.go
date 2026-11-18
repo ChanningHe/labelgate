@@ -31,7 +31,7 @@ func (c *Client) Verify(ctx context.Context) error {
 	}
 	for _, t := range c.tunnels {
 		if err := c.verifyTunnel(ctx, t); err != nil {
-			errs = append(errs, fmt.Errorf("tunnel %q (%s): %w", t.Ref, t.ID, err))
+			errs = append(errs, fmt.Errorf("tunnel %q (%s): %w%s", t.Ref, t.ID, err, tunnelVerifyHint(t, err)))
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -59,9 +59,20 @@ func (c *Client) verifyTokenAt(ctx context.Context, cr *credEntry, path string) 
 		return err
 	}
 	if env.Result.Status != tokenStatusActive {
-		return fmt.Errorf("token status %q: %w", env.Result.Status, ErrUnauthorized)
+		return fmt.Errorf("token status is %q, not active: %w; the API token in %s is disabled or expired: create a new one under %s",
+			env.Result.Status, ErrUnauthorized, CredentialKey(cr.name), tokenPage)
 	}
 	return nil
+}
+
+// tunnelVerifyHint explains a tunnel that does not exist where configured.
+func tunnelVerifyHint(t Tunnel, err error) string {
+	if !errors.Is(err, ErrNotFound) {
+		return ""
+	}
+	idKey, acctKey := TunnelKeys(t.Ref)
+	return "; no such tunnel in account " + t.AccountID + ": check " + idKey + " and " + acctKey +
+		" against Zero Trust > Networks > Tunnels in the Cloudflare dashboard"
 }
 
 func (c *Client) verifyTunnel(ctx context.Context, t Tunnel) error {

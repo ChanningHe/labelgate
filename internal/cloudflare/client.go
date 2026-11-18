@@ -232,7 +232,7 @@ func (c *Client) tunnelByRef(ref string) (Tunnel, bool) {
 func (c *Client) ResolveTunnel(ref string) (Tunnel, error) {
 	if ref == "" {
 		if c.defaultTunnel == "" {
-			return Tunnel{}, ErrNoDefaultTunnel
+			return Tunnel{}, NoDefaultTunnelError()
 		}
 		ref = c.defaultTunnel
 	}
@@ -245,14 +245,14 @@ func (c *Client) ResolveTunnel(ref string) (Tunnel, error) {
 			return t, nil
 		}
 	}
-	return Tunnel{}, fmt.Errorf("%s: %w", ref, ErrUnknownTunnel)
+	return Tunnel{}, UnknownTunnelError(ref)
 }
 
 // credByName returns the named credential or ErrUnknownCredential.
 func (c *Client) credByName(name string) (*credEntry, error) {
 	cr, ok := c.creds[name]
 	if !ok {
-		return nil, fmt.Errorf("credential %q: %w", name, ErrUnknownCredential)
+		return nil, UnknownCredentialError(name)
 	}
 	return cr, nil
 }
