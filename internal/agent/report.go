@@ -84,7 +84,7 @@ func (h *Hub) handleReport(ctx context.Context, s *hubSession, env Envelope, log
 			PublicIP: rep.PublicIP, PublicIPv6: rep.PublicIPv6, TakenAt: now,
 		}
 	} else {
-		log.Warn("agent cannot list containers; keeping previous snapshot",
+		log.Warn("agent cannot list its containers; keeping its previous containers until it can (fix Docker access on the agent host)",
 			"docker_error", truncate(rep.DockerError, maxDockerErrorLen))
 	}
 	changed, err := h.opts.Store.RecordAgentReport(ctx, rec, snap)

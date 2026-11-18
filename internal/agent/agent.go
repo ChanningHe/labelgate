@@ -127,14 +127,14 @@ func (a *Agent) ID() string { return a.id }
 // the inbound listener cannot start or the source fails unrecoverably.
 func (a *Agent) Run(ctx context.Context) error {
 	if a.opts.Connect.Mode == config.ConnectInbound {
-		ln, err := listen(a.opts.Connect.Listen, a.opts.Connect.TLS)
+		ln, err := listen(a.opts.Connect.Listen, a.opts.Connect.TLS, sectionConnect)
 		if err != nil {
 			return err
 		}
 		a.log.Info("agent inbound listener started", "address", ln.Addr().String())
 		return a.run(ctx, func(ctx context.Context) error { return a.serveInbound(ctx, ln) })
 	}
-	tlsCfg, err := clientTLSConfig(a.opts.Connect.TLS, a.log)
+	tlsCfg, err := clientTLSConfig(a.opts.Connect.TLS, sectionConnect, a.log)
 	if err != nil {
 		return err
 	}
@@ -181,11 +181,12 @@ func (a *Agent) dialer(tlsCfg *tls.Config) func(context.Context) (*websocket.Con
 // runOutbound keeps a session to the main instance until ctx is done.
 func (a *Agent) runOutbound(ctx context.Context, dialFn func(context.Context) (*websocket.Conn, error)) {
 	target := redactURL(a.opts.Connect.Endpoint)
+	where := dialTarget{urlKey: config.KeyWithEnv("connect.endpoint"), section: sectionConnect, peer: "the main instance"}
 	bo := newBackoff(a.opts.Retry)
 	for {
 		ws, err := dialFn(ctx)
 		if err != nil {
-			a.log.Warn("connect to main failed", "url", target, "error", err)
+			a.log.Warn("cannot connect to the main instance; retrying", "url", target, "error", explainDial(err, where))
 		} else if a.runConn(ctx, ws, ModeOutbound, func() {}, target) {
 			bo.reset()
 		}
@@ -223,7 +224,7 @@ func (a *Agent) runConn(ctx context.Context, ws *websocket.Conn, mode Mode, rele
 	defer ws.Close()
 	log := a.log.With("mode", string(mode), "remote", remote)
 	if err := agentHandshake(ws, mode, a.id, a.opts.Connect.Token, a.opts.Version, a.t); err != nil {
-		log.Warn("main handshake failed", "error", err)
+		log.Warn("handshake with the main instance failed", "error", withHint(err, agentAuthHint(a.id, err)))
 		return false
 	}
 	release()
@@ -307,7 +308,8 @@ func (a *Agent) serveSession(ctx context.Context, s *agentSession, log *slog.Log
 		case MsgRefresh:
 			signal(s.refresh)
 		case MsgError:
-			log.Warn("main sent error", "error", peerError(env))
+			perr := peerError(env)
+			log.Warn("main instance ended the session with an error", "error", withHint(perr, agentAuthHint(a.id, perr)))
 			return
 		default:
 			s.conn.fail(ErrBadRequest, "unexpected message type")
@@ -365,10 +367,11 @@ func (a *Agent) buildReport(ctx context.Context, log *slog.Logger) Report {
 	switch {
 	case err != nil:
 		rep.DockerError = truncate(err.Error(), maxDockerErrorLen)
-		log.Warn("container snapshot failed", "error", err)
+		log.Warn("cannot list local containers; the main instance keeps this agent's previous containers", "error", err)
 	case len(snap.Containers) > MaxContainers:
-		rep.DockerError = fmt.Sprintf("too many containers: %d > %d", len(snap.Containers), MaxContainers)
-		log.Error("container snapshot too large", "containers", len(snap.Containers))
+		rep.DockerError = fmt.Sprintf("too many containers: %d > %d; set %s on the agent to report only labelled containers",
+			len(snap.Containers), MaxContainers, config.KeyWithEnv("docker.filter_label"))
+		log.Error(rep.DockerError, "containers", len(snap.Containers))
 	default:
 		rep.DockerOK = true
 		rep.Containers = snap.Containers

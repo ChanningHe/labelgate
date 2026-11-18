@@ -20,7 +20,7 @@ const (
 func resolveAgentID(explicit string, machineID, hostname func() (string, error)) (string, error) {
 	if explicit != "" {
 		if !model.ValidAgentID(explicit) {
-			return "", fmt.Errorf("agent: connect.agent_id %q is invalid (want ^[a-z0-9][a-z0-9._-]{0,62}$)", explicit)
+			return "", fmt.Errorf("agent: connect.agent_id %q is invalid: use up to 63 lower-case letters, digits, dots, hyphens or underscores, starting with a letter or digit", explicit)
 		}
 		return explicit, nil
 	}
@@ -35,7 +35,7 @@ func resolveAgentID(explicit string, machineID, hostname func() (string, error))
 			return id, nil
 		}
 	}
-	return "", errors.New("agent: cannot derive agent id from machine-id or hostname; set connect.agent_id")
+	return "", errors.New("agent: cannot derive an agent ID from /etc/machine-id or the hostname; set connect.agent_id (env LABELGATE_CONNECT_AGENT_ID)")
 }
 
 func isHex(s string) bool {
