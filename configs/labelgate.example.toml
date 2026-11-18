@@ -101,7 +101,7 @@ listen = ":28112"          # agents connect to wss://<host>:28112/ws
 # endpoint = "wss://main.example.com:28112/ws"    # outbound; the /ws path is required
 # listen = ":28113"                               # inbound
 # token = "replace-with-openssl-rand-hex-32"              # required
-# agent_id = ""                                  # default: first 12 hex chars of /etc/machine-id
+# agent_id = ""                                  # default: first 12 hex chars of /etc/machine-id (mount it into the container), else the hostname (not stable, warns)
 # heartbeat_interval = "30s"
 
 # [connect.tls]

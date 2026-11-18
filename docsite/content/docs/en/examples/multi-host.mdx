@@ -107,10 +107,11 @@ services:
     group_add: ["${DOCKER_GID}"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /etc/machine-id:/etc/machine-id:ro   # stable agent ID
     environment:
       - LABELGATE_MODE=agent
       - LABELGATE_CONNECT_ENDPOINT=wss://main.example.com:28112/ws
-      - LABELGATE_CONNECT_AGENT_ID=edge1
+      - LABELGATE_CONNECT_AGENT_ID=edge1     # optional; overrides machine-id
       - LABELGATE_CONNECT_TOKEN=${AGENT_TOKEN}   # same token as on the main
 
   cloudflared:
@@ -125,7 +126,7 @@ services:
       labelgate.tunnel.whoami.service: "http://whoami:80"
 ```
 
-The agent needs no volume and no Cloudflare token. DNS labels with `target: auto` use the **agent host's** public IP.
+The agent needs no data volume and no Cloudflare token. DNS labels with `target: auto` use the **agent host's** public IP.
 
 ## Recipe: main connects to agent [#inbound-mode-example]
 
@@ -152,11 +153,12 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./tls:/certs:ro
+      - /etc/machine-id:/etc/machine-id:ro   # stable agent ID
     environment:
       - LABELGATE_MODE=agent
       - LABELGATE_CONNECT_MODE=inbound
       - LABELGATE_CONNECT_LISTEN=:28113
-      - LABELGATE_CONNECT_AGENT_ID=edge2
+      - LABELGATE_CONNECT_AGENT_ID=edge2     # optional; overrides machine-id
       - LABELGATE_CONNECT_TOKEN=${AGENT_TOKEN}
       - LABELGATE_CONNECT_TLS_CERT=/certs/server.crt
       - LABELGATE_CONNECT_TLS_KEY=/certs/server.key
@@ -171,7 +173,9 @@ The agent's certificate must be valid for the `connect_to` host. For an IP addre
 - Generate every token with `openssl rand -hex 32`. Tokens need at least 32 characters and 12 different characters.
 - The same token goes in two places: `agent.agents.<id>.token` on the main and `connect.token` (`LABELGATE_CONNECT_TOKEN`) on the agent.
 - `connect.agent_id` (`LABELGATE_CONNECT_AGENT_ID`) must equal the key under `agent.agents`. Use lower-case letters, digits, `.`, `_` and `-`.
-- Always set the agent ID. Without it, the agent picks one from the container's machine ID or hostname, which can change when the container is recreated.
+- The agent ID must stay the same when the container is recreated. Mount `/etc/machine-id:/etc/machine-id:ro`, or set `LABELGATE_CONNECT_AGENT_ID`, which takes priority.
+- A named agent (`agent.agents.<id>`) must set `LABELGATE_CONNECT_AGENT_ID` to its `<id>`.
+- With neither, the agent uses the container hostname and logs a warning at startup. The hostname changes on every recreate, so the main sees a new agent and removes the old one's resources after `sync.agent_grace` (`LABELGATE_SYNC_AGENT_GRACE`).
 - Labelgate does not expand `${VAR}` in `labelgate.yaml`. Paste the real token into the file.
 
 ## TLS [#tls]

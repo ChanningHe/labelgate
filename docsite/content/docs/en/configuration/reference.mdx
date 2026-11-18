@@ -203,7 +203,7 @@ Used only with `mode: agent`. In agent mode, only these, `log_*`, `docker` and `
 | `connect.endpoint` | `LABELGATE_CONNECT_ENDPOINT` | - | **Required** for outbound. Main URL including `/ws`: `wss://main.example.com:28112/ws`. |
 | `connect.listen` | `LABELGATE_CONNECT_LISTEN` | - | **Required** for inbound. Listen address, e.g. `:28113`. |
 | `connect.token` | `LABELGATE_CONNECT_TOKEN` | - | **Required.** Same token as on the main. See [Agent tokens](#agent-tokens). |
-| `connect.agent_id` | `LABELGATE_CONNECT_AGENT_ID` | from machine ID | Agent ID. Derived from `/etc/machine-id`, else the hostname. Set it to match the main. |
+| `connect.agent_id` | `LABELGATE_CONNECT_AGENT_ID` | from machine ID | Agent ID. Takes priority over `/etc/machine-id` (mount it into the container; the first 12 hex characters are used). With neither, the container hostname is used, which is not stable and logs a warning. A named agent must set it to match the main. |
 | `connect.heartbeat_interval` | `LABELGATE_CONNECT_HEARTBEAT_INTERVAL` | `30s` | How often the agent sends a full report. Minimum `1s`. |
 | `connect.tls.ca` | `LABELGATE_CONNECT_TLS_CA` | system CAs | CA to check the main's certificate. |
 | `connect.tls.cert` | `LABELGATE_CONNECT_TLS_CERT` | - | Inbound only: server certificate. Set together with `key`. |

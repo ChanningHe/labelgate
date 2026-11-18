@@ -98,12 +98,15 @@ services:
       - "999"   # group of the Docker socket: stat -c '%g' /var/run/docker.sock
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /etc/machine-id:/etc/machine-id:ro   # stable agent ID
     environment:
       LABELGATE_MODE: agent
       LABELGATE_CONNECT_ENDPOINT: wss://main.example.com:28112/ws
-      LABELGATE_CONNECT_AGENT_ID: edge1
+      LABELGATE_CONNECT_AGENT_ID: edge1      # optional; overrides machine-id
       LABELGATE_CONNECT_TOKEN: ${AGENT_TOKEN}   # openssl rand -hex 32
 ```
+
+The agent ID must stay the same when the container is recreated. Mount `/etc/machine-id`, or set `LABELGATE_CONNECT_AGENT_ID`, which takes priority. An agent named under `agent.agents.<id>` must set `LABELGATE_CONNECT_AGENT_ID` to that `<id>`.
 
 On the main instance, add the agent to `labelgate.yaml` with the same ID and token, and publish port `28112`:
 

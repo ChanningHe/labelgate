@@ -203,7 +203,7 @@ openssl rand -hex 32
 | `connect.endpoint` | `LABELGATE_CONNECT_ENDPOINT` | - | outbound 时**必填**。main 的地址，要带 `/ws`：`wss://main.example.com:28112/ws`。 |
 | `connect.listen` | `LABELGATE_CONNECT_LISTEN` | - | inbound 时**必填**。监听地址，如 `:28113`。 |
 | `connect.token` | `LABELGATE_CONNECT_TOKEN` | - | **必填。** 与 main 上的 token 相同。参见 [Agent token](#agent-tokens)。 |
-| `connect.agent_id` | `LABELGATE_CONNECT_AGENT_ID` | 由机器 ID 生成 | Agent ID。默认取自 `/etc/machine-id`，否则用主机名。请设置成与 main 上一致。 |
+| `connect.agent_id` | `LABELGATE_CONNECT_AGENT_ID` | 由机器 ID 生成 | Agent ID。优先于 `/etc/machine-id`（需挂载进容器，取前 12 位十六进制字符）。两者都没有时用容器主机名，它不稳定，并会在启动时打印警告。命名 agent 必须设成与 main 上一致。 |
 | `connect.heartbeat_interval` | `LABELGATE_CONNECT_HEARTBEAT_INTERVAL` | `30s` | agent 多久发送一次完整上报。最小 `1s`。 |
 | `connect.tls.ca` | `LABELGATE_CONNECT_TLS_CA` | 系统 CA | 校验 main 证书用的 CA。 |
 | `connect.tls.cert` | `LABELGATE_CONNECT_TLS_CERT` | - | 仅 inbound：服务端证书。需与 `key` 同时设置。 |
