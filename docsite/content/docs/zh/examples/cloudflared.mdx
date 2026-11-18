@@ -1,109 +1,83 @@
 ---
-title: cloudflared 设置
-description: 如何与 Labelgate 一起部署 cloudflared。
+title: cloudflared 部署
+description: 在 Labelgate 旁边运行 cloudflared 连接器。
 ---
 
-Labelgate 通过 Cloudflare API 管理 Tunnel 入口规则，但您仍需要运行 `cloudflared` 守护进程来建立隧道连接。以下是设置方法。
+只要用了 `labelgate.tunnel.*` 标签，就需要这一页。Labelgate 负责把隧道路由写进 Cloudflare，真正转发流量的是 `cloudflared` 连接器，所以它也必须运行。
 
-## 隧道令牌（推荐）
+## 1. 创建隧道
 
-隧道配置通过 Cloudflare API 远程管理，cloudflared 会自动获取 Labelgate 所做的更改，无需重启。
+1. 打开 [Cloudflare Zero Trust](https://one.dash.cloudflare.com/) → **Networks** → **Tunnels** → **Create a tunnel** → **Cloudflared**。
+2. 起个名字并保存。“public hostname” 这一步直接跳过，Labelgate 会自动添加。
+3. 记下两个值：
+   - **隧道 ID** → `LABELGATE_CLOUDFLARE_TUNNEL_ID`（给 Labelgate）；
+   - 安装命令里的 **token**（`--token` 后面那一长串）→ `TUNNEL_TOKEN`（给 cloudflared）。
 
-```yaml
+Labelgate 还需要 `LABELGATE_CLOUDFLARE_ACCOUNT_ID`，即隧道所属的账户。
+
+## 2. 在 Compose 里加上 cloudflared
+
+```yaml title="compose.yaml"
 services:
   cloudflared:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
     command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN}
-```
 
-<Callout type="info">
-当 Labelgate 通过 API 添加或删除入口规则时，cloudflared 会检测到更改并自动应用它们。无需重启。
-</Callout>
-
-## 获取隧道令牌
-
-1. 访问 [Cloudflare Zero Trust Dashboard](https://one.dash.cloudflare.com/)
-2. 导航到 **Networks > Tunnels**
-3. 创建新隧道或选择现有隧道
-4. 从安装命令中复制隧道令牌
-
-或通过 CLI：
-
-```bash
-cloudflared tunnel create my-tunnel
-cloudflared tunnel token my-tunnel
-```
-
-## 网络提示
-
-### Docker Compose 网络
-
-使用 Docker Compose 时，所有服务默认共享一个网络。在标签中使用 Docker 服务名称：
-
-```yaml
-services:
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    command: tunnel run --token ${TUNNEL_TOKEN}
-
-  webapp:
+  app:
     image: nginx:alpine
     labels:
-      # 使用服务名称 "webapp"，不要用 "localhost"
-      labelgate.tunnel.web.hostname: "app.example.com"
-      labelgate.tunnel.web.service: "http://webapp:80"
+      labelgate.tunnel.app.hostname: "app.example.com"
+      labelgate.tunnel.app.service: "http://app:80"
 ```
 
-### 基于主机的服务
+cloudflared 会自动拿到新路由。标签变了也不用重启它。
 
-要路由到直接在主机上运行的服务（不在 Docker 中）：
+带 `labelgate` 服务的完整文件见[单主机 → 隧道](/zh/docs/examples/single-host#tunnel)。
+
+## 让 cloudflared 访问到你的服务
+
+`service` 地址是由 cloudflared 自己去连接的，所以这个地址必须**在 cloudflared 容器里**能访问。
+
+| 服务运行在… | `service` 写法 | 额外配置 |
+|-------------|----------------|----------|
+| 同一个 Compose 文件里 | `http://app:80`（服务名） | 无 |
+| 另一个 Compose 项目里 | `http://app:80` | 两个容器加入同一个共享网络（见下） |
+| 宿主机上（不在 Docker 里） | `http://host.docker.internal:8080` | 给 cloudflared 加 `extra_hosts`（见下） |
+
+和其他 Compose 项目共享网络：
 
 ```yaml
 services:
   cloudflared:
-    image: cloudflare/cloudflared:latest
-    command: tunnel run --token ${TUNNEL_TOKEN}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-
-  proxy:
-    image: alpine
-    labels:
-      labelgate.tunnel.host-svc.hostname: "svc.example.com"
-      labelgate.tunnel.host-svc.service: "http://host.docker.internal:8080"
-```
-
-### 多个 Docker 网络
-
-如果您的服务位于不同的 Docker 网络上，请确保 cloudflared 可以访问它们：
-
-```yaml
-services:
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    command: tunnel run --token ${TUNNEL_TOKEN}
-    networks:
-      - frontend
-      - backend
+    networks: [tunnel]
 
 networks:
-  frontend:
-  backend:
+  tunnel:
+    name: tunnel # 其他项目这样加入：networks: { tunnel: { external: true } }
 ```
 
-## 健康检查
-
-启用 cloudflared 指标以进行监控：
+访问宿主机上的服务：
 
 ```yaml
 services:
   cloudflared:
-    image: cloudflare/cloudflared:latest
-    command: tunnel --metrics 0.0.0.0:2000 run --token ${TUNNEL_TOKEN}
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:2000/ready"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 ```
+
+## 检查是否正常
+
+- `docker compose logs cloudflared` 里有 `Registered tunnel connection`。
+- Zero Trust 控制台里隧道状态是 **Healthy**。
+- 控制台里该隧道的主机名路由列出了标签里的主机名。
+- `curl -I https://app.example.com` 能拿到应用的响应。
+
+## 常见问题
+
+| 现象 | 解决办法 |
+|------|----------|
+| `502 Bad Gateway` | cloudflared 访问不到 `service`。用服务名而不是 `localhost`，并检查网络。 |
+| 访问主机名出现 Cloudflare 错误 `1033` | cloudflared 没在运行，或用了别的隧道的 token。token 必须属于 `LABELGATE_CLOUDFLARE_TUNNEL_ID` 那条隧道。 |
+| Labelgate 显示路由 `active`，cloudflared 却不生效 | cloudflared 用的是本地 `config.yml`（本地管理的隧道）。按上面的步骤在控制台创建隧道，并且只用 `--token` 运行 cloudflared。 |
+| agent 主机上部分请求 `502` | 同一条隧道的流量会分给运行它的每台主机。每台主机用自己的隧道，见[多主机](/zh/docs/examples/multi-host#agent-tunnels)。 |

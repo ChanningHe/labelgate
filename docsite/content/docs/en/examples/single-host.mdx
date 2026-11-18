@@ -1,207 +1,146 @@
 ---
 title: Single Host
-description: Docker Compose examples for single-host deployments.
+description: Copy-paste Compose files for running Labelgate on one Docker host.
 ---
 
-<Callout type="info">
-All examples pass `LABELGATE_API_TOKEN`, which enables the dashboard and API. Without it they are disabled. No port is published here; add `ports: ["127.0.0.1:8080:8080"]` to reach the dashboard locally.
-</Callout>
+Use these recipes when all your containers run on **one Docker host**. For several hosts, see [Multi-Host](/docs/examples/multi-host).
 
-<Callout type="warn">
-For brevity the examples leave out something the non-root image (UID 65532) needs: `group_add` with the group that owns the Docker socket. The image ships `/app/config` owned by UID 65532, so a Docker named volume such as `labelgate-data` is writable out of the box; a bind mount must be `chown -R 65532:65532` first. See [Getting Started](/docs/getting-started#create-compose) for the complete service definition.
-</Callout>
+## 1. Create `.env` [#env]
 
-## DNS-Only Setup
+Put this file next to your `compose.yaml`:
 
-The simplest setup - Labelgate manages DNS records only, no tunnels needed.
+```bash
+# Cloudflare API token (see Getting Started for the permissions)
+LABELGATE_CLOUDFLARE_API_TOKEN=your-cloudflare-api-token
+# Dashboard password. Generate with: openssl rand -hex 32
+LABELGATE_API_TOKEN=paste-a-random-string
+# Group that owns the Docker socket: stat -c '%g' /var/run/docker.sock
+DOCKER_GID=999
 
-```yaml
+# Only for the tunnel recipes:
+LABELGATE_CLOUDFLARE_ACCOUNT_ID=your-account-id
+LABELGATE_CLOUDFLARE_TUNNEL_ID=your-tunnel-id
+TUNNEL_TOKEN=your-cloudflared-token
+```
+
+See [Getting Started](/docs/getting-started) for how to create the API token, and [cloudflared](/docs/examples/cloudflared) for the tunnel ID and token.
+
+## 2. Pick a recipe
+
+### DNS records only [#dns-only]
+
+Points `www.example.com` at this host's public IP. No tunnel needed.
+
+```yaml title="compose.yaml"
 services:
   labelgate:
     image: ghcr.io/channinghe/labelgate:v0.3
     restart: unless-stopped
+    group_add: ["${DOCKER_GID}"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - labelgate-data:/app/config
     environment:
       - LABELGATE_CLOUDFLARE_API_TOKEN
       - LABELGATE_API_TOKEN
+    ports:
+      - "127.0.0.1:8080:8080" # dashboard
 
-  # Web server with auto DNS
-  nginx:
+  web:
     image: nginx:alpine
+    ports:
+      - "80:80"
     labels:
       labelgate.dns.web.hostname: "www.example.com"
-      labelgate.dns.web.type: "A"
-      labelgate.dns.web.target: "auto"
-      labelgate.dns.web.proxied: "true"
+      # Defaults: type A, target auto (this host's public IP), proxied true
 
 volumes:
   labelgate-data:
 ```
 
-## Tunnel-Only Setup
+### Tunnel (no open ports) [#tunnel]
 
-Expose services through Cloudflare Tunnel - no public ports needed.
+Publishes `app.example.com` through a Cloudflare Tunnel. Labelgate adds the route and the DNS record.
 
-```yaml
+```yaml title="compose.yaml"
 services:
   labelgate:
     image: ghcr.io/channinghe/labelgate:v0.3
     restart: unless-stopped
+    group_add: ["${DOCKER_GID}"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - labelgate-data:/app/config
     environment:
       - LABELGATE_CLOUDFLARE_API_TOKEN
-      - LABELGATE_API_TOKEN
       - LABELGATE_CLOUDFLARE_ACCOUNT_ID
       - LABELGATE_CLOUDFLARE_TUNNEL_ID
+      - LABELGATE_API_TOKEN
+    ports:
+      - "127.0.0.1:8080:8080" # dashboard
 
   cloudflared:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
-    command: tunnel run --token ${TUNNEL_TOKEN}
-
-  # Web application
-  webapp:
-    image: nginx:alpine
-    labels:
-      labelgate.tunnel.web.hostname: "app.example.com"
-      labelgate.tunnel.web.service: "http://webapp:80"
-
-  # API server
-  api:
-    image: node:alpine
-    labels:
-      labelgate.tunnel.api.hostname: "api.example.com"
-      labelgate.tunnel.api.service: "http://api:3000"
-
-volumes:
-  labelgate-data:
-```
-
-<Callout type="info">
-Use Docker service names (e.g., `http://webapp:80`) in `service` labels, not `localhost`. Containers communicate via Docker's internal network.
-</Callout>
-
-## DNS + Tunnel (Different Hostnames)
-
-Combine DNS records and tunnel services on different hostnames.
-
-```yaml
-services:
-  labelgate:
-    image: ghcr.io/channinghe/labelgate:v0.3
-    restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - labelgate-data:/app/config
-    environment:
-      - LABELGATE_CLOUDFLARE_API_TOKEN
-      - LABELGATE_API_TOKEN
-      - LABELGATE_CLOUDFLARE_ACCOUNT_ID
-      - LABELGATE_CLOUDFLARE_TUNNEL_ID
-
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    restart: unless-stopped
-    command: tunnel run --token ${TUNNEL_TOKEN}
+    command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN}
 
   app:
-    image: myapp:latest
+    image: nginx:alpine
     labels:
-      # Tunnel: expose via Cloudflare Tunnel
-      labelgate.tunnel.web.hostname: "app.example.com"
-      labelgate.tunnel.web.service: "http://app:80"
-
-      # DNS: point a different hostname to server IP
-      labelgate.dns.legacy.hostname: "old.example.com"
-      labelgate.dns.legacy.type: "A"
-      labelgate.dns.legacy.target: "203.0.113.1"
+      labelgate.tunnel.app.hostname: "app.example.com"
+      labelgate.tunnel.app.service: "http://app:80" # Compose service name, not localhost
 
 volumes:
   labelgate-data:
 ```
 
-## With Access Policy
+### Add a login page (Access) [#access]
 
-Protect services with Zero Trust Access.
+Add this service to the tunnel recipe. Only `@example.com` email addresses can open `admin.example.com`.
 
 ```yaml
-services:
-  labelgate:
-    image: ghcr.io/channinghe/labelgate:v0.3
-    restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - labelgate-data:/app/config
-    environment:
-      - LABELGATE_CLOUDFLARE_API_TOKEN
-      - LABELGATE_API_TOKEN
-      - LABELGATE_CLOUDFLARE_ACCOUNT_ID
-      - LABELGATE_CLOUDFLARE_TUNNEL_ID
-
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    restart: unless-stopped
-    command: tunnel run --token ${TUNNEL_TOKEN}
-
-  admin-panel:
-    image: admin:latest
+  admin:
+    image: nginx:alpine
     labels:
-      # Define access policy
-      labelgate.access.team.policy.decision: "allow"
-      labelgate.access.team.policy.include.emails_ending_in: "@company.io"
+      labelgate.access.team.policy.include.emails_ending_in: "@example.com"
       labelgate.access.team.session_duration: "8h"
-
-      # Tunnel with access policy
-      labelgate.tunnel.admin.hostname: "admin.company.io"
-      labelgate.tunnel.admin.service: "http://admin-panel:8080"
+      labelgate.tunnel.admin.hostname: "admin.example.com"
+      labelgate.tunnel.admin.service: "http://admin:80"
       labelgate.tunnel.admin.access: "team"
-
-  # Public docs - no access policy needed
-  docs:
-    image: docs:latest
-    labels:
-      labelgate.tunnel.docs.hostname: "docs.company.io"
-      labelgate.tunnel.docs.service: "http://docs:80"
-
-volumes:
-  labelgate-data:
 ```
 
-## PR Preview Environment
+Your Cloudflare API token also needs `Access: Apps and Policies: Edit`. All Access labels are in [Access labels](/docs/labels/access).
 
-Automatic preview deployments. `cleanup` defaults to `true`, so the tunnel rule and its CNAME are removed `sync.remove_delay` (30 minutes by default) after the container stops. Lower the delay (for example `LABELGATE_SYNC_REMOVE_DELAY=5m`) if previews should disappear sooner.
+### Preview environments [#preview]
+
+Add one service per preview. When the container is removed, Labelgate deletes the route and DNS record after `sync.remove_delay` (`LABELGATE_SYNC_REMOVE_DELAY`, default `30m`).
 
 ```yaml
-services:
-  labelgate:
-    image: ghcr.io/channinghe/labelgate:v0.3
-    restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - labelgate-data:/app/config
-    environment:
-      - LABELGATE_CLOUDFLARE_API_TOKEN
-      - LABELGATE_API_TOKEN
-      - LABELGATE_CLOUDFLARE_ACCOUNT_ID
-      - LABELGATE_CLOUDFLARE_TUNNEL_ID
-
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    restart: unless-stopped
-    command: tunnel run --token ${TUNNEL_TOKEN}
-
   preview:
-    image: myapp:pr-${PR_NUMBER:-0}
+    image: myapp:pr-${PR_NUMBER}
     labels:
-      labelgate.tunnel.preview.hostname: "pr-${PR_NUMBER:-0}.preview.example.com"
+      labelgate.tunnel.preview.hostname: "pr-${PR_NUMBER}.preview.example.com"
       labelgate.tunnel.preview.service: "http://preview:3000"
-      # cleanup is "true" by default; set it explicitly if you like
-      labelgate.tunnel.preview.cleanup: "true"
-
-volumes:
-  labelgate-data:
 ```
+
+## 3. Start and check
+
+```bash
+docker compose up -d
+docker compose logs -f labelgate
+```
+
+- **Logs:** no `level=WARN msg="reconcile problem"` lines.
+- **Dashboard:** open `http://127.0.0.1:8080` and sign in with `LABELGATE_API_TOKEN`. Every resource should be `active`.
+- **DNS:** `dig +short www.example.com` returns Cloudflare IPs (proxied records hide your real IP).
+- **Tunnel:** `curl -I https://app.example.com` answers from your app.
+
+## Common problems
+
+| Symptom | Fix |
+|---------|-----|
+| `permission denied` on `/var/run/docker.sock` | `DOCKER_GID` is wrong. Run `stat -c '%g' /var/run/docker.sock` and put the number in `.env`. |
+| Dashboard does not load | `LABELGATE_API_TOKEN` is empty or shorter than 16 characters. Without it the dashboard is off. |
+| Database cannot be written (bind mount like `./data:/app/config`) | Run `sudo chown -R 65532:65532 ./data` once. The named volume above needs nothing. |
+| Tunnel shows `502 Bad Gateway` | `service` uses `localhost` or a container cloudflared cannot reach. Use the Compose service name and keep cloudflared on the same network as the app. |
+| `conflict: existing record not owned by labelgate` | A record for that hostname already exists. Delete it in Cloudflare, or pick another hostname. See [Ownership](/docs/ownership). |
