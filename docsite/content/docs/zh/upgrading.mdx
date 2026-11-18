@@ -91,16 +91,34 @@ v0.3 首次启动时会自动升级数据库。升级前，它会先在原数据
 
 回滚到 v0.2：
 
-1. 停止 Labelgate：`docker compose down`。
-2. 用备份替换数据库：
+1. 记下当前的实例 ID。它在启动日志的 `Storage ready` 一行里，`instance_id=` 后面的值：
+
+   ```bash
+   docker compose logs labelgate | grep instance_id
+   ```
+
+   如果日志已经没了，也可以从 Labelgate 创建的 DNS 记录备注里读出来（`labelgate:a1b2c3d4 ...`）。
+
+2. 停止 Labelgate：`docker compose down`。
+3. 用备份替换数据库。数据目录属于 UID 65532，所以要用 `sudo`：
 
    ```bash
    cd labelgate-data
-   mv labelgate.db labelgate.db.v0.3
-   rm -f labelgate.db-wal labelgate.db-shm
-   cp labelgate.db.v0.2.bak labelgate.db
+   sudo mv labelgate.db labelgate.db.v0.3
+   sudo rm -f labelgate.db-wal labelgate.db-shm
+   sudo cp -p labelgate.db.v0.2.bak labelgate.db
    ```
 
-3. 把镜像改回 `ghcr.io/channinghe/labelgate:v0.2`，agent 也一起回滚，然后执行 `docker compose up -d`。
+4. 把镜像改回 `ghcr.io/channinghe/labelgate:v0.2`，agent 也一起回滚，然后执行 `docker compose up -d`。
 
-v0.2 读不了 v0.3 的数据库，所以回滚时一定要恢复备份。
+<Callout type="warn">
+启动 v0.2 之前一定要先恢复备份文件。v0.2 在 v0.3 的数据库上也能启动，不会报错，但用的是升级前的旧数据。
+</Callout>
+
+以后再次升级到 v0.3 时，首次启动前先设置第 1 步记下的 ID：
+
+```bash
+LABELGATE_INSTANCE_ID=a1b2c3d4
+```
+
+不设置的话，升级会给数据库分配一个新 ID。第一次运行 v0.3 时创建的记录就会被当成别的实例的，从而产生冲突。

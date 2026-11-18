@@ -116,7 +116,7 @@ All endpoints except `/health` need the header `Authorization: Bearer <api.token
 | Endpoint | Returns |
 |----------|---------|
 | `GET /api/health` | `{"status":"ok"}`. No token needed. |
-| `GET /api/overview` | Counts, sync status and agent summary. |
+| `GET /api/overview` | Counts, sync status and agent summary. `sync.problems` lists the current problems (up to 200), `sync.problems_total` counts all of them. |
 | `GET /api/resources/dns` | DNS records. |
 | `GET /api/resources/tunnels` | Tunnel routes. |
 | `GET /api/resources/access` | Access applications. |

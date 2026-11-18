@@ -14,10 +14,10 @@ description: 按错误消息或现象查找解决办法。
    docker compose logs labelgate | grep -E "WARN|ERROR"
    ```
 
-   每个问题只在出现或内容变化时记录一次，问题持续期间每小时再记录一次（带 `still_present=true`）。问题解决后会记录 `reconcile problem resolved`。所以较早的日志行可能已经过时。
+   问题在出现或原因变化时记录一次，持续期间每小时再记录一次（带 `still_present=true`），解决后记录一次 `reconcile problem resolved`。所以较早的日志行可能已经过时。
 
 2. **打开 dashboard**：`http://localhost:28111/dashboard/`。
-   - dashboard 始终显示当前存在的问题。**Overview → Last sync** 显示其中第一个。
+   - **Overview → Sync problems** 列出当前所有问题（最多 200 条）并显示总数。没有问题时不显示这个面板。API `GET /api/overview` 也在 `sync.problems` 里返回同样的列表，总数在 `sync.problems_total`。
    - **DNS**、**Tunnels**、**Access** 列出所有资源。点开状态为 `error` 的资源即可看到原因。
    - **Agents** 显示哪些 agent 已连接。
 
@@ -36,17 +36,18 @@ Labelgate 只在启动时读取配置。改完环境变量后执行 `docker comp
 Labelgate 启动后立即退出（或不停重启）：
 
 ```
-labelgate: config: 2 problems:
+labelgate: config: 3 problems:
+  sync.remove_dely: unknown key; did you mean sync.remove_delay?
   api.token (env LABELGATE_API_TOKEN): must be at least 16 characters, got 5 (generate one with: openssl rand -hex 32)
   cloudflare.api_token (env LABELGATE_CLOUDFLARE_API_TOKEN): no Cloudflare API token is configured: set this, or add an entry under cloudflare.credentials in the config file
 ```
 
-**原因：** 某个设置缺失或无效。每行对应一个配置项，并给出设置它的环境变量。
+**原因：** 某个设置缺失、拼错或无效。每行对应一个配置项，并给出设置它的环境变量。所有问题会一次性列出，值的类型不对也包括在内。
 
 **解决：**
 
 1. 逐项修改：在 `labelgate.yaml` 里改，或者用 `(env ...)` 中给出的环境变量。没有 `(env ...)` 的配置项只能写在配置文件里。
-2. `unknown key`：配置项拼错了，对照[配置参考](/zh/docs/configuration/reference)检查。
+2. `unknown key; did you mean ...?`：按提示改名。没有提示时，对照[配置参考](/zh/docs/configuration/reference)检查，或者直接删掉。
 3. `removed in v0.3`：删掉这个配置项。见[已移除的配置项](/zh/docs/configuration/reference#removed-keys)。
 4. 重新启动：`docker compose up -d`。
 
@@ -70,7 +71,7 @@ services:
 相关消息：
 
 - `config: cannot parse ...; fix the syntax at the reported position`：YAML 语法错误，按消息里给出的位置修改。
-- `config: cannot check for a config file: ...; make it readable by the labelgate user`：Labelgate 以 UID 65532 运行。执行 `sudo chown 65532 labelgate.yaml`。
+- `config: cannot check for a config file: ...; make it readable by the labelgate user or pass --config`：Labelgate 以 UID 65532 运行。执行 `sudo chown 65532 labelgate.yaml`。
 
 ### `open store "/app/config/labelgate.db"` [#database]
 
@@ -173,14 +174,16 @@ docker: cannot list containers: permission denied ...; labelgate may not open th
 Labelgate 启动时退出：
 
 ```
-labelgate: cloudflare credential validation failed; to skip this startup check ...: credential "default": cloudflare tokens.verify: HTTP 401 ...; the API token in cloudflare.api_token (env LABELGATE_CLOUDFLARE_API_TOKEN) is invalid, expired or revoked; create a new one under My Profile > API Tokens in the Cloudflare dashboard
+labelgate: cloudflare credential validation failed; to skip this startup check set skip_credential_validation (env LABELGATE_SKIP_CREDENTIAL_VALIDATION) to true: credential "default": cloudflare tokens.verify: HTTP 401 ...; replace the API token in cloudflare.api_token (env LABELGATE_CLOUDFLARE_API_TOKEN): Cloudflare reports it as invalid, expired or revoked; create a new one under My Profile > API Tokens in the Cloudflare dashboard
 ```
 
 **原因：** Cloudflare 不接受这个 token，或者配置的隧道不存在。
 
 **解决：** 看消息的结尾：
 
-- `is invalid, expired or revoked` 或 `is disabled or expired`：[新建一个 token](/zh/docs/getting-started)，填到消息指出的配置项里。
+- `replace the API token in ...` 或 `is disabled or expired`：[新建一个 token](/zh/docs/getting-started)，填到消息指出的配置项里。
+- `is invalid and Cloudflare temporarily blocks it`：见 [token 被临时封锁](#auth-lockout)。
+- `wait a moment, then start labelgate again`：Cloudflare 暂时繁忙（HTTP 429 或 5xx）。稍等片刻，再执行 `docker compose up -d`。
 - `no such tunnel in account`：把 `LABELGATE_CLOUDFLARE_TUNNEL_ID` 和 `LABELGATE_CLOUDFLARE_ACCOUNT_ID` 与 **Zero Trust > Networks > Tunnels** 中的值逐一核对。
 - `cannot reach the Cloudflare API`：见[下文](#cloudflare-unreachable)。
 
@@ -191,6 +194,8 @@ cannot create DNS record: cloudflare dns.create: HTTP 403 ...; the API token in 
 ```
 
 **原因：** token 缺少消息里写的权限，或者没有覆盖这个域名或账户。
+
+如果消息里写的是 `replace the API token in ...`，说明 token 本身无效、已过期或已被撤销。新建一个 token，然后重启 Labelgate。
 
 **解决：**
 
@@ -248,14 +253,33 @@ cloudflare dns.list: dial tcp ...; cannot reach the Cloudflare API: check DNS, o
 
 ### `Cloudflare is rate-limiting this API token` [#rate-limit]
 
+```
+cloudflare dns.list: HTTP 429 ...; Cloudflare is rate-limiting this API token; labelgate retries on the next sync
+```
+
 **原因：** 短时间内 API 调用过多，常见于一次性重启大量容器之后。
 
-**解决：** 等一会儿，Labelgate 会自动重试。如果经常出现，降低同步频率：
+**解决：** 等一会儿，Labelgate 会在下一次同步时重试。启动时遇到的话，消息结尾是 `wait a moment, then start labelgate again`：稍等片刻再启动即可。如果经常出现，降低同步频率：
 
 ```bash
 LABELGATE_SYNC_INTERVAL=15m
 LABELGATE_DOCKER_POLL_INTERVAL=5m
 ```
+
+### `is invalid and Cloudflare temporarily blocks it` [#auth-lockout]
+
+```
+cloudflare dns.list: HTTP 429 (codes [10502]) ...; the API token in cloudflare.api_token (env LABELGATE_CLOUDFLARE_API_TOKEN) is invalid and Cloudflare temporarily blocks it after repeated authentication failures; replace the token, then wait for the lockout to expire
+```
+
+**原因：** token 无效。多次调用失败后，Cloudflare 会把它临时封锁一段时间。
+
+**解决：**
+
+1. 新建一个 token，填到消息指出的配置项里。
+2. 等封锁解除后再启动 Labelgate。容器反复重启（`restart: unless-stopped`）会让封锁一直持续，所以在此之前先停掉容器：`docker compose stop labelgate`。
+
+遇到这种封锁时，Labelgate 不会重试。
 
 ### `target auto: cannot detect this host's public IPv4 address` [#public-ip]
 
@@ -264,7 +288,7 @@ target auto: cannot detect this host's public IPv4 address: ...; set the record'
 target auto needs the public IPv4 address of agent edge1, which it did not report (it could not detect one); set the record's target label to an IP address instead
 ```
 
-agent 自己会记录 `cannot detect this host's public IPv4 address: records with target auto need it; ...`，恢复后记录 `public IPv4 detection recovered`。如果主机没有 IPv6，也没有 `AAAA` 记录使用 `target: auto`，可以忽略 IPv6 的这条警告。
+agent 自己会记录 `cannot detect this host's public IPv4 address: records with target auto need it; ...`，恢复后记录 `public IPv4 detection recovered`。IPv6 检测失败只记为 INFO，不算警告，因为很多主机本来就没有 IPv6。只有 `target: auto` 的 `AAAA` 记录才需要它。
 
 **原因：** `target: auto` 需要公网 IP。Labelgate 通过 `api.ipify.org` 和 `ipv4.icanhazip.com`（IPv6：`api6.ipify.org`、`ipv6.icanhazip.com`）获取，但没能访问到。对 agent 来说，是 agent 主机访问不到。
 
@@ -298,7 +322,7 @@ conflict: existing record not owned by labelgate: a CNAME record for app.example
 | 消息后半部分 | 解决办法 |
 |--------------|----------|
 | `a ... record for ... already exists in Cloudflare` | 在 **DNS > Records** 删除该记录，或者换一个主机名。 |
-| `it was created by labelgate instance "a1b2c3d4"` | 数据库丢了。设置 `LABELGATE_INSTANCE_ID=a1b2c3d4`。见[数据库丢失时](/zh/docs/ownership#recovering-from-database-loss)。 |
+| `it was created by labelgate instance "a1b2c3d4"` | 如果是这套部署丢了数据库，设置 `LABELGATE_INSTANCE_ID=a1b2c3d4`，但前提是那个实例已经永久下线。它还在运行时绝不能这样做，否则两边会争抢同一批记录。见[数据库丢失时](/zh/docs/ownership#recovering-from-database-loss)。 |
 | `the ownership marker was removed from the comment` | 把 `labelgate:<instance_id>` 放回记录备注的开头，或者删除该记录。 |
 | `an Access application for ... already exists` | 在 **Zero Trust > Access > Applications** 删除它，或者去掉 access 标签。 |
 | `the tag "labelgate-..." was removed` | 给该 Access 应用重新加上这个标签，或者删除该应用。 |
@@ -409,28 +433,32 @@ level=WARN msg="cannot connect to the main instance; retrying" url=wss://main.ex
 
 **解决：** 看 error 的结尾：
 
-| error 结尾 | 解决办法 |
+| error 包含 | 解决办法 |
 |------------|----------|
 | `must end in /ws` | 使用 `LABELGATE_CONNECT_ENDPOINT=wss://main.example.com:28112/ws`。 |
-| `nothing listens there: ...` | main 要开启 `agent.enabled: true`（`LABELGATE_AGENT_ENABLED=true`），发布 `"28112:28112"`，并在防火墙放行该端口。 |
+| `this port is not labelgate's agent listener` | `/ws` 返回 HTTP 404：地址用的是 dashboard 端口 `28111`。请改用 agent 端口 `28112`（`agent.listen`）。 |
+| `nothing listens there` | main 要开启 `agent.enabled: true`（`LABELGATE_AGENT_ENABLED=true`），发布 `"28112:28112"`，并在防火墙放行该端口。 |
 | `does not resolve` | 修正 `LABELGATE_CONNECT_ENDPOINT` 里的主机名。 |
 | `TLS certificate is not trusted` | 把 `LABELGATE_CONNECT_TLS_CA` 设为你的 CA 文件，或者改用公开签发的证书。 |
 | `TLS certificate does not list the host` | 使用证书中包含的主机名。 |
 | `does not use TLS: use ws://` | 改用 `ws://`，或者给 main 配置证书（`agent.tls.cert`、`agent.tls.key`）。 |
-| `uses TLS: use wss://` | 改用 `wss://`。 |
-| `does not belong to labelgate's agent port` | 地址指向了别处，例如 dashboard 端口 `28111`。请用 `28112`。 |
+| `likely expects TLS: use wss://` | main 启用了 TLS。改用 `wss://`。 |
+| `the reverse proxy in front of the main instance cannot reach it` | HTTP 502、503 或 504：反向代理连不到 main。确认 main 在运行，并且代理转发到它的 `28112` 端口。 |
+| `does not belong to labelgate's agent port` | 应答的是别的服务器。检查主机、端口和路径。 |
 
 main 主动连接 [inbound 模式的 agent](/zh/docs/examples/multi-host#inbound-mode-example) 时，main 会记录 `cannot connect to inbound agent; retrying`，结尾含义相同。此时要在 main 上修改 `agent.agents.<id>.connect_to` 和 `agent.tls.ca`。
 
-### `peer authentication failed; tokens do not match` [#agent-auth]
+### `main rejected this agent` [#agent-auth]
 
 agent 日志：
 
 ```
-level=WARN msg="handshake with the main instance failed" error="agent: peer authentication failed; tokens do not match: connect.token (env LABELGATE_CONNECT_TOKEN) on this agent must equal agent.agents.edge1.token in the main instance config (or agent.accept_token there if \"edge1\" is not listed under agent.agents)"
+level=WARN msg="handshake with the main instance failed" error="...; main rejected this agent: either agent \"edge1\" is not configured on the main instance (add agent.agents.edge1 with this agent's token there, or set agent.accept_token, env LABELGATE_AGENT_ACCEPT_TOKEN), or the tokens do not match: connect.token (env LABELGATE_CONNECT_TOKEN) on this agent must equal agent.agents.edge1.token (or agent.accept_token) in the main instance config"
 ```
 
 main 会记录 `agent handshake failed` 并指出是哪个 agent，例如 `agent "edge1" is not configured: add agent.agents.edge1 with a token to the main instance config`。
+
+握手失败的日志有限流：同一地址加同一 agent ID，每 5 分钟只记一条警告。下一条会注明期间被省略的次数（`suppressed=...`）。
 
 **原因：** agent ID 或 token 与 main 的配置不一致。
 

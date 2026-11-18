@@ -140,7 +140,8 @@ docker compose logs -f labelgate
 | 现象 | 解决办法 |
 |------|----------|
 | 访问 `/var/run/docker.sock` 报 `permission denied` | `DOCKER_GID` 不对。运行 `stat -c '%g' /var/run/docker.sock`，把结果填进 `.env`。 |
-| 控制台打不开 | `LABELGATE_API_TOKEN` 为空或少于 16 个字符。没有它控制台不会启用。 |
+| 控制台打不开，日志里有 `API and dashboard disabled: api.token is empty`（WARN） | `LABELGATE_API_TOKEN` 为空。同步照常运行，但 API 和控制台不会启用。设置 token 后执行 `docker compose up -d`。 |
+| Labelgate 启动即退出，报 `api.token (env LABELGATE_API_TOKEN): must be at least 16 characters` | token 太短。用 `openssl rand -hex 32` 重新生成，然后执行 `docker compose up -d`。 |
 | 数据库写不进去（用了 `./data:/app/config` 这类目录挂载） | 执行一次 `sudo chown -R 65532:65532 ./data`。上面的命名卷不需要这一步。 |
 | 隧道返回 `502 Bad Gateway` | `service` 用了 `localhost`，或 cloudflared 访问不到该容器。改用 Compose 服务名，并让 cloudflared 和应用在同一个网络里。 |
 | `conflict: existing record not owned by labelgate` | 这个主机名已经有一条记录。去 Cloudflare 删掉它，或换一个主机名。见[所有权](/zh/docs/ownership)。 |

@@ -140,7 +140,8 @@ docker compose logs -f labelgate
 | Symptom | Fix |
 |---------|-----|
 | `permission denied` on `/var/run/docker.sock` | `DOCKER_GID` is wrong. Run `stat -c '%g' /var/run/docker.sock` and put the number in `.env`. |
-| Dashboard does not load | `LABELGATE_API_TOKEN` is empty or shorter than 16 characters. Without it the dashboard is off. |
+| Dashboard does not load; the log shows `API and dashboard disabled: api.token is empty` (WARN) | `LABELGATE_API_TOKEN` is empty. Sync keeps running, but the API and the dashboard are off. Set the token and run `docker compose up -d`. |
+| Labelgate exits at start with `api.token (env LABELGATE_API_TOKEN): must be at least 16 characters` | The token is too short. Make a new one with `openssl rand -hex 32` and run `docker compose up -d`. |
 | Database cannot be written (bind mount like `./data:/app/config`) | Run `sudo chown -R 65532:65532 ./data` once. The named volume above needs nothing. |
 | Tunnel shows `502 Bad Gateway` | `service` uses `localhost` or a container cloudflared cannot reach. Use the Compose service name and keep cloudflared on the same network as the app. |
 | `conflict: existing record not owned by labelgate` | A record for that hostname already exists. Delete it in Cloudflare, or pick another hostname. See [Ownership](/docs/ownership). |
