@@ -6,8 +6,9 @@ import (
 )
 
 // Failed handshakes are unauthenticated, so anyone who reaches the agent
-// port can cause them. Each remote address and claimed agent ID logs at most
-// one warning per window; the map is capped so spoofed IDs cannot grow it.
+// port (hub) or an inbound agent's listener can cause them. Each remote
+// address (and, on the hub, claimed agent ID) logs at most one warning per
+// window; the map is capped so spoofed IDs cannot grow it.
 const (
 	handshakeLogWindow  = 5 * time.Minute
 	maxHandshakeLogKeys = 1024
