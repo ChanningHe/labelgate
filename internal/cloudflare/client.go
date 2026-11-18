@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	cf "github.com/cloudflare/cloudflare-go/v6"
-	"github.com/cloudflare/cloudflare-go/v6/option"
+	cf "github.com/cloudflare/cloudflare-go/v7"
+	"github.com/cloudflare/cloudflare-go/v7/option"
 
 	"github.com/channinghe/labelgate/internal/config"
 )
