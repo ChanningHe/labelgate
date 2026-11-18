@@ -177,7 +177,7 @@ func (a *app) buildMain(ctx context.Context, cfg config.Config, st store.Store, 
 	}
 	if !cfg.SkipCredentialValidation {
 		if err := cf.Verify(ctx); err != nil {
-			return nil, nil, nil, fmt.Errorf("cloudflare credential validation failed (checked at startup; %s=true skips it): %w",
+			return nil, nil, nil, fmt.Errorf("cloudflare credential validation failed; to skip this startup check set %s to true: %w",
 				config.KeyWithEnv("skip_credential_validation"), err)
 		}
 	}

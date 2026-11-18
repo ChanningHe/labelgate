@@ -297,7 +297,7 @@ The [first recipe](#outbound-mode-example) does exactly this.
 - The endpoint is reachable: `curl https://main.example.com:28112/health` returns `{"status":"ok"}`.
 - `curl -I https://whoami.edge1.example.com` answers from the agent host.
 
-## Common problems
+## Common problems [#common-problems]
 
 | Symptom | Fix |
 |---------|-----|
@@ -307,7 +307,7 @@ The [first recipe](#outbound-mode-example) does exactly this.
 | `must be at least 32 characters` or `distinct characters` | Make a new token with `openssl rand -hex 32`. A `${VAR}` written in `labelgate.yaml` is not expanded and fails this check. |
 | `service host "traefik" is a host name, which agents may only use if allow-listed` | Add `traefik` to that agent's `services` on the main. See [Troubleshooting](/docs/troubleshooting/common-issues#agent-service-host). |
 | Added to `agent.accept_services`, still rejected | The agent is a named agent. Use `agent.agents.<id>.services`. |
-| `rejected duplicate agent connection` | Two hosts use the same agent ID. Give each host its own. |
-| `conflict: <hostname> already claimed by ...` | A hostname belongs to one host at a time. Use a different hostname. See [Ownership](/docs/ownership). |
+| `rejected a second connection for an agent ID that is already connected` | Two hosts use the same agent ID. Give each host its own. |
+| `conflict: the ... is already managed by ...` | A hostname belongs to one host at a time. Use a different hostname. See [Ownership](/docs/ownership). |
 | Tunnel gives `502` for agent services | The request reached a cloudflared on another host. Use [one tunnel per host](#agent-tunnels). |
 | v0.2 agent cannot connect | Upgrade the main and all agents to v0.3 together. See [Upgrading](/docs/upgrading). |

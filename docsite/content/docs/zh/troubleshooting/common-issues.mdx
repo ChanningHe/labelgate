@@ -173,7 +173,7 @@ docker: cannot list containers: permission denied ...; labelgate may not open th
 Labelgate 启动时退出：
 
 ```
-labelgate: cloudflare credential validation failed (checked at startup; ...): credential "default": cloudflare tokens.verify: HTTP 401 ...; the API token in cloudflare.api_token (env LABELGATE_CLOUDFLARE_API_TOKEN) is invalid, expired or revoked; create a new one under My Profile > API Tokens in the Cloudflare dashboard
+labelgate: cloudflare credential validation failed; to skip this startup check ...: credential "default": cloudflare tokens.verify: HTTP 401 ...; the API token in cloudflare.api_token (env LABELGATE_CLOUDFLARE_API_TOKEN) is invalid, expired or revoked; create a new one under My Profile > API Tokens in the Cloudflare dashboard
 ```
 
 **原因：** Cloudflare 不接受这个 token，或者配置的隧道不存在。
@@ -219,7 +219,7 @@ app.example.com: no matching zone: no configured API token can see a zone contai
 ### `unknown tunnel` 或 `no default tunnel configured` [#unknown-tunnel]
 
 ```
-tunnel "media": unknown tunnel: use default (cloudflare.tunnel_id (env LABELGATE_CLOUDFLARE_TUNNEL_ID)) or a name or tunnel ID from cloudflare.tunnels in the main instance config
+tunnel "media": unknown tunnel: use "default" (the tunnel in cloudflare.tunnel_id, env LABELGATE_CLOUDFLARE_TUNNEL_ID) or a name or tunnel ID from cloudflare.tunnels in the main instance config
 no default tunnel configured: name the tunnel in the label, or set cloudflare.tunnel_id (env LABELGATE_CLOUDFLARE_TUNNEL_ID) or default_tunnel (env LABELGATE_DEFAULT_TUNNEL) in the main instance config
 credential "corp": unknown credential: add cloudflare.credentials.corp to the main instance config, or use default (cloudflare.api_token) or another configured credential
 ```
@@ -279,7 +279,7 @@ labels:
 
 **原因：** 隧道路由已经建好，但 cloudflared 没在运行，或者访问不到你的应用。
 
-**解决：** 见 [cloudflared：常见问题](/zh/docs/examples/cloudflared#常见问题)。
+**解决：** 见 [cloudflared：常见问题](/zh/docs/examples/cloudflared#common-problems)。
 
 ## 冲突 [#conflicts]
 
@@ -298,7 +298,7 @@ conflict: existing record not owned by labelgate: a CNAME record for app.example
 | 消息后半部分 | 解决办法 |
 |--------------|----------|
 | `a ... record for ... already exists in Cloudflare` | 在 **DNS > Records** 删除该记录，或者换一个主机名。 |
-| `(it was created by labelgate instance "a1b2c3d4" ...)` | 数据库丢了。设置 `LABELGATE_INSTANCE_ID=a1b2c3d4`。见[数据库丢失时](/zh/docs/ownership#recovering-from-database-loss)。 |
+| `it was created by labelgate instance "a1b2c3d4"` | 数据库丢了。设置 `LABELGATE_INSTANCE_ID=a1b2c3d4`。见[数据库丢失时](/zh/docs/ownership#recovering-from-database-loss)。 |
 | `the ownership marker was removed from the comment` | 把 `labelgate:<instance_id>` 放回记录备注的开头，或者删除该记录。 |
 | `an Access application for ... already exists` | 在 **Zero Trust > Access > Applications** 删除它，或者去掉 access 标签。 |
 | `the tag "labelgate-..." was removed` | 给该 Access 应用重新加上这个标签，或者删除该应用。 |
@@ -310,7 +310,7 @@ conflict: existing record not owned by labelgate: a CNAME record for app.example
 ### `conflict: the A record ... is already managed by` [#duplicate-claim]
 
 ```
-conflict: the A record app.example.com is already managed by local container web service web; remove the duplicate label from one of the containers
+conflict: the A record app.example.com is already managed by container web service web on the main instance; remove the duplicate label from one of the containers
 ```
 
 **原因：** 两个容器声明了同一条记录或路由，先拿到的那个保留。
@@ -330,7 +330,7 @@ conflict: hostname app.example.com is already managed by agent edge1, and a host
 ### `conflict: hostname ... already has` [#dns-and-tunnel-on-same-hostname]
 
 ```
-conflict: hostname app.example.com already has a route on tunnel 6ff4... from local container web service web; a hostname can have DNS records, one CNAME record or one tunnel route, not a mix: remove one of the labels
+conflict: hostname app.example.com already has a route on tunnel 6ff4... from container web service web on the main instance; a hostname can have DNS records, one CNAME record or one tunnel route, not a mix: remove one of the labels
 ```
 
 **原因：** 同一个主机名既有 DNS 标签又有隧道标签。隧道路由会自己创建 DNS 记录。

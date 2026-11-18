@@ -70,7 +70,7 @@ func otherInstanceHint(comment, instanceID string) string {
 	if id == instanceID || !model.ValidInstanceID(id) {
 		return ""
 	}
-	return fmt.Sprintf(" (it was created by labelgate instance %q: if that was this installation before its database was lost, set %s to %q)",
+	return fmt.Sprintf("; it was created by labelgate instance %q, so if that was this installation before its database was lost, set %s to %q",
 		id, config.KeyWithEnv("instance_id"), id)
 }
 
@@ -115,9 +115,16 @@ func zoneError(host string, err error) string {
 }
 
 // zoneNotRead reports a zone whose records were not listed this cycle.
-func zoneNotRead(zoneID string) string {
-	return "the DNS records of zone " + zoneID + " were not read this sync; retrying"
+func zoneNotRead(zone string) string {
+	return "the DNS records of " + zone + " were not read this sync; retrying"
 }
+
+// zoneRef names a zone for users by its name, never its ID.
+func zoneRef(z cloudflare.Zone) string { return "zone " + z.Name }
+
+// rowZoneRef names the zone of a tracked row, which stores only the zone ID:
+// it is described by the hostname it contains.
+func rowZoneRef(r model.Resource) string { return "the zone of " + r.Hostname }
 
 // accountNotRead reports an account whose Access objects were not listed this cycle.
 func accountNotRead(accountID string) string {

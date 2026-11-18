@@ -184,7 +184,7 @@ func TestMixedSourceRowIsNotTakenOver(t *testing.T) {
 		t.Fatalf("row %+v", row)
 	}
 	rej := h.st.list(true)
-	if len(rej) != 1 || rej[0].Owner.AgentID != "" || !strings.Contains(rej[0].LastError, "is already managed by agent edge") {
+	if len(rej) != 1 || rej[0].Owner.AgentID != "" || !strings.Contains(rej[0].LastError, "is already managed by container x service web on agent edge") {
 		t.Fatalf("rejected %+v", rej)
 	}
 }

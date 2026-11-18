@@ -297,7 +297,7 @@ agent:
 - 连接地址可达：`curl https://main.example.com:28112/health` 返回 `{"status":"ok"}`。
 - `curl -I https://whoami.edge1.example.com` 能拿到 agent 主机上服务的响应。
 
-## 常见问题
+## 常见问题 [#common-problems]
 
 | 现象 | 解决办法 |
 |------|----------|
@@ -307,7 +307,7 @@ agent:
 | `must be at least 32 characters` 或 `distinct characters` | 用 `openssl rand -hex 32` 重新生成 token。写在 `labelgate.yaml` 里的 `${VAR}` 不会被展开，也会触发这个错误。 |
 | `service host "traefik" is a host name, which agents may only use if allow-listed` | 在 main 上把 `traefik` 加进该 agent 的 `services`。见[故障排查](/zh/docs/troubleshooting/common-issues#agent-service-host)。 |
 | 已经加进 `agent.accept_services`，仍被拒绝 | 这是命名 agent，要改 `agent.agents.<id>.services`。 |
-| `rejected duplicate agent connection` | 两台主机用了同一个 agent ID，给每台主机设不同的 ID。 |
-| `conflict: <hostname> already claimed by ...` | 一个主机名同一时间只属于一台主机，换一个主机名。见[所有权](/zh/docs/ownership)。 |
+| `rejected a second connection for an agent ID that is already connected` | 两台主机用了同一个 agent ID，给每台主机设不同的 ID。 |
+| `conflict: the ... is already managed by ...` | 一个主机名同一时间只属于一台主机，换一个主机名。见[所有权](/zh/docs/ownership)。 |
 | agent 上的服务通过隧道访问返回 `502` | 请求被发到了另一台主机上的 cloudflared。改为[每台主机一条隧道](#agent-tunnels)。 |
 | v0.2 的 agent 连不上 | main 和所有 agent 一起升级到 v0.3。见[升级](/zh/docs/upgrading)。 |

@@ -136,7 +136,7 @@ services:
 ## 注意事项
 
 - **策略放在哪里。** 放在同一个容器里，或同一主机上任何正在运行的容器里。在 [agent](/zh/docs/examples/multi-host) 上，只看该 agent 上的容器。
-- **同名策略。** 容器自身的策略优先。否则，如果另外两个容器定义了同名但内容不同的策略，会报 `ambiguous access policy definition`，请改掉其中一个的名字。
+- **同名策略。** 容器自身的策略优先。否则，如果另外两个容器定义了同名但内容不同的策略，会报 `access policy "name" is defined differently on several containers of this host`，请改掉其中一个的名字。
 - **清理。** 策略没有 `cleanup` 标签，它的 Access 应用跟随引用它的 tunnel 或 DNS 标签一起清理或保留。
 - **修改会生效。** 修改标签（比如删掉一个邮箱）后，下次同步时 Cloudflare 上也会更新。
 - **不动已有应用。** 如果 Cloudflare 上已有不是 Labelgate 创建的、针对该主机名的 Access 应用，会报 `conflict: existing record not owned by labelgate`。参见[所有权与冲突](/zh/docs/ownership)。

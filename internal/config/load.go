@@ -181,6 +181,15 @@ func KeyWithEnv(key string) string {
 	return key + " (env " + envName(key) + ")"
 }
 
+// KeyAndEnv is KeyWithEnv for use inside parentheses: "api.token, env
+// LABELGATE_API_TOKEN", so the message has no nested brackets.
+func KeyAndEnv(key string) string {
+	if !envBound(key) {
+		return key
+	}
+	return key + ", env " + envName(key)
+}
+
 // envBound reports whether an environment variable can set key: every
 // scalar/list key, and removed keys (Load reports them when set in the env).
 func envBound(key string) bool {

@@ -93,6 +93,34 @@ func TestResolutionErrors(t *testing.T) {
 	}
 }
 
+func TestUnknownTunnelErrorHasNoNestedBrackets(t *testing.T) {
+	got := UnknownTunnelError("media").Error()
+	want := `use "default" (the tunnel in cloudflare.tunnel_id, env LABELGATE_CLOUDFLARE_TUNNEL_ID) or a name or tunnel ID from cloudflare.tunnels`
+	assertContains(t, got, want)
+	for _, err := range []error{UnknownTunnelError("media"), NoZoneError("app.example.com", "default"), NoZoneError("app.example.com", "")} {
+		if nestedBrackets(err.Error()) {
+			t.Errorf("nested brackets in %q", err)
+		}
+	}
+}
+
+// nestedBrackets reports whether s opens a "(" while another is still open.
+func nestedBrackets(s string) bool {
+	depth := 0
+	for _, r := range s {
+		switch r {
+		case '(':
+			depth++
+			if depth > 1 {
+				return true
+			}
+		case ')':
+			depth--
+		}
+	}
+	return false
+}
+
 func TestTunnelVerifyHint(t *testing.T) {
 	root := Tunnel{Ref: "default", ID: "t1", AccountID: "acct"}
 	assertContains(t, tunnelVerifyHint(root, &APIError{Op: "tunnel.get", Status: 404, Err: ErrNotFound}),

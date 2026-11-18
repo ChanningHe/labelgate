@@ -45,7 +45,7 @@ func CredentialKey(name string) string {
 // credential) contains host. It wraps ErrNoZone.
 func NoZoneError(host, credential string) error {
 	if credential != "" {
-		return fmt.Errorf("%s: %w: the API token of credential %q (%s) cannot see a zone containing this hostname; "+
+		return fmt.Errorf("%s: %w: the API token of credential %q, set by %s, cannot see a zone containing this hostname; "+
 			"add the zone to the token's Zone Resources under %s, or fix the hostname",
 			host, ErrNoZone, credential, CredentialKey(credential), tokenPage)
 	}
@@ -64,8 +64,8 @@ func UnknownCredentialError(name string) error {
 // UnknownTunnelError reports a tunnel reference that is not configured. It
 // wraps ErrUnknownTunnel.
 func UnknownTunnelError(ref string) error {
-	return fmt.Errorf("tunnel %q: %w: use default (%s) or a name or tunnel ID from cloudflare.tunnels in the main instance config",
-		ref, ErrUnknownTunnel, config.KeyWithEnv("cloudflare.tunnel_id"))
+	return fmt.Errorf("tunnel %q: %w: use \"default\" (the tunnel in %s) or a name or tunnel ID from cloudflare.tunnels in the main instance config",
+		ref, ErrUnknownTunnel, config.KeyAndEnv("cloudflare.tunnel_id"))
 }
 
 // NoDefaultTunnelError reports a tunnel rule without a tunnel when no default

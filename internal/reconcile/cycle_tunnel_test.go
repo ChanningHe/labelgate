@@ -308,7 +308,7 @@ func TestUnknownTunnelIsRejected(t *testing.T) {
 	s.Tunnel = "missing"
 	h.src.set(ctr("web", tunOnly(s)))
 	h.cycle()
-	if rej := h.st.list(true); len(rej) != 1 || !strings.Contains(rej[0].LastError, "unknown tunnel: use default") {
+	if rej := h.st.list(true); len(rej) != 1 || !strings.Contains(rej[0].LastError, "unknown tunnel: use \"default\" (the tunnel in cloudflare.tunnel_id") {
 		t.Fatalf("rejected %+v", rej)
 	}
 }
