@@ -51,12 +51,12 @@ Pick one:
 The service that had the hostname first keeps it. The newcomer gets an error and changes nothing on Cloudflare:
 
 ```
-conflict: app.example.com|A already claimed by local container webapp service web
+conflict: the A record app.example.com is already managed by container webapp service web on the main instance; remove the duplicate label from one of the containers
 ```
 
 A few more rules:
 
-- **One hostname belongs to one host:** the main host or one agent. Other hosts get `conflict: hostname app.example.com is owned by agent edge1`.
+- **One hostname belongs to one host:** the main host or one agent. Other hosts get `conflict: hostname app.example.com is already managed by agent edge1`.
 - **One hostname is either DNS or tunnel, not both.** A DNS service and a tunnel service on the same hostname are a conflict.
 - Containers on the same host may share a hostname if they use different record types or paths.
 

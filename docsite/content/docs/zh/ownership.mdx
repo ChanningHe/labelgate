@@ -51,12 +51,12 @@ Labelgate 每次同步都会重新检查，所以你处理好之后错误会自�
 先用上这个主机名的服务继续保有它。后来者会收到错误，并且不会改动 Cloudflare 上的任何东西：
 
 ```
-conflict: app.example.com|A already claimed by local container webapp service web
+conflict: the A record app.example.com is already managed by container webapp service web on the main instance; remove the duplicate label from one of the containers
 ```
 
 另外几条规则：
 
-- **一个主机名只属于一台主机：** main 主机或某一个 agent。其他主机会收到 `conflict: hostname app.example.com is owned by agent edge1`。
+- **一个主机名只属于一台主机：** main 主机或某一个 agent。其他主机会收到 `conflict: hostname app.example.com is already managed by agent edge1`。
 - **一个主机名要么用 DNS，要么用 tunnel，不能同时用。** 同一主机名上的 DNS 服务和 tunnel 服务算冲突。
 - 同一台主机上的容器，只要记录类型或路径不同，可以共用一个主机名。
 

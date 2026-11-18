@@ -136,7 +136,7 @@ services:
 ## Good to know
 
 - **Where a policy can live.** In the same container, or in any running container on the same host. On an [agent](/docs/examples/multi-host), only containers on that agent count.
-- **Same name twice.** A policy in the container itself wins. Otherwise, if two other containers define different policies with that name, you get `ambiguous access policy definition`. Rename one.
+- **Same name twice.** A policy in the container itself wins. Otherwise, if two other containers define different policies with that name, you get `access policy "name" is defined differently on several containers of this host`. Rename one.
 - **Cleanup.** A policy has no `cleanup` label. Its Access app follows the tunnel or DNS label that uses it.
 - **Changes apply.** Edit a label, e.g. remove an email, and Cloudflare is updated on the next sync.
 - **Existing apps are not touched.** If Cloudflare already has an Access app for the hostname that Labelgate did not create, you get `conflict: existing record not owned by labelgate`. See [Ownership & Conflicts](/docs/ownership).
