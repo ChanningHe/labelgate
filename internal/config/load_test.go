@@ -340,9 +340,9 @@ func TestLoad_EveryKeyHasEnvBinding(t *testing.T) {
 		t.Run(key, func(t *testing.T) {
 			ft := fieldByKey(Defaults(), key).Type()
 			raw, want := sample(ft)
-			cfg, err := decode(newViper(), env(name, raw))
-			if err != nil {
-				t.Fatalf("decode %s=%s: %v", name, raw, err)
+			cfg, unknown, failures := decode(newViper(), env(name, raw))
+			if len(unknown)+len(failures) != 0 {
+				t.Fatalf("decode %s=%s: %v %v", name, raw, unknown, failures)
 			}
 			got := fieldByKey(cfg, key).Interface()
 			if ft.Kind() == reflect.String && ft != reflect.TypeFor[string]() {
@@ -455,11 +455,6 @@ func TestLoad_DecodeErrors(t *testing.T) {
 			wantValidationError(t, err, tt.field, tt.msg)
 		})
 	}
-}
-
-func TestLoad_DecodeErrorWithoutFieldName(t *testing.T) {
-	err := decodeError(errors.New("something odd"))
-	wantValidationError(t, err, "config", "something odd")
 }
 
 func TestLoad_ReturnsValidateErrorsUnchanged(t *testing.T) {

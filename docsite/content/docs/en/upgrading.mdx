@@ -82,7 +82,7 @@ Label errors are logged with the container and label key and turn the sync statu
 | `db.retention` | None (delete the key) |
 | `db.vacuum_interval` | None (delete the key) |
 
-These now fail at startup with an explicit error. Unknown `mode`, `log_level` and `log_format` values also fail instead of silently falling back.
+These now fail at startup with an explicit error that lists every problem at once. Unknown `mode`, `log_level` and `log_format` values also fail instead of silently falling back.
 
 ### Other behaviour changes
 

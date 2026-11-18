@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"strings"
 	"time"
 
@@ -36,14 +35,14 @@ var configExts = []struct{ ext, kind string }{
 type envLookup func(string) (string, bool)
 
 var (
-	durationType     = reflect.TypeFor[time.Duration]()
-	unusedKeysRegexp = regexp.MustCompile(`'([^']*)' has invalid keys: ([^\n]+)`)
-	fieldNameRegexp  = regexp.MustCompile(`'([^']+)'`)
-	mapIndexRegexp   = regexp.MustCompile(`\[([^\]]+)\]`)
+	durationType = reflect.TypeFor[time.Duration]()
 )
 
 // Load reads configuration from file and environment, applies Defaults and
-// returns a validated Config.
+// returns a validated Config. On failure the error describes every problem,
+// not just the first, in a stable order: removed keys, unknown keys, decode
+// (type) errors, then Validate problems. Validate is skipped when a decode
+// error means the Config cannot be trusted.
 //
 //   - File resolution: explicit path (CLI --config) > $LABELGATE_CONFIG >
 //     ./labelgate.{yaml,yml,json,toml} > /etc/labelgate/labelgate.{...}.
@@ -52,10 +51,12 @@ var (
 //   - Every scalar/list key is overridable by LABELGATE_<PATH> (lists are
 //     comma-separated, empty values are ignored). Map sections
 //     (cloudflare.credentials, cloudflare.tunnels, agent.agents) are file-only.
-//   - Any key in RemovedKeys present in file or env -> *ValidationError naming it.
-//   - Unknown keys and undecodable values -> *ValidationError (strict decoding).
+//   - Every key in RemovedKeys present in file or env is reported (sorted).
+//   - Unknown keys and undecodable values are reported too (strict decoding).
+//   - One problem is returned as *ValidationError, several as ValidationErrors
+//     (errors.As finds *ValidationError either way).
 //   - Durations must be strings such as "30s"; bare numbers are rejected.
-//   - Returns Validate(cfg) errors unchanged.
+//   - Validate problems are reported unchanged.
 //   - Touches no global state (no viper singleton, no os.Setenv).
 func Load(path string) (Config, error) {
 	return load(path, os.LookupEnv, defaultSearchDirs)
@@ -72,27 +73,42 @@ func load(path string, env envLookup, dirs []string) (Config, error) {
 			return Config{}, err
 		}
 	}
-	if err := rejectRemoved(v, env); err != nil {
-		return Config{}, err
+	problems := removedProblems(v, env)
+	cfg, unknown, failures := decode(v, env)
+	problems = append(problems, unknown...)
+	problems = append(problems, failures...)
+	// Unknown keys leave the struct fully decoded; a type error does not, and
+	// validating a half-decoded config would only add noise.
+	if len(failures) == 0 {
+		problems = append(problems, validate(cfg)...)
 	}
-	cfg, err := decode(v, env)
-	if err != nil {
-		return Config{}, err
-	}
-	if err := Validate(cfg); err != nil {
+	if err := problems.err(); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil
 }
 
 // decode overlays the environment on v and strictly decodes it over Defaults().
-func decode(v *viper.Viper, env envLookup) (Config, error) {
+// Unknown keys (other than removed ones, which removedProblems reports) and
+// decode failures are returned separately because only the latter make the
+// decoded Config untrustworthy.
+//
+// The Config comes from a lenient decode, because strict decoding drops map
+// entries holding an unknown key, which would make validation report phantom
+// missing references. A second, strict decode into a scratch Config only
+// discovers the unknown keys.
+func decode(v *viper.Viper, env envLookup) (cfg Config, unknown, failures ValidationErrors) {
 	applyEnv(v, env)
-	cfg := Defaults()
-	if err := v.UnmarshalExact(&cfg, viper.DecodeHook(decodeHook)); err != nil {
-		return Config{}, decodeError(err)
+	hook := viper.DecodeHook(decodeHook)
+	cfg = Defaults()
+	if err := v.Unmarshal(&cfg, hook); err != nil {
+		_, failures = decodeProblems(err)
 	}
-	return cfg, nil
+	scratch := Defaults()
+	if err := v.UnmarshalExact(&scratch, hook); err != nil {
+		unknown, _ = decodeProblems(err)
+	}
+	return cfg, unknown, failures
 }
 
 // resolveFile returns the config file to read, or "" when none applies.
@@ -135,35 +151,6 @@ func readFile(v *viper.Viper, file string) error {
 		}
 	}
 	return fmt.Errorf("config: %s: unsupported extension %q (use .yaml, .yml, .json or .toml)", file, ext)
-}
-
-// rejectRemoved fails when a removed v0.2 key (or its parent section) is
-// present in the file or the environment.
-func rejectRemoved(v *viper.Viper, env envLookup) error {
-	keys := sortedKeys(RemovedKeys)
-	for _, key := range keys {
-		if _, inEnv := env(envName(key)); inEnv || v.IsSet(viperKey(key)) {
-			return &ValidationError{Field: key, Message: RemovedKeys[key]}
-		}
-	}
-	// A bare removed section (e.g. an empty docker.ssh block) is reported too.
-	for _, key := range keys {
-		if parent := key[:strings.LastIndex(key, ".")]; v.IsSet(viperKey(parent)) && !knownSection(parent) {
-			return &ValidationError{Field: key, Message: RemovedKeys[key]}
-		}
-	}
-	return nil
-}
-
-// knownSection reports whether section is still a valid config section, so a
-// file merely containing it does not imply a removed key.
-func knownSection(section string) bool {
-	for _, k := range leafKeys(reflect.TypeFor[Config](), "") {
-		if strings.HasPrefix(k, section+".") {
-			return true
-		}
-	}
-	return false
 }
 
 // applyEnv overlays LABELGATE_<PATH> variables for every scalar/list key.
@@ -243,23 +230,4 @@ func splitList(s string) []string {
 		}
 	}
 	return out
-}
-
-// decodeError converts a decoding failure into a *ValidationError.
-func decodeError(err error) error {
-	msg := err.Error()
-	if m := unusedKeysRegexp.FindStringSubmatch(msg); m != nil {
-		key, _, _ := strings.Cut(m[2], ",")
-		return &ValidationError{Field: dotted(m[1] + "." + strings.TrimSpace(key)), Message: "unknown key"}
-	}
-	field := "config"
-	if m := fieldNameRegexp.FindStringSubmatch(msg); m != nil {
-		field = dotted(m[1])
-	}
-	return &ValidationError{Field: field, Message: strings.TrimSpace(strings.TrimPrefix(msg, "decoding failed due to the following error(s):"))}
-}
-
-// dotted rewrites mapstructure paths ("a.b[c].d", ".x") into dotted config keys.
-func dotted(path string) string {
-	return strings.Trim(mapIndexRegexp.ReplaceAllString(path, ".$1"), ".")
 }
