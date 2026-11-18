@@ -267,7 +267,9 @@ func convertLegacyResources(ctx context.Context, tx *sql.Tx, env stepEnv) error 
 	}
 	kept, dropped := dedupeLatest(converted)
 	if skipped > 0 || dropped > 0 {
-		env.log.Warn("legacy resources dropped during migration", "unrepresentable", skipped, "duplicates", dropped)
+		env.log.Warn("some v0.2 resources could not be migrated and were dropped from the database; "+
+			"their Cloudflare objects were not changed: review them in the Cloudflare dashboard",
+			"unrepresentable", skipped, "duplicates", dropped)
 	}
 	resources := make([]model.Resource, 0, len(kept)+len(kept)/2)
 	for _, k := range kept {
