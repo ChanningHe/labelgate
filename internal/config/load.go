@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -113,12 +114,14 @@ func decode(v *viper.Viper, env envLookup) (cfg Config, unknown, failures Valida
 
 // resolveFile returns the config file to read, or "" when none applies.
 func resolveFile(path string, env envLookup, dirs []string) (string, error) {
+	origin := "--config"
 	if path == "" {
 		path, _ = env(ConfigEnv)
+		origin = ConfigEnv
 	}
 	if path != "" {
 		if _, err := os.Stat(path); err != nil {
-			return "", fmt.Errorf("config: %w", err)
+			return "", fmt.Errorf("config: cannot open the config file set by %s: %w; fix the path or mount the file into the container", origin, err)
 		}
 		return path, nil
 	}
@@ -130,7 +133,7 @@ func resolveFile(path string, env envLookup, dirs []string) (string, error) {
 			case err == nil && info.Mode().IsRegular():
 				return candidate, nil
 			case err != nil && !errors.Is(err, fs.ErrNotExist):
-				return "", fmt.Errorf("config: %w", err)
+				return "", fmt.Errorf("config: cannot check for a config file: %w; make it readable by the labelgate user or pass --config", err)
 			}
 		}
 	}
@@ -145,7 +148,7 @@ func readFile(v *viper.Viper, file string) error {
 			v.SetConfigFile(file)
 			v.SetConfigType(e.kind)
 			if err := v.ReadInConfig(); err != nil {
-				return fmt.Errorf("config: read %s: %w", file, err)
+				return fmt.Errorf("config: cannot parse %s: %w; fix the syntax at the reported position", file, err)
 			}
 			return nil
 		}
@@ -167,6 +170,25 @@ func newViper() *viper.Viper { return viper.NewWithOptions(viper.KeyDelimiter(ke
 
 // viperKey converts a dotted config key into a viper key path.
 func viperKey(key string) string { return strings.ReplaceAll(key, ".", keyDelim) }
+
+// KeyWithEnv names a config key for messages: "api.token (env
+// LABELGATE_API_TOKEN)" when an environment variable can set it, the bare key
+// otherwise (map sections such as agent.agents.* are config-file only).
+func KeyWithEnv(key string) string {
+	if !envBound(key) {
+		return key
+	}
+	return key + " (env " + envName(key) + ")"
+}
+
+// envBound reports whether an environment variable can set key: every
+// scalar/list key, and removed keys (Load reports them when set in the env).
+func envBound(key string) bool {
+	if _, removed := RemovedKeys[key]; removed {
+		return true
+	}
+	return slices.Contains(leafKeys(reflect.TypeFor[Config](), ""), key)
+}
 
 // envName returns the environment variable bound to a config key.
 func envName(key string) string {

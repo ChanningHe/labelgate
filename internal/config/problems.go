@@ -16,7 +16,7 @@ func (p ValidationErrors) Error() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "config: %d problems:", len(p))
 	for _, ve := range p {
-		b.WriteString("\n  " + ve.Field + ": " + ve.Message)
+		b.WriteString("\n  " + KeyWithEnv(ve.Field) + ": " + ve.Message)
 	}
 	return b.String()
 }

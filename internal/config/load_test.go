@@ -63,7 +63,7 @@ func TestLoad_DefaultsFromEnvOnly(t *testing.T) {
 
 func TestLoad_NoCredentialFailsValidation(t *testing.T) {
 	_, err := load("", env(), nil)
-	wantValidationError(t, err, "cloudflare.api_token", "at least one credential")
+	wantValidationError(t, err, "cloudflare.api_token", "no Cloudflare API token is configured")
 }
 
 func TestLoad_FileFormats(t *testing.T) {

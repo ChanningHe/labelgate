@@ -7,10 +7,10 @@ func checkCloudflare(p *ValidationErrors, cfg Config) {
 	rootTokenMissing := false
 	if cf.TunnelID != "" {
 		if cf.AccountID == "" {
-			p.addf("cloudflare.account_id", "required when cloudflare.tunnel_id is set")
+			p.addf("cloudflare.account_id", "required when cloudflare.tunnel_id is set (find it on any zone overview page in the Cloudflare dashboard)")
 		}
 		if cf.APIToken == "" {
-			p.addf("cloudflare.api_token", "required: cloudflare.tunnel_id uses the root credential")
+			p.addf("cloudflare.api_token", "required because cloudflare.tunnel_id is set: the tunnel is managed with this token")
 			rootTokenMissing = true
 		}
 	}
@@ -20,7 +20,7 @@ func checkCloudflare(p *ValidationErrors, cfg Config) {
 	// Both rules below concern cloudflare.api_token: report it once.
 	if !rootTokenMissing && cf.APIToken == "" && len(cf.Credentials) == 0 && !cfg.SkipCredentialValidation {
 		p.addf("cloudflare.api_token",
-			"at least one credential is required: set cloudflare.api_token or configure cloudflare.credentials")
+			"no Cloudflare API token is configured: set this, or add an entry under cloudflare.credentials in the config file")
 	}
 }
 
@@ -29,7 +29,7 @@ func checkName(field, name string) *ValidationError {
 		return fail(field, "name %q is reserved for the root entry", name)
 	}
 	if !resourceNamePat.MatchString(name) {
-		return fail(field, "name %q must match %s", name, resourceNamePat)
+		return fail(field, "name %q is invalid: use lower-case letters, digits, hyphens or underscores, starting with a letter or digit", name)
 	}
 	return nil
 }
@@ -40,11 +40,11 @@ func checkCredentials(p *ValidationErrors, creds map[string]CredentialConfig) {
 		c := creds[name]
 		p.add(checkName(field, name))
 		if strings.TrimSpace(c.APIToken) == "" {
-			p.addf(field+".api_token", "must not be empty")
+			p.addf(field+".api_token", "must not be empty: paste the Cloudflare API token for this credential")
 		}
 		for _, z := range c.Zones {
 			if !validGlob(z) {
-				p.addf(field+".zones", "invalid zone pattern %q", z)
+				p.addf(field+".zones", "invalid zone pattern %q (use a zone name such as example.com or a glob such as *.example.com)", z)
 				break
 			}
 		}
@@ -72,12 +72,12 @@ func checkTunnels(p *ValidationErrors, cf CloudflareConfig, rootTokenMissing boo
 func checkTunnelCredential(field, ref string, cf CloudflareConfig, rootTokenMissing bool) *ValidationError {
 	if ref != "" && ref != RootCredential {
 		if _, ok := cf.Credentials[ref]; !ok {
-			return fail(field, "credential %q is not defined in cloudflare.credentials", ref)
+			return fail(field, "credential %q is not defined; add cloudflare.credentials.%s or use default (cloudflare.api_token)", ref, ref)
 		}
 		return nil
 	}
 	if cf.APIToken == "" && !rootTokenMissing {
-		return fail(field, "uses the root credential but cloudflare.api_token is empty")
+		return fail(field, "uses the default credential, but %s is empty; set it or name a credential from cloudflare.credentials", KeyWithEnv("cloudflare.api_token"))
 	}
 	return nil
 }
@@ -91,7 +91,7 @@ func checkDefaultTunnel(cfg Config) *ValidationError {
 		return nil
 	case ref == RootTunnel:
 		if cfg.Cloudflare.TunnelID == "" {
-			return fail("default_tunnel", "%q requires cloudflare.tunnel_id", ref)
+			return fail("default_tunnel", "%q means the tunnel set by %s, which is empty; set it or name a tunnel from cloudflare.tunnels", ref, KeyWithEnv("cloudflare.tunnel_id"))
 		}
 	default:
 		if _, ok := cfg.Cloudflare.Tunnels[ref]; !ok {
@@ -124,7 +124,7 @@ func resolvableTunnel(cf CloudflareConfig, ref string) bool {
 func checkTunnelRefs(cf CloudflareConfig, field string, refs []string) *ValidationError {
 	for _, ref := range refs {
 		if !resolvableTunnel(cf, ref) {
-			return fail(field, "unknown tunnel %q", ref)
+			return fail(field, "unknown tunnel %q (use default for cloudflare.tunnel_id, or a name or tunnel ID from cloudflare.tunnels)", ref)
 		}
 	}
 	return nil
