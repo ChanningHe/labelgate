@@ -1,9 +1,7 @@
 package config
 
 import (
-	"fmt"
 	"net"
-	"net/netip"
 	"net/url"
 	"path"
 	"regexp"
@@ -47,13 +45,15 @@ var (
 	logFormats         = []string{"text", "json"}
 )
 
-// fail builds a *ValidationError.
-func fail(field, format string, args ...any) error {
-	return &ValidationError{Field: field, Message: fmt.Sprintf(format, args...)}
-}
-
-// Validate checks cfg and returns the first problem as *ValidationError.
-// It never modifies cfg (no silent fallbacks). Rules, in check order:
+// Validate checks cfg and returns every problem it finds: a single
+// *ValidationError when there is one, ValidationErrors (whose elements are all
+// *ValidationError) when there are several, in check order. It never modifies
+// cfg (no silent fallbacks).
+//
+// Checks are independent: one failing field does not hide another. A check
+// stops at the first problem of its own field, and is skipped when it depends
+// on a rule that already failed (retry.max_delay needs a valid retry.delay,
+// mode-specific sections need a valid mode, and so on). Rules, in check order:
 //   - label_prefix pattern; mode, log_level, log_format, connect.mode
 //     enumerations; instance_id empty or model.ValidInstanceID.
 //   - retry.attempts >= 1, retry.delay > 0, retry.backoff >= 1,
@@ -73,65 +73,72 @@ func fail(field, format string, args ...any) error {
 //     inbound needs connect.listen, connect.agent_id valid when set,
 //     heartbeat_interval >= 1s.
 func Validate(cfg Config) error {
-	checks := []func(Config) error{checkCore, checkRetry, checkDocker}
-	if cfg.Mode == ModeAgent {
-		checks = append(checks, checkConnect)
-	} else {
-		checks = append(checks, checkSyncDB, checkAPI, checkCloudflare, checkAgentServer)
+	var p ValidationErrors
+	checkCore(&p, cfg)
+	checkRetry(&p, cfg)
+	checkDocker(&p, cfg)
+	switch cfg.Mode {
+	case ModeAgent:
+		checkConnect(&p, cfg)
+	case ModeMain:
+		checkSyncDB(&p, cfg)
+		checkAPI(&p, cfg)
+		checkCloudflare(&p, cfg)
+		checkAgentServer(&p, cfg)
 	}
-	for _, check := range checks {
-		if err := check(cfg); err != nil {
-			return err
-		}
-	}
-	return nil
+	return p.err()
 }
 
-func checkCore(cfg Config) error {
-	switch {
-	case !labelPrefixPattern.MatchString(cfg.LabelPrefix):
-		return fail("label_prefix", "%q must match %s", cfg.LabelPrefix, labelPrefixPattern)
-	case cfg.Mode != ModeMain && cfg.Mode != ModeAgent:
-		return fail("mode", "%q is invalid (use main or agent)", cfg.Mode)
-	case !slices.Contains(logLevels, cfg.LogLevel):
-		return fail("log_level", "%q is invalid (use %s)", cfg.LogLevel, strings.Join(logLevels, ", "))
-	case !slices.Contains(logFormats, cfg.LogFormat):
-		return fail("log_format", "%q is invalid (use %s)", cfg.LogFormat, strings.Join(logFormats, ", "))
-	case cfg.Connect.Mode != ConnectOutbound && cfg.Connect.Mode != ConnectInbound:
-		return fail("connect.mode", "%q is invalid (use outbound or inbound)", cfg.Connect.Mode)
-	case cfg.InstanceID != "" && !model.ValidInstanceID(cfg.InstanceID):
-		return fail("instance_id", "%q must be 4-32 lower-case alphanumeric characters", cfg.InstanceID)
+func checkCore(p *ValidationErrors, cfg Config) {
+	if !labelPrefixPattern.MatchString(cfg.LabelPrefix) {
+		p.addf("label_prefix", "%q must match %s", cfg.LabelPrefix, labelPrefixPattern)
 	}
-	return nil
+	if cfg.Mode != ModeMain && cfg.Mode != ModeAgent {
+		p.addf("mode", "%q is invalid (use main or agent)", cfg.Mode)
+	}
+	if !slices.Contains(logLevels, cfg.LogLevel) {
+		p.addf("log_level", "%q is invalid (use %s)", cfg.LogLevel, strings.Join(logLevels, ", "))
+	}
+	if !slices.Contains(logFormats, cfg.LogFormat) {
+		p.addf("log_format", "%q is invalid (use %s)", cfg.LogFormat, strings.Join(logFormats, ", "))
+	}
+	if !validConnectMode(cfg.Connect.Mode) {
+		p.addf("connect.mode", "%q is invalid (use outbound or inbound)", cfg.Connect.Mode)
+	}
+	if cfg.InstanceID != "" && !model.ValidInstanceID(cfg.InstanceID) {
+		p.addf("instance_id", "%q must be 4-32 lower-case alphanumeric characters", cfg.InstanceID)
+	}
 }
 
-func checkRetry(cfg Config) error {
+func validConnectMode(m ConnectMode) bool { return m == ConnectOutbound || m == ConnectInbound }
+
+func checkRetry(p *ValidationErrors, cfg Config) {
 	r := cfg.Retry
-	switch {
-	case r.Attempts < 1:
-		return fail("retry.attempts", "must be >= 1, got %d", r.Attempts)
-	case r.Delay <= 0:
-		return fail("retry.delay", "must be > 0, got %s", r.Delay)
-	case !(r.Backoff >= 1): // also rejects NaN
-		return fail("retry.backoff", "must be >= 1, got %v", r.Backoff)
-	case r.MaxDelay < r.Delay:
-		return fail("retry.max_delay", "must be >= retry.delay (%s), got %s", r.Delay, r.MaxDelay)
+	if r.Attempts < 1 {
+		p.addf("retry.attempts", "must be >= 1, got %d", r.Attempts)
 	}
-	return nil
+	if r.Delay <= 0 {
+		p.addf("retry.delay", "must be > 0, got %s", r.Delay)
+	}
+	if !(r.Backoff >= 1) { // also rejects NaN
+		p.addf("retry.backoff", "must be >= 1, got %v", r.Backoff)
+	}
+	// max_delay is only comparable to a valid delay.
+	if r.Delay > 0 && r.MaxDelay < r.Delay {
+		p.addf("retry.max_delay", "must be >= retry.delay (%s), got %s", r.Delay, r.MaxDelay)
+	}
 }
 
-func checkDocker(cfg Config) error {
+func checkDocker(p *ValidationErrors, cfg Config) {
 	d := cfg.Docker
-	if err := checkDockerEndpoint(d.Endpoint); err != nil {
-		return err
-	}
+	p.add(checkDockerEndpoint(d.Endpoint))
 	if d.PollInterval <= 0 {
-		return fail("docker.poll_interval", "must be > 0, got %s", d.PollInterval)
+		p.addf("docker.poll_interval", "must be > 0, got %s", d.PollInterval)
 	}
-	return checkTLSPair("docker.tls", d.TLS)
+	p.add(checkTLSPair("docker.tls", d.TLS))
 }
 
-func checkDockerEndpoint(endpoint string) error {
+func checkDockerEndpoint(endpoint string) *ValidationError {
 	const field = "docker.endpoint"
 	u, err := url.Parse(endpoint)
 	if err != nil || endpoint == "" {
@@ -145,9 +152,7 @@ func checkDockerEndpoint(endpoint string) error {
 			return fail(field, "%q has no socket path", endpoint)
 		}
 	case "tcp":
-		if err := checkHostPort(field, u.Host); err != nil {
-			return err
-		}
+		return checkHostPort(field, u.Host)
 	default:
 		return fail(field, "unsupported scheme in %q (use unix:// or tcp://)", endpoint)
 	}
@@ -155,7 +160,7 @@ func checkDockerEndpoint(endpoint string) error {
 }
 
 // checkHostPort verifies hostport is host:port with a non-empty host and a numeric port.
-func checkHostPort(field, hostport string) error {
+func checkHostPort(field, hostport string) *ValidationError {
 	host, port, err := net.SplitHostPort(hostport)
 	if err != nil || host == "" {
 		return fail(field, "%q must be host:port", hostport)
@@ -163,7 +168,7 @@ func checkHostPort(field, hostport string) error {
 	return checkPort(field, port)
 }
 
-func checkPort(field, port string) error {
+func checkPort(field, port string) *ValidationError {
 	n, err := strconv.Atoi(port)
 	if err != nil || n < 0 || n > maxPort {
 		return fail(field, "invalid port %q", port)
@@ -172,7 +177,7 @@ func checkPort(field, port string) error {
 }
 
 // checkListen verifies a listen address ("[host]:port"; host may be empty).
-func checkListen(field, addr string) error {
+func checkListen(field, addr string) *ValidationError {
 	_, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return fail(field, "%q must be [host]:port", addr)
@@ -180,45 +185,43 @@ func checkListen(field, addr string) error {
 	return checkPort(field, port)
 }
 
-func checkTLSPair(prefix string, t TLSConfig) error {
+func checkTLSPair(prefix string, t TLSConfig) *ValidationError {
 	if (t.Cert == "") != (t.Key == "") {
 		return fail(prefix+".cert", "cert and key must be set together")
 	}
 	return nil
 }
 
-func checkSyncDB(cfg Config) error {
+func checkSyncDB(p *ValidationErrors, cfg Config) {
 	s := cfg.Sync
-	switch {
-	case s.Interval < MinSyncInterval:
-		return fail("sync.interval", "must be >= %s, got %s", MinSyncInterval, s.Interval)
-	case s.RemoveDelay < 0:
-		return fail("sync.remove_delay", "must be >= 0, got %s", s.RemoveDelay)
-	case s.OrphanTTL < 0:
-		return fail("sync.orphan_ttl", "must be >= 0, got %s", s.OrphanTTL)
-	case s.AgentGrace < MinAgentGrace:
-		return fail("sync.agent_grace", "must be >= 5m, got %s", s.AgentGrace)
-	case strings.TrimSpace(cfg.DB.Path) == "":
-		return fail("db.path", "must not be empty")
+	if s.Interval < MinSyncInterval {
+		p.addf("sync.interval", "must be >= %s, got %s", MinSyncInterval, s.Interval)
 	}
-	return nil
+	if s.RemoveDelay < 0 {
+		p.addf("sync.remove_delay", "must be >= 0, got %s", s.RemoveDelay)
+	}
+	if s.OrphanTTL < 0 {
+		p.addf("sync.orphan_ttl", "must be >= 0, got %s", s.OrphanTTL)
+	}
+	if s.AgentGrace < MinAgentGrace {
+		p.addf("sync.agent_grace", "must be >= 5m, got %s", s.AgentGrace)
+	}
+	if strings.TrimSpace(cfg.DB.Path) == "" {
+		p.addf("db.path", "must not be empty")
+	}
 }
 
-func checkAPI(cfg Config) error {
+func checkAPI(p *ValidationErrors, cfg Config) {
 	a := cfg.API
 	if !a.Enabled {
-		return nil
+		return
 	}
-	if err := checkListen("api.address", a.Address); err != nil {
-		return err
-	}
-	if err := checkTokenLen("api.token", a.Token, MinAPITokenLen, true); err != nil {
-		return err
-	}
-	return checkBasePath(a.BasePath)
+	p.add(checkListen("api.address", a.Address))
+	p.add(checkTokenLen("api.token", a.Token, MinAPITokenLen, true))
+	p.add(checkBasePath(a.BasePath))
 }
 
-func checkBasePath(p string) error {
+func checkBasePath(p string) *ValidationError {
 	const field = "api.base_path"
 	switch {
 	case !strings.HasPrefix(p, "/"):
@@ -233,140 +236,6 @@ func checkBasePath(p string) error {
 	return nil
 }
 
-func checkCloudflare(cfg Config) error {
-	cf := cfg.Cloudflare
-	if cf.TunnelID != "" && cf.AccountID == "" {
-		return fail("cloudflare.account_id", "required when cloudflare.tunnel_id is set")
-	}
-	if cf.TunnelID != "" && cf.APIToken == "" {
-		return fail("cloudflare.api_token", "required: cloudflare.tunnel_id uses the root credential")
-	}
-	if err := checkCredentials(cf.Credentials); err != nil {
-		return err
-	}
-	if err := checkTunnels(cf); err != nil {
-		return err
-	}
-	if err := checkDefaultTunnel(cfg); err != nil {
-		return err
-	}
-	if cf.APIToken == "" && len(cf.Credentials) == 0 && !cfg.SkipCredentialValidation {
-		return fail("cloudflare.api_token",
-			"at least one credential is required: set cloudflare.api_token or configure cloudflare.credentials")
-	}
-	return nil
-}
-
-func checkName(field, name string) error {
-	if name == RootCredential || name == RootTunnel {
-		return fail(field, "name %q is reserved for the root entry", name)
-	}
-	if !resourceNamePat.MatchString(name) {
-		return fail(field, "name %q must match %s", name, resourceNamePat)
-	}
-	return nil
-}
-
-func checkCredentials(creds map[string]CredentialConfig) error {
-	for _, name := range sortedKeys(creds) {
-		field := "cloudflare.credentials." + name
-		if err := checkName(field, name); err != nil {
-			return err
-		}
-		c := creds[name]
-		if strings.TrimSpace(c.APIToken) == "" {
-			return fail(field+".api_token", "must not be empty")
-		}
-		for _, z := range c.Zones {
-			if !validGlob(z) {
-				return fail(field+".zones", "invalid zone pattern %q", z)
-			}
-		}
-	}
-	return nil
-}
-
-func checkTunnels(cf CloudflareConfig) error {
-	for _, name := range sortedKeys(cf.Tunnels) {
-		field := "cloudflare.tunnels." + name
-		if err := checkName(field, name); err != nil {
-			return err
-		}
-		t := cf.Tunnels[name]
-		switch {
-		case strings.TrimSpace(t.AccountID) == "":
-			return fail(field+".account_id", "must not be empty")
-		case strings.TrimSpace(t.TunnelID) == "":
-			return fail(field+".tunnel_id", "must not be empty")
-		}
-		if err := checkTunnelCredential(field+".credential", t.Credential, cf); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func checkTunnelCredential(field, ref string, cf CloudflareConfig) error {
-	if ref != "" && ref != RootCredential {
-		if _, ok := cf.Credentials[ref]; !ok {
-			return fail(field, "credential %q is not defined in cloudflare.credentials", ref)
-		}
-		return nil
-	}
-	if cf.APIToken == "" {
-		return fail(field, "uses the root credential but cloudflare.api_token is empty")
-	}
-	return nil
-}
-
-// checkDefaultTunnel validates default_tunnel: "" or "default" (root tunnel)
-// or the name of an entry in cloudflare.tunnels.
-func checkDefaultTunnel(cfg Config) error {
-	ref := cfg.DefaultTunnel
-	switch {
-	case ref == "":
-		return nil
-	case ref == RootTunnel:
-		if cfg.Cloudflare.TunnelID == "" {
-			return fail("default_tunnel", "%q requires cloudflare.tunnel_id", ref)
-		}
-	default:
-		if _, ok := cfg.Cloudflare.Tunnels[ref]; !ok {
-			return fail("default_tunnel", "unknown tunnel %q (use default or a name from cloudflare.tunnels)", ref)
-		}
-	}
-	return nil
-}
-
-// resolvableTunnel reports whether ref names the root tunnel, a configured
-// tunnel, or the ID of either.
-func resolvableTunnel(cf CloudflareConfig, ref string) bool {
-	if ref == RootTunnel {
-		return cf.TunnelID != ""
-	}
-	if cf.TunnelID != "" && ref == cf.TunnelID {
-		return true
-	}
-	if _, ok := cf.Tunnels[ref]; ok {
-		return true
-	}
-	for _, t := range cf.Tunnels {
-		if t.TunnelID == ref {
-			return true
-		}
-	}
-	return false
-}
-
-func checkTunnelRefs(cf CloudflareConfig, field string, refs []string) error {
-	for _, ref := range refs {
-		if !resolvableTunnel(cf, ref) {
-			return fail(field, "unknown tunnel %q", ref)
-		}
-	}
-	return nil
-}
-
 func validGlob(p string) bool {
 	if p == "" || strings.ContainsAny(p, " \t") {
 		return false
@@ -375,7 +244,7 @@ func validGlob(p string) bool {
 	return err == nil
 }
 
-func checkGlobs(field string, globs []string) error {
+func checkGlobs(field string, globs []string) *ValidationError {
 	for _, g := range globs {
 		if !validGlob(g) {
 			return fail(field, "invalid pattern %q", g)
@@ -384,158 +253,14 @@ func checkGlobs(field string, globs []string) error {
 	return nil
 }
 
-// checkServices validates a tunnel-origin allow-list: CIDRs and IP
-// addresses must parse strictly; anything else is a hostname glob whose last
-// label must not be numeric (inet_aton forms such as 127.1 are no IPs here).
-func checkServices(field string, entries []string) error {
-	for _, e := range entries {
-		e = strings.ToLower(strings.TrimSpace(e))
-		if strings.Contains(e, "/") {
-			if _, err := netip.ParsePrefix(e); err != nil {
-				return fail(field, "invalid CIDR %q", e)
-			}
-			continue
-		}
-		if _, err := netip.ParseAddr(e); err == nil {
-			continue
-		}
-		if !validGlob(e) {
-			return fail(field, "invalid entry %q (use a hostname glob, an IP address or a CIDR)", e)
-		}
-		labels := strings.Split(e, ".")
-		last := labels[len(labels)-1]
-		if strings.HasPrefix(last, "0x") || strings.Trim(last, "0123456789") == "" {
-			return fail(field, "%q is not a canonical IP address or hostname (write IPv4 as a.b.c.d)", e)
-		}
-	}
-	return nil
-}
-
 // checkTokenLen enforces a minimum token length (in characters). An empty
 // token passes when optional is true (the feature is disabled).
-func checkTokenLen(field, token string, minLen int, optional bool) error {
+func checkTokenLen(field, token string, minLen int, optional bool) *ValidationError {
 	if token == "" && optional {
 		return nil
 	}
 	if n := utf8.RuneCountInString(token); n < minLen {
 		return fail(field, "must be at least %d characters, got %d (generate one with: openssl rand -hex 32)", minLen, n)
-	}
-	return nil
-}
-
-// checkAgentToken enforces length and character variety of an agent token
-// (an HMAC key that a captured handshake lets attackers brute-force offline).
-func checkAgentToken(field, token string, optional bool) error {
-	if err := checkTokenLen(field, token, MinAgentTokenLen, optional); err != nil || token == "" {
-		return err
-	}
-	distinct := map[rune]bool{}
-	for _, r := range token {
-		distinct[r] = true
-	}
-	if len(distinct) < MinAgentTokenDistinct {
-		return fail(field, "must contain at least %d distinct characters, got %d (generate one with: openssl rand -hex 32)",
-			MinAgentTokenDistinct, len(distinct))
-	}
-	return nil
-}
-
-func checkAgentServer(cfg Config) error {
-	a := cfg.Agent
-	if err := checkAgentToken("agent.accept_token", a.AcceptToken, true); err != nil {
-		return err
-	}
-	if err := checkTLSPair("agent.tls", a.TLS); err != nil {
-		return err
-	}
-	if a.Enabled {
-		if err := checkListen("agent.listen", a.Listen); err != nil {
-			return err
-		}
-	}
-	if err := checkGlobs("agent.accept_hostnames", a.AcceptHostnames); err != nil {
-		return err
-	}
-	if err := checkTunnelRefs(cfg.Cloudflare, "agent.accept_tunnels", a.AcceptTunnels); err != nil {
-		return err
-	}
-	if err := checkServices("agent.accept_services", a.AcceptServices); err != nil {
-		return err
-	}
-	for _, id := range sortedKeys(a.Agents) {
-		if err := checkAgentEntry(cfg.Cloudflare, id, a.Agents[id]); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func checkAgentEntry(cf CloudflareConfig, id string, e AgentEntry) error {
-	field := "agent.agents." + id
-	if !model.ValidAgentID(id) {
-		return fail(field, "invalid agent ID %q (must match ^[a-z0-9][a-z0-9._-]{0,62}$)", id)
-	}
-	if strings.TrimSpace(e.Token) == "" {
-		return fail(field+".token", "must not be empty")
-	}
-	if err := checkAgentToken(field+".token", e.Token, false); err != nil {
-		return err
-	}
-	if e.ConnectTo != "" {
-		if err := checkWebSocketURL(field+".connect_to", e.ConnectTo); err != nil {
-			return err
-		}
-	}
-	if e.DefaultTunnel != "" && !resolvableTunnel(cf, e.DefaultTunnel) {
-		return fail(field+".default_tunnel", "unknown tunnel %q", e.DefaultTunnel)
-	}
-	if err := checkTunnelRefs(cf, field+".tunnels", e.Tunnels); err != nil {
-		return err
-	}
-	if err := checkGlobs(field+".hostnames", e.Hostnames); err != nil {
-		return err
-	}
-	return checkServices(field+".services", e.Services)
-}
-
-func checkWebSocketURL(field, raw string) error {
-	u, err := url.Parse(raw)
-	if err != nil || (u.Scheme != "ws" && u.Scheme != "wss") || u.Host == "" {
-		return fail(field, "%q must be a ws:// or wss:// URL", raw)
-	}
-	return nil
-}
-
-func checkConnect(cfg Config) error {
-	c := cfg.Connect
-	switch {
-	case strings.TrimSpace(c.Token) == "":
-		return fail("connect.token", "must not be empty in agent mode")
-	case c.AgentID != "" && !model.ValidAgentID(c.AgentID):
-		return fail("connect.agent_id", "%q must match ^[a-z0-9][a-z0-9._-]{0,62}$", c.AgentID)
-	case c.HeartbeatInterval < MinHeartbeatInterval:
-		return fail("connect.heartbeat_interval", "must be >= %s, got %s", MinHeartbeatInterval, c.HeartbeatInterval)
-	}
-	if err := checkAgentToken("connect.token", c.Token, false); err != nil {
-		return err
-	}
-	if err := checkTLSPair("connect.tls", c.TLS); err != nil {
-		return err
-	}
-	if c.Mode == ConnectInbound {
-		if c.Listen == "" {
-			return fail("connect.listen", "required in inbound mode")
-		}
-		return checkListen("connect.listen", c.Listen)
-	}
-	if c.Endpoint == "" {
-		return fail("connect.endpoint", "required in outbound mode")
-	}
-	if err := checkWebSocketURL("connect.endpoint", c.Endpoint); err != nil {
-		return err
-	}
-	if u, _ := url.Parse(c.Endpoint); strings.Trim(u.Path, "/") == "" {
-		return fail("connect.endpoint", "%q has no path (did you mean %s/ws?)", c.Endpoint, strings.TrimRight(c.Endpoint, "/"))
 	}
 	return nil
 }
