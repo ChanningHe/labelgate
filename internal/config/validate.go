@@ -145,19 +145,19 @@ func checkDockerEndpoint(endpoint string) *ValidationError {
 	const field = "docker.endpoint"
 	u, err := url.Parse(endpoint)
 	if err != nil || endpoint == "" {
-		return fail(field, "%q is not a valid endpoint (use unix:///path or tcp://host:port)", endpoint)
+		return fail(field, "%q is not a valid endpoint (use unix:///path or tcp://host:port)", redactURL(endpoint))
 	}
 	switch u.Scheme {
 	case "ssh":
 		return fail(field, "ssh:// Docker endpoints were removed in v0.3; use a unix socket or tcp:// with TLS")
 	case "unix":
 		if u.Path == "" {
-			return fail(field, "%q has no socket path", endpoint)
+			return fail(field, "%q has no socket path", redactURL(endpoint))
 		}
 	case "tcp":
 		return checkHostPort(field, u.Host)
 	default:
-		return fail(field, "unsupported scheme in %q (use unix:// or tcp://)", endpoint)
+		return fail(field, "unsupported scheme in %q (use unix:// or tcp://)", redactURL(endpoint))
 	}
 	return nil
 }
