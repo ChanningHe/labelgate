@@ -3,13 +3,13 @@
 #
 # Usage:
 #   docker build -f docker/Dockerfile --build-arg VERSION=v0.3.0 --build-arg COMMIT=$(git rev-parse HEAD) --build-arg BUILD_DATE=$(git log -1 --format=%cI) .
-#   docker build -f docker/Dockerfile --build-arg BASE_IMAGE=gcr.io/distroless/static-debian13:debug-nonroot@sha256:7df9fac2f5d3927260696af33fc2391da26366825838a47337088ed78f854a0c .
+#   docker build -f docker/Dockerfile --build-arg BASE_IMAGE=gcr.io/distroless/static-debian13:debug-nonroot@sha256:3e7f48d714a3298b4df1a69fbc8809dd6fadd16c306838862fffc2895b168158 .
 
 # Runtime base image. Must be declared before the first FROM so the final
 # stage's FROM can use it.
 # Default: distroless nonroot (production)
-# Full:    pass --build-arg BASE_IMAGE=gcr.io/distroless/static-debian13:debug-nonroot@sha256:7df9fac2f5d3927260696af33fc2391da26366825838a47337088ed78f854a0c
-ARG BASE_IMAGE=gcr.io/distroless/static-debian13:nonroot@sha256:aafe993665bf6200db38a02c11a9351e782a84b6a45e7f33b6695638c88e3931
+# Full:    pass --build-arg BASE_IMAGE=gcr.io/distroless/static-debian13:debug-nonroot@sha256:3e7f48d714a3298b4df1a69fbc8809dd6fadd16c306838862fffc2895b168158
+ARG BASE_IMAGE=gcr.io/distroless/static-debian13:nonroot@sha256:8ce6dd87e9823c5b48dcfb2c8604714ccb351ce59607327bcc4957448da279b5
 
 # Stage 1: Build dashboard frontend (runs on host arch — output is platform-independent)
 FROM --platform=$BUILDPLATFORM node:24-alpine@sha256:116b800c3754b440ee0aa3ed2f20f5bf3d99a554bfd9adeea09ea8017f6e85f5 AS dashboard-builder
@@ -24,7 +24,7 @@ RUN yarn build
 
 # Stage 2: Build Go binary (runs on host arch — cross-compiles via GOARCH)
 # Keep the Go minor in step with the go directive in go.mod.
-FROM --platform=$BUILDPLATFORM golang:1.26-alpine@sha256:ecb67f987aa1a57794c91d19ade7ae0209f2f0f5496aaef9e6ae85ddf92d02ab AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine@sha256:70bd7ddea8b6cbe5d6943cde279d6b67feb10cc924fb9100d1d8757c1575b280 AS builder
 
 ARG TARGETARCH
 ARG VERSION=dev
